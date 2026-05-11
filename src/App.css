@@ -792,3 +792,118 @@
 
 .ww-mini-btn.green { color: var(--green); }
 .ww-mini-btn.green:hover { background: var(--green); color: white; }
+
+/* ============ Sticky drinks bar ============ */
+.ww-drinks-bar {
+  display: flex; gap: 8px; align-items: center;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 999px; padding: 6px;
+  margin: 0 0 14px;
+  position: sticky; top: 0; z-index: 12;
+}
+.ww-drinks-bar.paused { opacity: 0.55; }
+
+.ww-drink-pill {
+  flex: 1;
+  display: flex; align-items: center; gap: 4px;
+  background: var(--card-2); border: 1px solid var(--border-2);
+  border-radius: 999px; padding: 3px;
+  min-width: 0;
+}
+.ww-drink-tap {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: none; border: none; color: var(--text);
+  padding: 4px 6px; cursor: pointer;
+}
+.ww-drink-tap:disabled { cursor: not-allowed; }
+.ww-drink-emoji { font-size: 18px; line-height: 1; }
+.ww-drink-count {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 22px; line-height: 1;
+  letter-spacing: 0.04em;
+  display: inline-block;
+  animation: pulse 0.2s ease-out;
+}
+.ww-drink-btn {
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 50%; color: var(--text); cursor: pointer;
+  flex: 0 0 auto;
+}
+.ww-drink-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ww-drink-btn.plus {
+  background: var(--amber); color: #0a0a0b; border-color: var(--amber);
+  width: 36px; height: 36px;
+}
+.ww-drink-btn.minus { color: var(--muted); }
+.ww-drink-btn.minus:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+.ww-drink-btn.plus:hover:not(:disabled) { background: var(--amber-2); }
+@keyframes pulse {
+  from { transform: scale(0.85); }
+  to { transform: scale(1); }
+}
+
+/* ============ Clickable leaderboard / crew rows ============ */
+.ww-board-row.clickable, .ww-crew-head.clickable {
+  background: none; border: none; width: 100%; cursor: pointer;
+  font-family: inherit; color: inherit;
+  text-align: left;
+}
+.ww-board-row.clickable:hover { background: var(--card-2); }
+.ww-crew-head.clickable {
+  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px;
+  padding: 8px 6px; margin: -8px -6px 4px;
+  border-radius: 4px;
+}
+.ww-crew-head.clickable:hover { background: var(--card-2); }
+
+/* ============ User detail drawer ============ */
+.ww-detail { display: flex; flex-direction: column; gap: 16px; }
+.ww-detail-total {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: rgba(245,165,36,0.08); border: 1px solid var(--amber);
+  border-radius: 6px; padding: 14px;
+}
+.ww-detail-total-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.2em; color: var(--muted);
+}
+.ww-detail-total-val {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 56px; line-height: 1; color: var(--amber);
+}
+.ww-detail-section {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 12px;
+}
+.ww-detail-section-head {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.2em; color: var(--muted);
+  margin-bottom: 6px;
+}
+.ww-detail-row {
+  display: grid; grid-template-columns: 1fr auto auto;
+  gap: 10px; align-items: baseline;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.ww-detail-row.bold {
+  border-top: 1px solid var(--border);
+  padding-top: 8px; margin-top: 4px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 16px; letter-spacing: 0.06em; color: var(--amber);
+}
+.ww-detail-count {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; color: var(--muted);
+}
+.ww-detail-pts {
+  font-family: 'Bebas Neue', sans-serif;
+  letter-spacing: 0.05em; min-width: 50px; text-align: right;
+}
+.ww-detail-wish {
+  font-size: 13px; line-height: 1.4; padding: 3px 0;
+}
+.ww-detail-wish.warn { color: var(--red); }
