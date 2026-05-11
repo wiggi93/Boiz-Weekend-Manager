@@ -667,3 +667,128 @@
 }
 .ww-flunky-assign-btns { display: flex; gap: 4px; }
 .ww-mini-btn.active { background: var(--amber); color: #0a0a0b; border-color: var(--amber); }
+
+/* ============ Home wrapper ============ */
+.ww-home { display: flex; flex-direction: column; gap: 0; }
+
+/* ============ Module tabs (horizontal scroll) ============ */
+.ww-mod-tabs {
+  display: flex; gap: 4px;
+  overflow-x: auto; scrollbar-width: none;
+  margin: 10px -20px 16px;
+  padding: 0 20px 4px;
+  position: sticky; top: 0; z-index: 10;
+  background: linear-gradient(180deg, var(--bg) 70%, transparent);
+}
+.ww-mod-tabs::-webkit-scrollbar { display: none; }
+.ww-mod-tab {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--muted); padding: 8px 14px;
+  border-radius: 99px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; letter-spacing: 0.15em; text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ww-mod-tab:hover { border-color: var(--border-2); }
+.ww-mod-tab.active {
+  background: var(--amber); color: #0a0a0b; border-color: var(--amber);
+}
+.ww-mod-tab-icon { font-size: 14px; }
+
+/* ============ Module header (title + gear) ============ */
+.ww-mod-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 4px 0 14px;
+}
+.ww-mod-header-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 20px; letter-spacing: 0.1em;
+  margin: 0;
+}
+.ww-icon-btn-sm { width: 30px; height: 30px; }
+
+/* ============ Module toggles in event settings ============ */
+.ww-module-toggles {
+  display: flex; flex-direction: column; gap: 6px;
+  margin: 8px 0 14px;
+}
+.ww-module-toggle {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 12px 14px; border-radius: 6px;
+  cursor: pointer; text-align: left;
+}
+.ww-module-toggle .ww-mod-name { flex: 1; font-size: 14px; }
+.ww-module-toggle.on { border-color: var(--amber); color: var(--text); background: rgba(245,165,36,0.06); }
+.ww-module-toggle.disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ============ Drawer (live settings) ============ */
+.ww-drawer-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+  z-index: 90; backdrop-filter: blur(4px);
+  animation: fadein 0.2s ease-out;
+}
+.ww-drawer {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  max-width: 540px; margin: 0 auto;
+  background: var(--bg-2); border-top: 1px solid var(--amber);
+  border-radius: 16px 16px 0 0;
+  max-height: 80dvh; overflow-y: auto;
+  z-index: 100;
+  padding: 14px 20px max(20px, env(safe-area-inset-bottom));
+  animation: slideup 0.25s ease-out;
+}
+.ww-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ww-drawer-head h3 {
+  margin: 0; font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 0.1em;
+}
+.ww-drawer-body { display: flex; flex-direction: column; }
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+/* ============ Flunky games ============ */
+.ww-flunky-team.won {
+  border-color: var(--green); background: rgba(34,197,94,0.07);
+}
+.ww-flunky-team.lost { opacity: 0.55; }
+
+.ww-game-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px;
+  margin-bottom: 10px;
+}
+.ww-game-card.live { border-color: var(--amber); background: rgba(245,165,36,0.04); }
+.ww-game-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.ww-game-tag {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.2em; color: var(--muted);
+}
+.ww-game-tag.live { color: var(--red); }
+.ww-game-result {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 14px; color: var(--amber); letter-spacing: 0.1em;
+}
+.ww-game-actions {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
+}
+.ww-game-list { display: flex; flex-direction: column; gap: 0; }
+
+.ww-game-composer {
+  background: var(--card); border: 1px solid var(--amber);
+  border-radius: 6px; padding: 14px; margin-top: 10px;
+}
+
+.ww-mini-btn.green { color: var(--green); }
+.ww-mini-btn.green:hover { background: var(--green); color: white; }

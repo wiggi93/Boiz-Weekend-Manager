@@ -52,11 +52,8 @@ onRecordAfterCreateSuccess((e) => {
     const flunkyCol = e.app.findCollectionByNameOrId("flunky");
     const f = new Record(flunkyCol);
     f.set("event", e.record.id);
-    f.set("setsTotal", 5);
     f.set("pointsPerWin", 3);
-    f.set("teamA", []);
-    f.set("teamB", []);
-    f.set("sets", []);
+    f.set("games", []);
     e.app.save(f);
   } catch (err) {
     console.log("flunky seed:", err);
