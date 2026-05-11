@@ -84,14 +84,13 @@ export function logout() {
   pb.authStore.clear();
 }
 
-export function subscribeAll(onChange) {
-  const unsubs = [
-    pb.collection('users').subscribe('*', onChange),
-    pb.collection('stats').subscribe('*', onChange),
-    pb.collection('event').subscribe('*', onChange),
-  ];
-  return async () => {
-    const fns = await Promise.all(unsubs);
-    fns.forEach(fn => { try { fn(); } catch (_) {} });
+export async function subscribeAll(onChange) {
+  const unsubs = await Promise.all([
+    pb.collection('users').subscribe('*', onChange).catch(() => () => {}),
+    pb.collection('stats').subscribe('*', onChange).catch(() => () => {}),
+    pb.collection('event').subscribe('*', onChange).catch(() => () => {}),
+  ]);
+  return () => {
+    unsubs.forEach(fn => { try { fn(); } catch (_) {} });
   };
 }
