@@ -74,7 +74,7 @@ Die App wird bei jedem Push auf `master` als Docker-Image gebaut und nach Docker
 2. In den GitHub-Repo-Settings unter **Secrets and variables → Actions** zwei Secrets anlegen:
    - `DOCKERHUB_USERNAME`
    - `DOCKERHUB_TOKEN`
-3. Im Compose-File auf dem HTPC (`services/docker-compose-boiz-weekend.yml`) ggf. den Image-Namen an deinen Docker-Hub-User anpassen (Default: `wiggi93/boiz-weekend-manager:latest`).
+3. Im Compose-File auf dem HTPC (`services/docker-compose-boiz-weekend.yml`) ggf. den Image-Namen an deinen Docker-Hub-User anpassen (Default: `profdrdisco/boiz-weekend-manager:latest`).
 4. DNS-Record für `boiz.dr-disco.eu` auf den HTPC zeigen lassen.
 
 ## Projekt-Struktur
