@@ -1,241 +1,199 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Beer, Wine, Trophy, Users, Settings, Plus, Minus, Check, X,
   ChevronRight, RotateCcw, Home, User as UserIcon, Utensils,
-  ArrowLeft, LogOut, AlertTriangle, Calendar,
+  ArrowLeft, LogOut, AlertTriangle, Calendar, ShieldCheck,
+  Mail, Lock, UserPlus, Shield,
 } from 'lucide-react';
-import { sset, sget, sdel, lset, lget, ldel } from './storage.js';
+import {
+  pb, isAdmin,
+  loadEvent, loadUsers, loadStats, ensureMyStats, bumpStat,
+  updateMyProfile, updateEvent, resetAllStats,
+  deleteUser, setUserRole,
+  login, register, logout, subscribeAll,
+} from './api.js';
 import './App.css';
-
-// ============================================================
-// Constants & helpers
-// ============================================================
 
 const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘'];
 
-const DEFAULT_EVENT = {
+const FALLBACK_EVENT = {
   name: 'Boiz Weekend',
   date: '2026-06-05',
   beerLabel: 'Bier',
   drinkLabel: 'Mische',
   pointsPerBeer: 1,
   pointsPerMische: 1,
-  createdAt: Date.now(),
 };
 
-const uid = () => Math.random().toString(36).slice(2, 10);
-
-// ============================================================
-// Root App
-// ============================================================
+const computePoints = (s, ev) =>
+  (s?.beer || 0) * (ev?.pointsPerBeer ?? 1) + (s?.mische || 0) * (ev?.pointsPerMische ?? 1);
 
 export default function App() {
   const [booted, setBooted] = useState(false);
-  const [event, setEvent] = useState(DEFAULT_EVENT);
+  const [me, setMe] = useState(pb.authStore.record);
+  const [event, setEvent] = useState(FALLBACK_EVENT);
   const [users, setUsers] = useState([]);
   const [statsMap, setStatsMap] = useState({});
-  const [myId, setMyId] = useState(null);
   const [view, setView] = useState('dashboard');
-  const [authView, setAuthView] = useState('pick');
+  const [authView, setAuthView] = useState('login');
   const [toast, setToast] = useState(null);
 
-  const loadAll = useCallback(async (silent = false) => {
-    const [ev, usersList, mine] = await Promise.all([
-      sget('event', null),
-      sget('users', []),
-      lget('myUserId', null),
-    ]);
-    if (ev) setEvent(ev); else { await sset('event', DEFAULT_EVENT); }
-    setUsers(usersList || []);
-    setMyId(mine);
-
-    const ids = (usersList || []).map(u => u.id);
-    const statsArr = await Promise.all(
-      ids.map(id => sget(`stats_${id}`, { beer: 0, mische: 0, points: 0 }))
-    );
-    const m = {};
-    ids.forEach((id, i) => { m[id] = statsArr[i] || { beer: 0, mische: 0, points: 0 }; });
-    setStatsMap(m);
-
-    if (!silent) setBooted(true);
-  }, []);
-
-  useEffect(() => { loadAll(); }, [loadAll]);
-
-  useEffect(() => {
-    if (!booted || !myId) return;
-    if (view !== 'dashboard' && view !== 'crew') return;
-    const iv = setInterval(() => { loadAll(true); }, 4000);
-    return () => clearInterval(iv);
-  }, [booted, myId, view, loadAll]);
+  useEffect(() => pb.authStore.onChange(() => setMe(pb.authStore.record)), []);
 
   const showToast = (msg) => {
     setToast({ msg, id: Date.now() });
     setTimeout(() => setToast(t => (t && Date.now() - t.id >= 1800) ? null : t), 2000);
   };
 
-  const joinAsNew = async (profile) => {
-    const id = uid();
-    const newUser = { id, ...profile, joinedAt: Date.now() };
-    const updated = [...users, newUser];
-    setUsers(updated);
-    await sset('users', updated);
-    await sset(`stats_${id}`, { beer: 0, mische: 0, points: 0 });
-    await lset('myUserId', id);
-    setStatsMap(s => ({ ...s, [id]: { beer: 0, mische: 0, points: 0 } }));
-    setMyId(id);
-    showToast(`Willkommen, ${profile.name}! 🤘`);
+  const refresh = useCallback(async () => {
+    if (!pb.authStore.isValid) { setBooted(true); return; }
+    try {
+      const [ev, us, sm] = await Promise.all([loadEvent(), loadUsers(), loadStats()]);
+      if (ev) setEvent(ev); else setEvent(FALLBACK_EVENT);
+      setUsers(us);
+      setStatsMap(sm);
+      if (pb.authStore.record) await ensureMyStats(pb.authStore.record.id);
+    } catch (e) {
+      console.warn('refresh failed', e);
+    } finally {
+      setBooted(true);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh, me?.id]);
+
+  useEffect(() => {
+    if (!me) return;
+    let unsub;
+    subscribeAll(() => refresh()).then(fn => { unsub = fn; });
+    return () => { if (unsub) unsub(); };
+  }, [me, refresh]);
+
+  const onInc = async (kind) => {
+    if (!me) return;
+    const s = statsMap[me.id];
+    if (!s) { await ensureMyStats(me.id); await refresh(); return; }
+    setStatsMap(m => ({ ...m, [me.id]: { ...s, [kind]: (s[kind] || 0) + 1 } }));
+    try { await bumpStat(s.id, kind, +1); }
+    catch (e) { showToast('Fehler 😬'); refresh(); }
   };
 
-  const claimExisting = async (id) => {
-    await lset('myUserId', id);
-    setMyId(id);
+  const onDec = async (kind) => {
+    if (!me) return;
+    const s = statsMap[me.id];
+    if (!s || (s[kind] || 0) <= 0) return;
+    setStatsMap(m => ({ ...m, [me.id]: { ...s, [kind]: s[kind] - 1 } }));
+    try { await bumpStat(s.id, kind, -1); }
+    catch (e) { showToast('Fehler 😬'); refresh(); }
+  };
+
+  const onLogin = async (email, password) => {
+    await login(email, password);
     showToast('Eingeloggt 🍻');
   };
 
-  const updateMyProfile = async (patch) => {
-    const updated = users.map(u => u.id === myId ? { ...u, ...patch } : u);
-    setUsers(updated);
-    await sset('users', updated);
+  const onRegister = async (data) => {
+    await register(data);
+    showToast(`Willkommen, ${data.displayName}! 🤘`);
+  };
+
+  const onLogout = () => {
+    logout();
+    setView('dashboard');
+    setAuthView('login');
+    showToast('Tschüss 👋');
+  };
+
+  const onSaveProfile = async (patch) => {
+    await updateMyProfile(me.id, patch);
     showToast('Gespeichert ✓');
   };
 
-  const incCounter = async (kind) => {
-    if (!myId) return;
-    const cur = statsMap[myId] || { beer: 0, mische: 0, points: 0 };
-    const inc = kind === 'beer' ? event.pointsPerBeer : event.pointsPerMische;
-    const next = { ...cur, [kind]: (cur[kind] || 0) + 1, points: (cur.points || 0) + inc };
-    setStatsMap(s => ({ ...s, [myId]: next }));
-    await sset(`stats_${myId}`, next);
-  };
-
-  const decCounter = async (kind) => {
-    if (!myId) return;
-    const cur = statsMap[myId] || { beer: 0, mische: 0, points: 0 };
-    if ((cur[kind] || 0) <= 0) return;
-    const inc = kind === 'beer' ? event.pointsPerBeer : event.pointsPerMische;
-    const next = { ...cur, [kind]: cur[kind] - 1, points: Math.max(0, (cur.points || 0) - inc) };
-    setStatsMap(s => ({ ...s, [myId]: next }));
-    await sset(`stats_${myId}`, next);
-  };
-
-  const switchUser = async () => {
-    await ldel('myUserId');
-    setMyId(null);
-    setAuthView('pick');
-    setView('dashboard');
-  };
-
-  const updateEvent = async (patch) => {
-    const next = { ...event, ...patch };
-    setEvent(next);
-    await sset('event', next);
+  const onSaveEvent = async (patch) => {
+    if (!isAdmin(me)) return;
+    await updateEvent(event.id, patch);
     showToast('Event aktualisiert ✓');
   };
 
-  const resetCounters = async () => {
-    if (!confirm('Wirklich alle Bier/Mische-Counter & Punkte zurücksetzen?')) return;
-    const zero = { beer: 0, mische: 0, points: 0 };
-    const m = {};
-    for (const u of users) {
-      m[u.id] = zero;
-      await sset(`stats_${u.id}`, zero);
-    }
-    setStatsMap(m);
+  const onResetCounters = async () => {
+    if (!isAdmin(me)) return;
+    if (!confirm('Wirklich alle Bier/Mische-Counter zurücksetzen?')) return;
+    await resetAllStats();
     showToast('Counter zurückgesetzt 🔄');
-  };
-
-  const resetEvent = async () => {
-    if (!confirm('Komplettes Event zurücksetzen? Alle Spieler, Wünsche und Counter werden gelöscht!')) return;
-    for (const u of users) await sdel(`stats_${u.id}`);
-    await sdel('users');
-    await sdel('event');
-    await ldel('myUserId');
-    setUsers([]);
-    setStatsMap({});
-    setEvent(DEFAULT_EVENT);
-    setMyId(null);
-    setView('dashboard');
-    setAuthView('pick');
-    showToast('Neues Event bereit ⚡');
   };
 
   if (!booted) return <BootScreen />;
 
-  const me = users.find(u => u.id === myId);
-  const needsAuth = !me;
+  if (!me) {
+    return (
+      <div className="ww-app">
+        <GrainOverlay />
+        <AuthScreen
+          event={event}
+          view={authView}
+          setView={setAuthView}
+          onLogin={onLogin}
+          onRegister={onRegister}
+        />
+        {toast && <Toast toast={toast} />}
+      </div>
+    );
+  }
+
+  const admin = isAdmin(me);
 
   return (
     <div className="ww-app">
       <GrainOverlay />
-      {needsAuth ? (
-        <AuthScreen
-          event={event}
-          users={users}
-          view={authView}
-          setView={setAuthView}
-          onClaim={claimExisting}
-          onJoin={joinAsNew}
-        />
-      ) : (
-        <>
-          <TopBar me={me} onSettings={() => setView('settings')} />
-          <main className="ww-main">
-            {view === 'dashboard' && (
-              <Dashboard
+      <TopBar me={me} admin={admin} onSettings={() => setView('settings')} />
+      <main className="ww-main">
+        {view === 'dashboard' && (
+          <Dashboard event={event} me={me} users={users} statsMap={statsMap} onInc={onInc} onDec={onDec} />
+        )}
+        {view === 'crew' && <CrewView users={users} statsMap={statsMap} event={event} myId={me.id} />}
+        {view === 'profile' && (
+          <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
+        )}
+        {view === 'settings' && (
+          admin
+            ? <SettingsView
                 event={event}
-                me={me}
                 users={users}
-                statsMap={statsMap}
-                onInc={incCounter}
-                onDec={decCounter}
-              />
-            )}
-            {view === 'crew' && <CrewView users={users} statsMap={statsMap} myId={myId} />}
-            {view === 'profile' && (
-              <ProfileView me={me} onSave={updateMyProfile} onSwitch={switchUser} />
-            )}
-            {view === 'settings' && (
-              <SettingsView
-                event={event}
-                onSave={updateEvent}
-                onResetCounters={resetCounters}
-                onResetEvent={resetEvent}
+                me={me}
+                onSave={onSaveEvent}
+                onResetCounters={onResetCounters}
+                onSetRole={setUserRole}
+                onDeleteUser={async (id) => {
+                  if (!confirm('User wirklich löschen?')) return;
+                  await deleteUser(id); showToast('User gelöscht');
+                }}
                 onBack={() => setView('dashboard')}
               />
-            )}
-          </main>
-          {view !== 'settings' && <BottomNav view={view} setView={setView} />}
-        </>
-      )}
+            : <NotAllowed onBack={() => setView('dashboard')} />
+        )}
+      </main>
+      {view !== 'settings' && <BottomNav view={view} setView={setView} />}
       {toast && <Toast toast={toast} />}
     </div>
   );
 }
-
-// ============================================================
-// Boot screen
-// ============================================================
 
 function BootScreen() {
   return (
     <div className="ww-boot">
       <div className="ww-boot-inner">
         <div className="ww-boot-emoji">🍺</div>
-        <div className="ww-boot-text">LADE...</div>
+        <div className="ww-boot-text">LOADING</div>
       </div>
     </div>
   );
 }
 
 // ============================================================
-// Auth (Pick existing or create new)
+// Auth: Login + Register
 // ============================================================
 
-function AuthScreen({ event, users, view, setView, onClaim, onJoin }) {
-  if (view === 'new') {
-    return <NewPlayerForm onBack={() => setView('pick')} onSubmit={onJoin} />;
-  }
+function AuthScreen({ event, view, setView, onLogin, onRegister }) {
   return (
     <div className="ww-auth">
       <div className="ww-auth-header">
@@ -247,77 +205,96 @@ function AuthScreen({ event, users, view, setView, onClaim, onJoin }) {
         </div>
       </div>
 
-      <div className="ww-auth-prompt">Wer bist du?</div>
+      <div className="ww-auth-tabs">
+        <button className={`ww-auth-tab ${view === 'login' ? 'active' : ''}`} onClick={() => setView('login')}>LOGIN</button>
+        <button className={`ww-auth-tab ${view === 'register' ? 'active' : ''}`} onClick={() => setView('register')}>NEU HIER</button>
+      </div>
 
-      {users.length > 0 && (
-        <div className="ww-user-grid">
-          {users.map(u => (
-            <button key={u.id} className="ww-user-card" onClick={() => onClaim(u.id)}>
-              <div className="ww-user-emoji">{u.emoji}</div>
-              <div className="ww-user-name">{u.name}</div>
-              <ChevronRight size={16} className="ww-user-chev" />
-            </button>
-          ))}
-        </div>
-      )}
+      {view === 'login' ? <LoginForm onSubmit={onLogin} /> : <RegisterForm onSubmit={onRegister} />}
+    </div>
+  );
+}
 
-      <div className="ww-divider"><span>oder</span></div>
+function LoginForm({ onSubmit }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const valid = email.includes('@') && password.length >= 8;
 
-      <button className="ww-big-cta" onClick={() => setView('new')}>
-        <Plus size={20} />
-        <span>NEUER SPIELER</span>
+  const submit = async () => {
+    if (!valid) return;
+    setBusy(true); setErr('');
+    try { await onSubmit(email.trim(), password); }
+    catch (e) { setErr('Login fehlgeschlagen — falsche Daten?'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <label className="ww-label"><Mail size={12} /> E-MAIL</label>
+      <input className="ww-input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+      <label className="ww-label"><Lock size={12} /> PASSWORT</label>
+      <input className="ww-input" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
+      {err && <div className="ww-err">{err}</div>}
+      <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
+        <Check size={20} /><span>{busy ? '...' : 'EINLOGGEN'}</span>
       </button>
     </div>
   );
 }
 
-function NewPlayerForm({ onBack, onSubmit }) {
-  const [name, setName] = useState('');
+function RegisterForm({ onSubmit }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [emoji, setEmoji] = useState(EMOJI_AVATARS[0]);
   const [foodWishes, setFoodWishes] = useState('');
   const [drinkWishes, setDrinkWishes] = useState('');
   const [allergies, setAllergies] = useState('');
-  const valid = name.trim().length >= 2;
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  const valid = email.includes('@') && password.length >= 8 && displayName.trim().length >= 2;
 
-  const submit = () => {
+  const submit = async () => {
     if (!valid) return;
-    onSubmit({
-      name: name.trim(),
-      emoji,
-      foodWishes: foodWishes.trim(),
-      drinkWishes: drinkWishes.trim(),
-      allergies: allergies.trim(),
-    });
+    setBusy(true); setErr('');
+    try {
+      await onSubmit({
+        email: email.trim(), password,
+        displayName: displayName.trim(), emoji,
+        foodWishes: foodWishes.trim(),
+        drinkWishes: drinkWishes.trim(),
+        allergies: allergies.trim(),
+      });
+    } catch (e) {
+      setErr(e?.response?.data ? Object.values(e.response.data).map(v => v.message).join(' / ') : 'Registrierung fehlgeschlagen');
+    } finally { setBusy(false); }
   };
 
   return (
-    <div className="ww-form-wrap">
-      <button className="ww-back" onClick={onBack}><ArrowLeft size={18} /> zurück</button>
-      <h2 className="ww-display ww-title-big">Anmeldung</h2>
-      <p className="ww-muted">Gib deine Wünsche an — der Host sieht alles auf einen Blick.</p>
-
+    <div>
+      <label className="ww-label"><Mail size={12} /> E-MAIL</label>
+      <input className="ww-input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+      <label className="ww-label"><Lock size={12} /> PASSWORT (min. 8)</label>
+      <input className="ww-input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
       <label className="ww-label">DEIN NAME</label>
-      <input className="ww-input" value={name} onChange={e => setName(e.target.value)} placeholder="z.B. Max" maxLength={20} />
-
+      <input className="ww-input" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} />
       <label className="ww-label">AVATAR</label>
       <div className="ww-emoji-grid">
         {EMOJI_AVATARS.map(e => (
           <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
         ))}
       </div>
-
       <label className="ww-label"><Utensils size={12} /> ESSENSWÜNSCHE</label>
-      <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} placeholder="z.B. Spareribs, viel Fleisch, Pizza Hawaii (sorry)..." rows={2} />
-
+      <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
       <label className="ww-label"><Beer size={12} /> GETRÄNKEWÜNSCHE</label>
-      <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} placeholder="z.B. Tannenzäpfle, Bourbon, Mate, Club Mate..." rows={2} />
-
-      <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN / SONSTIGES</label>
-      <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} placeholder="z.B. Laktose, keine Pilze..." rows={2} />
-
-      <button className={`ww-big-cta ${valid ? '' : 'disabled'}`} onClick={submit} disabled={!valid}>
-        <Check size={20} />
-        <span>SQUAD BEITRETEN</span>
+      <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
+      <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
+      <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
+      {err && <div className="ww-err">{err}</div>}
+      <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
+        <UserPlus size={20} /><span>{busy ? '...' : 'SQUAD BEITRETEN'}</span>
       </button>
     </div>
   );
@@ -327,19 +304,24 @@ function NewPlayerForm({ onBack, onSubmit }) {
 // Top bar
 // ============================================================
 
-function TopBar({ me, onSettings }) {
+function TopBar({ me, admin, onSettings }) {
   return (
     <header className="ww-topbar">
       <div className="ww-topbar-left">
-        <div className="ww-me-emoji">{me.emoji}</div>
+        <div className="ww-me-emoji">{me.emoji || '🍺'}</div>
         <div className="ww-me-block">
           <div className="ww-me-hi">Servus,</div>
-          <div className="ww-me-name">{me.name}</div>
+          <div className="ww-me-name">
+            {me.displayName || me.email}
+            {admin && <span className="ww-admin-badge"><ShieldCheck size={10} /> ADMIN</span>}
+          </div>
         </div>
       </div>
-      <button className="ww-icon-btn" onClick={onSettings} aria-label="Settings">
-        <Settings size={18} />
-      </button>
+      {admin && (
+        <button className="ww-icon-btn" onClick={onSettings} aria-label="Settings">
+          <Settings size={18} />
+        </button>
+      )}
     </header>
   );
 }
@@ -349,12 +331,16 @@ function TopBar({ me, onSettings }) {
 // ============================================================
 
 function Dashboard({ event, me, users, statsMap, onInc, onDec }) {
-  const myStats = statsMap[me.id] || { beer: 0, mische: 0, points: 0 };
-  const leaderboard = [...users]
-    .map(u => ({ ...u, ...(statsMap[u.id] || { beer: 0, mische: 0, points: 0 }) }))
-    .sort((a, b) => b.points - a.points);
+  const myStats = statsMap[me.id] || { beer: 0, mische: 0 };
+  const leaderboard = useMemo(() => [...users]
+    .map(u => {
+      const s = statsMap[u.id] || { beer: 0, mische: 0 };
+      return { ...u, beer: s.beer, mische: s.mische, points: computePoints(s, event) };
+    })
+    .sort((a, b) => b.points - a.points), [users, statsMap, event]);
   const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
   const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
+  const myPoints = computePoints(myStats, event);
 
   return (
     <div className="ww-dash">
@@ -364,41 +350,26 @@ function Dashboard({ event, me, users, statsMap, onInc, onDec }) {
       </div>
 
       <div className="ww-counters">
-        <CounterCard
-          icon={<Beer size={28} />}
-          label={event.beerLabel}
-          color="amber"
-          count={myStats.beer}
-          onInc={() => onInc('beer')}
-          onDec={() => onDec('beer')}
-        />
-        <CounterCard
-          icon={<Wine size={28} />}
-          label={event.drinkLabel}
-          color="red"
-          count={myStats.mische}
-          onInc={() => onInc('mische')}
-          onDec={() => onDec('mische')}
-        />
+        <CounterCard icon={<Beer size={28} />} label={event.beerLabel} color="amber"
+          count={myStats.beer} onInc={() => onInc('beer')} onDec={() => onDec('beer')} />
+        <CounterCard icon={<Wine size={28} />} label={event.drinkLabel} color="red"
+          count={myStats.mische} onInc={() => onInc('mische')} onDec={() => onDec('mische')} />
       </div>
 
       <div className="ww-stats-row">
-        <StatPill label="Drinks" value={myStats.beer + myStats.mische} />
-        <StatPill label="Punkte" value={myStats.points} accent />
+        <StatPill label="Drinks" value={(myStats.beer || 0) + (myStats.mische || 0)} />
+        <StatPill label="Punkte" value={myPoints} accent />
         <StatPill label="Rang" value={myRank ? `#${myRank}` : '–'} />
       </div>
 
       <section className="ww-section">
-        <div className="ww-section-head">
-          <Trophy size={16} />
-          <h3>LIVE LEADERBOARD</h3>
-        </div>
+        <div className="ww-section-head"><Trophy size={16} /><h3>LIVE LEADERBOARD</h3></div>
         <div className="ww-board">
           {leaderboard.map((u, i) => (
             <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
               <div className="ww-board-rank">{rankBadge(i)}</div>
-              <div className="ww-board-emoji">{u.emoji}</div>
-              <div className="ww-board-name">{u.name}{u.id === me.id && <span className="ww-you">DU</span>}</div>
+              <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
+              <div className="ww-board-name">{u.displayName || u.email}{u.id === me.id && <span className="ww-you">DU</span>}</div>
               <div className="ww-board-bar-wrap">
                 <div className="ww-board-bar" style={{ width: `${(u.points / maxPoints) * 100}%` }} />
               </div>
@@ -414,16 +385,12 @@ function Dashboard({ event, me, users, statsMap, onInc, onDec }) {
 
 function CounterCard({ icon, label, color, count, onInc, onDec }) {
   const [pulse, setPulse] = useState(0);
-  const handleInc = () => {
-    onInc();
-    setPulse(p => p + 1);
-  };
   return (
     <div className={`ww-counter ww-${color}`}>
-      <button className="ww-counter-tap" onClick={handleInc}>
+      <button className="ww-counter-tap" onClick={() => { onInc(); setPulse(p => p + 1); }}>
         <div className="ww-counter-icon">{icon}</div>
-        <div className="ww-counter-label">{label.toUpperCase()}</div>
-        <div className="ww-counter-num" key={pulse}>{count}</div>
+        <div className="ww-counter-label">{label?.toUpperCase()}</div>
+        <div className="ww-counter-num" key={pulse}>{count || 0}</div>
         <div className="ww-counter-hint">TIPPEN = +1</div>
       </button>
       <button className="ww-counter-minus" onClick={onDec} aria-label="minus eins">
@@ -450,26 +417,27 @@ function rankBadge(i) {
 }
 
 // ============================================================
-// Crew view
+// Crew
 // ============================================================
 
-function CrewView({ users, statsMap, myId }) {
+function CrewView({ users, statsMap, event, myId }) {
   return (
     <div className="ww-crew">
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({users.length})</h3></div>
       <div className="ww-crew-list">
         {users.map(u => {
-          const s = statsMap[u.id] || { beer: 0, mische: 0, points: 0 };
+          const s = statsMap[u.id] || { beer: 0, mische: 0 };
+          const points = computePoints(s, event);
           return (
             <div key={u.id} className={`ww-crew-card ${u.id === myId ? 'me' : ''}`}>
               <div className="ww-crew-head">
-                <div className="ww-crew-emoji">{u.emoji}</div>
-                <div className="ww-crew-name">{u.name}{u.id === myId && <span className="ww-you">DU</span>}</div>
-                <div className="ww-crew-pts">{s.points} pkt</div>
+                <div className="ww-crew-emoji">{u.emoji || '🍺'}</div>
+                <div className="ww-crew-name">{u.displayName || u.email}{u.id === myId && <span className="ww-you">DU</span>}</div>
+                <div className="ww-crew-pts">{points} pkt</div>
               </div>
               <div className="ww-crew-mini">
-                <span><Beer size={11} /> {s.beer}</span>
-                <span><Wine size={11} /> {s.mische}</span>
+                <span><Beer size={11} /> {s.beer || 0}</span>
+                <span><Wine size={11} /> {s.mische || 0}</span>
               </div>
               {u.foodWishes && <div className="ww-crew-line"><b>Essen:</b> {u.foodWishes}</div>}
               {u.drinkWishes && <div className="ww-crew-line"><b>Trinken:</b> {u.drinkWishes}</div>}
@@ -483,67 +451,55 @@ function CrewView({ users, statsMap, myId }) {
 }
 
 // ============================================================
-// Profile view (edit own)
+// Profile (own)
 // ============================================================
 
-function ProfileView({ me, onSave, onSwitch }) {
-  const [name, setName] = useState(me.name);
-  const [emoji, setEmoji] = useState(me.emoji);
+function ProfileView({ me, onSave, onLogout }) {
+  const [displayName, setDisplayName] = useState(me.displayName || '');
+  const [emoji, setEmoji] = useState(me.emoji || EMOJI_AVATARS[0]);
   const [foodWishes, setFoodWishes] = useState(me.foodWishes || '');
   const [drinkWishes, setDrinkWishes] = useState(me.drinkWishes || '');
   const [allergies, setAllergies] = useState(me.allergies || '');
-
-  const dirty = name !== me.name || emoji !== me.emoji || foodWishes !== (me.foodWishes || '') || drinkWishes !== (me.drinkWishes || '') || allergies !== (me.allergies || '');
+  const dirty = displayName !== (me.displayName || '') || emoji !== (me.emoji || '') ||
+    foodWishes !== (me.foodWishes || '') || drinkWishes !== (me.drinkWishes || '') || allergies !== (me.allergies || '');
 
   return (
     <div className="ww-form-wrap">
       <h2 className="ww-display ww-title-big">Mein Profil</h2>
-
       <label className="ww-label">NAME</label>
-      <input className="ww-input" value={name} onChange={e => setName(e.target.value)} maxLength={20} />
-
+      <input className="ww-input" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} />
       <label className="ww-label">AVATAR</label>
       <div className="ww-emoji-grid">
         {EMOJI_AVATARS.map(e => (
           <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
         ))}
       </div>
-
       <label className="ww-label"><Utensils size={12} /> ESSENSWÜNSCHE</label>
       <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
-
       <label className="ww-label"><Beer size={12} /> GETRÄNKEWÜNSCHE</label>
       <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
-
       <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
       <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
-
-      <button
-        className={`ww-big-cta ${dirty ? '' : 'disabled'}`}
-        onClick={() => dirty && onSave({ name: name.trim(), emoji, foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim() })}
-        disabled={!dirty}
-      >
+      <button className={`ww-big-cta ${dirty ? '' : 'disabled'}`} disabled={!dirty}
+        onClick={() => onSave({ displayName: displayName.trim(), emoji, foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim() })}>
         <Check size={20} /><span>SPEICHERN</span>
       </button>
-
-      <button className="ww-text-btn" onClick={onSwitch}>
-        <LogOut size={14} /> Spieler wechseln (auf diesem Gerät)
-      </button>
+      <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Ausloggen</button>
     </div>
   );
 }
 
 // ============================================================
-// Settings (admin / event config)
+// Settings (admin)
 // ============================================================
 
-function SettingsView({ event, onSave, onResetCounters, onResetEvent, onBack }) {
-  const [name, setName] = useState(event.name);
-  const [date, setDate] = useState(event.date);
-  const [beerLabel, setBeerLabel] = useState(event.beerLabel);
-  const [drinkLabel, setDrinkLabel] = useState(event.drinkLabel);
-  const [pb, setPb] = useState(event.pointsPerBeer);
-  const [pm, setPm] = useState(event.pointsPerMische);
+function SettingsView({ event, users, me, onSave, onResetCounters, onSetRole, onDeleteUser, onBack }) {
+  const [name, setName] = useState(event.name || '');
+  const [date, setDate] = useState(event.date || '');
+  const [beerLabel, setBeerLabel] = useState(event.beerLabel || 'Bier');
+  const [drinkLabel, setDrinkLabel] = useState(event.drinkLabel || 'Mische');
+  const [pb_, setPb] = useState(event.pointsPerBeer ?? 1);
+  const [pm, setPm] = useState(event.pointsPerMische ?? 1);
 
   return (
     <div className="ww-form-wrap">
@@ -553,10 +509,8 @@ function SettingsView({ event, onSave, onResetCounters, onResetEvent, onBack }) 
 
       <label className="ww-label">EVENT-NAME</label>
       <input className="ww-input" value={name} onChange={e => setName(e.target.value)} />
-
       <label className="ww-label">DATUM</label>
       <input className="ww-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
-
       <div className="ww-grid2">
         <div>
           <label className="ww-label">BIER-LABEL</label>
@@ -567,31 +521,62 @@ function SettingsView({ event, onSave, onResetCounters, onResetEvent, onBack }) 
           <input className="ww-input" value={drinkLabel} onChange={e => setDrinkLabel(e.target.value)} maxLength={12} />
         </div>
       </div>
-
       <div className="ww-grid2">
         <div>
           <label className="ww-label">PKT / BIER</label>
-          <input className="ww-input" type="number" min={0} max={10} value={pb} onChange={e => setPb(Number(e.target.value))} />
+          <input className="ww-input" type="number" min={0} max={10} value={pb_} onChange={e => setPb(Number(e.target.value))} />
         </div>
         <div>
           <label className="ww-label">PKT / MISCHE</label>
           <input className="ww-input" type="number" min={0} max={10} value={pm} onChange={e => setPm(Number(e.target.value))} />
         </div>
       </div>
-
-      <button className="ww-big-cta" onClick={() => onSave({ name: name.trim(), date, beerLabel: beerLabel.trim(), drinkLabel: drinkLabel.trim(), pointsPerBeer: pb, pointsPerMische: pm })}>
+      <button className="ww-big-cta" onClick={() => onSave({
+        name: name.trim(), date, beerLabel: beerLabel.trim(), drinkLabel: drinkLabel.trim(),
+        pointsPerBeer: pb_, pointsPerMische: pm,
+      })}>
         <Check size={20} /><span>SPEICHERN</span>
       </button>
+
+      <div className="ww-section">
+        <div className="ww-section-head"><Shield size={16} /><h3>USER MANAGEMENT</h3></div>
+        <div className="ww-user-mgmt">
+          {users.map(u => (
+            <div key={u.id} className="ww-user-mgmt-row">
+              <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+              <span className="ww-user-mgmt-name">
+                {u.displayName || u.email}
+                {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
+              </span>
+              {u.id !== me.id && (
+                <>
+                  <button className="ww-mini-btn" onClick={() => onSetRole(u.id, u.role === 'admin' ? 'member' : 'admin')}>
+                    {u.role === 'admin' ? 'Admin entziehen' : 'Zum Admin'}
+                  </button>
+                  <button className="ww-mini-btn red" onClick={() => onDeleteUser(u.id)}><X size={12} /></button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="ww-danger">
         <div className="ww-danger-head"><AlertTriangle size={14} /> DANGER ZONE</div>
         <button className="ww-danger-btn" onClick={onResetCounters}>
-          <RotateCcw size={14} /> Counter & Punkte zurücksetzen
-        </button>
-        <button className="ww-danger-btn red" onClick={onResetEvent}>
-          <X size={14} /> Komplettes Event löschen (neues Wochenende)
+          <RotateCcw size={14} /> Counter zurücksetzen
         </button>
       </div>
+    </div>
+  );
+}
+
+function NotAllowed({ onBack }) {
+  return (
+    <div className="ww-form-wrap">
+      <h2 className="ww-display ww-title-big">Kein Zutritt</h2>
+      <p className="ww-muted">Settings sind Admins vorbehalten.</p>
+      <button className="ww-big-cta" onClick={onBack}><ArrowLeft size={20} /><span>ZURÜCK</span></button>
     </div>
   );
 }
@@ -618,17 +603,9 @@ function BottomNav({ view, setView }) {
   );
 }
 
-// ============================================================
-// Toast
-// ============================================================
-
 function Toast({ toast }) {
   return <div className="ww-toast" key={toast.id}>{toast.msg}</div>;
 }
-
-// ============================================================
-// Helpers
-// ============================================================
 
 function formatDate(iso) {
   try {

@@ -44,25 +44,17 @@ npm run preview
 
 Die App läuft dann unter `http://localhost:5173/Boiz-Weekend-Manager/`.
 
-## ⚠️ Wichtig: Storage-Modell
+## Architektur
 
-Diese Version nutzt **`localStorage`** als Datenspeicher. Das heißt:
+- **Frontend:** React + Vite, im Docker-Image als nginx-served Static Bundle
+- **Backend:** PocketBase (SQLite + Auth + REST + Realtime + Admin-UI), eigenes Docker-Image
+- **Auth:** E-Mail + Passwort, erster registrierter User wird automatisch Admin (über PB-Hook)
+- **Rollen:** `admin` (Settings + User-Mgmt) und `member`. Rechte werden serverseitig über PocketBase API Rules durchgesetzt.
+- **Realtime:** Counter und Crew-Liste poppen sofort auf allen Geräten hoch (PB SSE-Subscription).
 
-- ✅ Daten überleben Refreshes und Browser-Neustarts
-- ❌ **Keine Synchronisation zwischen Geräten** — jedes Handy hat seine eigenen Daten
+### PocketBase Admin-UI
 
-Für das echte Jungs-Wochenende, bei dem alle auf ihren eigenen Handys teilnehmen, braucht ihr ein gemeinsames Backend.
-
-### Backend-Optionen für richtigen Multi-Device-Sync
-
-| Option | Aufwand | Free-Tier | Best für |
-|---|---|---|---|
-| **Supabase** | mittel | ja | Postgres + REST + Realtime |
-| **Firebase Realtime DB** | gering | ja | Live-Sync out of the box |
-| **Cloudflare KV + Workers** | mittel | ja | Simpel und schnell |
-| **Eigener Node-Server** | hoch | – | Volle Kontrolle |
-
-Das Storage-Modul ist sauber abstrahiert (`src/storage.js`), sodass beim Backend-Swap nur diese eine Datei getauscht werden muss.
+Unter `https://boiz-api.dr-disco.eu/_/` erreichbar. Beim ersten Start einen Superuser anlegen — getrennt von App-Usern.
 
 ## Self-Hosting via Docker
 

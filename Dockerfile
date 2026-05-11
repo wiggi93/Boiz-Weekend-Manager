@@ -4,6 +4,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 ENV VITE_BASE=/
+ENV VITE_PB_URL=https://boiz-api.dr-disco.eu
 RUN npm run build
 
 FROM nginx:alpine

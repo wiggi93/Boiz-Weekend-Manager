@@ -461,3 +461,52 @@
   from { opacity: 0; transform: translate(-50%, 12px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* ============ Auth tabs / errors ============ */
+.ww-auth-tabs {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  background: var(--border); border-radius: 4px; padding: 2px;
+  margin-bottom: 22px;
+}
+.ww-auth-tab {
+  background: transparent; border: none; color: var(--muted);
+  padding: 12px; cursor: pointer; border-radius: 3px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 0.15em;
+}
+.ww-auth-tab.active { background: var(--card-2); color: var(--amber); }
+.ww-err {
+  background: rgba(239,68,68,0.1); border: 1px solid var(--red);
+  color: #fca5a5; padding: 10px 12px; border-radius: 4px;
+  font-size: 13px; margin: 12px 0;
+}
+
+/* ============ Admin badge ============ */
+.ww-admin-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  margin-left: 8px; padding: 2px 6px; border-radius: 3px;
+  background: rgba(245,165,36,0.15); color: var(--amber);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 0.15em; vertical-align: middle;
+}
+
+/* ============ User mgmt ============ */
+.ww-user-mgmt { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.ww-user-mgmt-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px 10px;
+}
+.ww-user-mgmt-emoji { font-size: 20px; }
+.ww-user-mgmt-name {
+  flex: 1; font-family: 'Manrope', sans-serif; font-size: 13px;
+  display: flex; align-items: center; gap: 4px;
+}
+.ww-mini-btn {
+  background: var(--card-2); border: 1px solid var(--border);
+  color: var(--text); padding: 6px 8px; border-radius: 3px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  letter-spacing: 0.1em; cursor: pointer;
+}
+.ww-mini-btn:hover { border-color: var(--amber); color: var(--amber); }
+.ww-mini-btn.red { color: var(--red); }
+.ww-mini-btn.red:hover { background: var(--red); color: white; }
