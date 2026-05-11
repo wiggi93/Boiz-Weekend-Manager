@@ -515,13 +515,20 @@ function CreateEventForm({ onSubmit }) {
   const [date, setDate] = useState('');
   const [modules, setModules] = useState(['drinks']);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
   const valid = name.trim().length >= 2;
   const toggle = (id) => setModules(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
   const submit = async () => {
     if (!valid) return;
-    setBusy(true);
+    setBusy(true); setErr('');
     try { await onSubmit({ name: name.trim(), date, modules }); }
-    finally { setBusy(false); }
+    catch (e) {
+      const detail = e?.response?.data
+        ? Object.entries(e.response.data).map(([k, v]) => `${k}: ${v.message}`).join(' / ')
+        : (e?.response?.message || e?.message || 'Unbekannter Fehler');
+      setErr(`${e?.status || ''} ${detail}`);
+      console.error('createEvent failed', e);
+    } finally { setBusy(false); }
   };
   return (
     <div>
@@ -544,6 +551,7 @@ function CreateEventForm({ onSubmit }) {
           </button>
         ))}
       </div>
+      {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         <Plus size={20} /><span>{busy ? '...' : 'EVENT ERSTELLEN'}</span>
       </button>
