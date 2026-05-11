@@ -62,6 +62,7 @@ export default function App() {
   const [view, setView] = useState('home');
   const [moduleTab, setModuleTab] = useState('overview');
   const [moduleSettingsOpen, setModuleSettingsOpen] = useState(null); // module id or null
+  const [detailUserId, setDetailUserId] = useState(null);
   const [authView, setAuthView] = useState('login');
   const [lobbyView, setLobbyView] = useState('list');
   const [toast, setToast] = useState(null);
@@ -277,10 +278,11 @@ export default function App() {
             moduleTab={moduleTab} setModuleTab={setModuleTab}
             moduleSettingsOpen={moduleSettingsOpen} setModuleSettingsOpen={setModuleSettingsOpen}
             onSaveEvent={onSaveEvent}
+            onShowUserDetail={setDetailUserId}
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} myId={me.id} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} myId={me.id} onShowUserDetail={setDetailUserId} />
         )}
         {view === 'profile' && (
           <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
@@ -310,6 +312,16 @@ export default function App() {
         )}
       </main>
       {view !== 'settings' && <BottomNav view={view} setView={setView} />}
+      {detailUserId && (
+        <UserDetailDrawer
+          user={(eventMembers.find(m => m.expand?.user?.id === detailUserId) || {}).expand?.user}
+          stats={statsMap[detailUserId]}
+          event={currentEvent}
+          flunky={flunky}
+          isMe={detailUserId === me.id}
+          onClose={() => setDetailUserId(null)}
+        />
+      )}
       {toast && <Toast toast={toast} />}
     </div>
   );
@@ -627,10 +639,12 @@ function WaitingScreen({ event, onLeave }) {
 function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
   modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
-  onSaveEvent,
+  onSaveEvent, onShowUserDetail,
 }) {
-  const enabledModules = MODULES.filter(m => modules.includes(m.id) && m.available);
-  const tabs = [{ id: 'overview', name: 'Stand', icon: '📊' }, ...enabledModules];
+  // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
+  const enabledTabModules = MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
+  const tabs = [{ id: 'overview', name: 'Stand', icon: '📊' }, ...enabledTabModules];
+  const drinksOn = modules.includes('drinks');
 
   return (
     <div className="ww-home">
@@ -638,6 +652,14 @@ function HomeView({
         <div className="ww-tag">{formatDate(event.date)}</div>
         <h1 className="ww-display ww-title-big">{event.name}</h1>
       </div>
+
+      {drinksOn && (
+        <DrinksBar
+          me={me} event={event} statsMap={statsMap} setStatsMap={setStatsMap}
+          admin={admin} active={event.active}
+          onOpenSettings={() => setModuleSettingsOpen('drinks')}
+        />
+      )}
 
       <div className="ww-mod-tabs">
         {tabs.map(t => (
@@ -649,14 +671,7 @@ function HomeView({
       </div>
 
       {moduleTab === 'overview' && (
-        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} />
-      )}
-      {moduleTab === 'drinks' && (
-        <DrinksView
-          me={me} event={event} members={members} statsMap={statsMap} setStatsMap={setStatsMap}
-          admin={admin} active={event.active}
-          onOpenSettings={() => setModuleSettingsOpen('drinks')}
-        />
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} onShowUserDetail={onShowUserDetail} />
       )}
       {moduleTab === 'flunky' && flunky && (
         <FlunkyView
@@ -681,10 +696,78 @@ function HomeView({
 }
 
 // ============================================================
+// Sticky drinks bar (replaces the old drinks tab)
+// ============================================================
+
+function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSettings }) {
+  const myStats = statsMap[me.id] || { id: null, beer: 0, mische: 0 };
+  const pendingWrite = useRef(null);
+  const flushTimer = useRef(null);
+
+  const scheduleWrite = (statsId, vals) => {
+    pendingWrite.current = { statsId, vals };
+    if (flushTimer.current) clearTimeout(flushTimer.current);
+    flushTimer.current = setTimeout(async () => {
+      const w = pendingWrite.current; pendingWrite.current = null;
+      if (!w?.statsId) return;
+      try { await setMyCount(w.statsId, w.vals); }
+      catch (e) { console.warn('write failed', e); }
+    }, 350);
+  };
+
+  const bump = (kind, delta) => {
+    if (!active) return;
+    const cur = statsMap[me.id]; if (!cur?.id) return;
+    const nextVal = Math.max(0, (cur[kind] || 0) + delta);
+    const next = { ...cur, [kind]: nextVal };
+    setStatsMap(m => ({ ...m, [me.id]: next }));
+    scheduleWrite(cur.id, { beer: next.beer, mische: next.mische });
+  };
+
+  return (
+    <div className={`ww-drinks-bar ${!active ? 'paused' : ''}`}>
+      <DrinkPill
+        emoji="🍺" label={event.beerLabel} count={myStats.beer || 0}
+        disabled={!active}
+        onInc={() => bump('beer', +1)} onDec={() => bump('beer', -1)}
+      />
+      <DrinkPill
+        emoji="🍷" label={event.drinkLabel} count={myStats.mische || 0}
+        disabled={!active}
+        onInc={() => bump('mische', +1)} onDec={() => bump('mische', -1)}
+      />
+      {admin && (
+        <button className="ww-icon-btn ww-icon-btn-sm" onClick={onOpenSettings} aria-label="Drinks Settings">
+          <Settings size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function DrinkPill({ emoji, label, count, disabled, onInc, onDec }) {
+  const [pulse, setPulse] = useState(0);
+  return (
+    <div className={`ww-drink-pill ${disabled ? 'disabled' : ''}`} title={label}>
+      <button className="ww-drink-btn minus" onClick={onDec} disabled={disabled} aria-label={`${label} minus`}>
+        <Minus size={12} />
+      </button>
+      <button className="ww-drink-tap" onClick={() => { if (!disabled) { onInc(); setPulse(p => p + 1); } }} disabled={disabled}>
+        <span className="ww-drink-emoji">{emoji}</span>
+        <span className="ww-drink-count" key={pulse}>{count}</span>
+      </button>
+      <button className="ww-drink-btn plus" onClick={onInc} disabled={disabled} aria-label={`${label} plus`}>
+        <Plus size={14} />
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
 // Overview (leaderboard / standings)
 // ============================================================
 
-function OverviewView({ me, event, members, statsMap, flunky }) {
+function OverviewView({ me, event, members, statsMap, flunky, onShowUserDetail }) {
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
@@ -710,7 +793,7 @@ function OverviewView({ me, event, members, statsMap, flunky }) {
         <div className="ww-section-head"><Trophy size={16} /><h3>LIVE LEADERBOARD</h3></div>
         <div className="ww-board">
           {leaderboard.map((u, i) => (
-            <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
+            <button key={u.id} className={`ww-board-row clickable ${u.id === me.id ? 'me' : ''}`} onClick={() => onShowUserDetail?.(u.id)}>
               <div className="ww-board-rank">{rankBadge(i)}</div>
               <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
               <div className="ww-board-name">{u.displayName || u.email}{u.id === me.id && <span className="ww-you">DU</span>}</div>
@@ -718,7 +801,7 @@ function OverviewView({ me, event, members, statsMap, flunky }) {
                 <div className="ww-board-bar" style={{ width: `${(u.points / maxPoints) * 100}%` }} />
               </div>
               <div className="ww-board-pts">{u.points}<span>pkt</span></div>
-            </div>
+            </button>
           ))}
           {leaderboard.length === 0 && <div className="ww-empty">Noch keiner gepunktet 💀</div>}
         </div>
@@ -740,72 +823,6 @@ function ModuleHeader({ title, admin, onOpenSettings }) {
           <Settings size={14} />
         </button>
       )}
-    </div>
-  );
-}
-
-// ============================================================
-// Drinks module view
-// ============================================================
-
-function DrinksView({ me, event, members, statsMap, setStatsMap, admin, active, onOpenSettings }) {
-  const myStats = statsMap[me.id] || { id: null, beer: 0, mische: 0 };
-
-  const pendingWrite = useRef(null);
-  const flushTimer = useRef(null);
-  const scheduleWrite = (statsId, vals) => {
-    pendingWrite.current = { statsId, vals };
-    if (flushTimer.current) clearTimeout(flushTimer.current);
-    flushTimer.current = setTimeout(async () => {
-      const w = pendingWrite.current; pendingWrite.current = null;
-      if (!w?.statsId) return;
-      try { await setMyCount(w.statsId, w.vals); }
-      catch (e) { console.warn('write failed', e); }
-    }, 350);
-  };
-
-  const bump = (kind, delta) => {
-    if (!active) return;
-    const cur = statsMap[me.id]; if (!cur?.id) return;
-    const nextVal = Math.max(0, (cur[kind] || 0) + delta);
-    const next = { ...cur, [kind]: nextVal };
-    setStatsMap(m => ({ ...m, [me.id]: next }));
-    scheduleWrite(cur.id, { beer: next.beer, mische: next.mische });
-  };
-
-  return (
-    <>
-      <ModuleHeader title="🍺 Bier-Counter" admin={admin} onOpenSettings={onOpenSettings} />
-      <div className="ww-counters">
-        <CounterCard icon={<Beer size={28} />} label={event.beerLabel} color="amber"
-          count={myStats.beer} disabled={!active}
-          onInc={() => bump('beer', +1)} onDec={() => bump('beer', -1)} />
-        <CounterCard icon={<Wine size={28} />} label={event.drinkLabel} color="red"
-          count={myStats.mische} disabled={!active}
-          onInc={() => bump('mische', +1)} onDec={() => bump('mische', -1)} />
-      </div>
-      <div className="ww-stats-row">
-        <StatPill label={event.beerLabel || 'Bier'} value={myStats.beer || 0} />
-        <StatPill label={event.drinkLabel || 'Mische'} value={myStats.mische || 0} />
-        <StatPill label="Punkte" value={computeDrinkPoints(myStats, event)} accent />
-      </div>
-    </>
-  );
-}
-
-function CounterCard({ icon, label, color, count, onInc, onDec, disabled }) {
-  const [pulse, setPulse] = useState(0);
-  return (
-    <div className={`ww-counter ww-${color} ${disabled ? 'disabled' : ''}`}>
-      <button className="ww-counter-tap" onClick={() => { if (!disabled) { onInc(); setPulse(p => p + 1); } }} disabled={disabled}>
-        <div className="ww-counter-icon">{icon}</div>
-        <div className="ww-counter-label">{label?.toUpperCase()}</div>
-        <div className="ww-counter-num" key={pulse}>{count || 0}</div>
-        <div className="ww-counter-hint">{disabled ? 'PAUSE' : 'TIPPEN = +1'}</div>
-      </button>
-      <button className="ww-counter-minus" onClick={onDec} aria-label="minus eins" disabled={disabled}>
-        <Minus size={14} />
-      </button>
     </div>
   );
 }
@@ -1111,7 +1128,7 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, myId }) {
+function CrewView({ members, statsMap, event, flunky, myId, onShowUserDetail }) {
   return (
     <div className="ww-crew">
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({members.length})</h3></div>
@@ -1122,11 +1139,11 @@ function CrewView({ members, statsMap, event, flunky, myId }) {
           const points = computeTotalPoints(u.id, s, event, flunky);
           return (
             <div key={u.id} className={`ww-crew-card ${u.id === myId ? 'me' : ''}`}>
-              <div className="ww-crew-head">
+              <button className="ww-crew-head clickable" onClick={() => onShowUserDetail?.(u.id)}>
                 <div className="ww-crew-emoji">{u.emoji || '🍺'}</div>
                 <div className="ww-crew-name">{u.displayName || u.email}{u.id === myId && <span className="ww-you">DU</span>}</div>
                 <div className="ww-crew-pts">{points} pkt</div>
-              </div>
+              </button>
               <div className="ww-crew-mini">
                 <span><Beer size={11} /> {s.beer || 0}</span>
                 <span><Wine size={11} /> {s.mische || 0}</span>
@@ -1138,6 +1155,82 @@ function CrewView({ members, statsMap, event, flunky, myId }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// ============================================================
+// User detail drawer (point breakdown)
+// ============================================================
+
+function UserDetailDrawer({ user, stats, event, flunky, isMe, onClose }) {
+  if (!user) return null;
+  const s = stats || { beer: 0, mische: 0 };
+  const beerPts = (s.beer || 0) * (event.pointsPerBeer ?? 1);
+  const mischePts = (s.mische || 0) * (event.pointsPerMische ?? 1);
+  const drinkPts = beerPts + mischePts;
+
+  const ppw = flunky?.pointsPerWin || 0;
+  const allFinished = finishedGames(flunky);
+  const playedGames = allFinished.filter(g => teamOfInGame(user.id, g) !== null);
+  const wonGames = playedGames.filter(g => teamOfInGame(user.id, g) === g.winner);
+  const lostGames = playedGames.filter(g => teamOfInGame(user.id, g) !== g.winner);
+  const flunkyPts = wonGames.length * ppw;
+
+  const total = drinkPts + flunkyPts;
+
+  return (
+    <ModuleSettingsDrawer
+      title={`${user.emoji || '🍺'} ${user.displayName || user.email}${isMe ? ' (DU)' : ''}`}
+      onClose={onClose}
+    >
+      <div className="ww-detail">
+        <div className="ww-detail-total">
+          <div className="ww-detail-total-label">PUNKTE GESAMT</div>
+          <div className="ww-detail-total-val">{total}</div>
+        </div>
+
+        <div className="ww-detail-section">
+          <div className="ww-detail-section-head">🍺 BIER & MISCHE</div>
+          <DetailRow label={`${event.beerLabel || 'Bier'} × ${event.pointsPerBeer ?? 1} pkt`} count={s.beer || 0} pts={beerPts} />
+          <DetailRow label={`${event.drinkLabel || 'Mische'} × ${event.pointsPerMische ?? 1} pkt`} count={s.mische || 0} pts={mischePts} />
+          <DetailRow label="Summe" pts={drinkPts} bold />
+        </div>
+
+        {flunky && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🎳 FLUNKYBALL</div>
+            {playedGames.length === 0 ? (
+              <div className="ww-muted" style={{ fontSize: 12, padding: '8px 0' }}>Noch in keinem Spiel.</div>
+            ) : (
+              <>
+                <DetailRow label={`Siege × ${ppw} pkt`} count={wonGames.length} pts={flunkyPts} />
+                <DetailRow label="Niederlagen" count={lostGames.length} pts={0} />
+                <DetailRow label="Summe" pts={flunkyPts} bold />
+              </>
+            )}
+          </div>
+        )}
+
+        {(user.foodWishes || user.drinkWishes || user.allergies) && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">📝 WÜNSCHE</div>
+            {user.foodWishes && <div className="ww-detail-wish"><b>Essen:</b> {user.foodWishes}</div>}
+            {user.drinkWishes && <div className="ww-detail-wish"><b>Trinken:</b> {user.drinkWishes}</div>}
+            {user.allergies && <div className="ww-detail-wish warn"><b>⚠ Allergie:</b> {user.allergies}</div>}
+          </div>
+        )}
+      </div>
+    </ModuleSettingsDrawer>
+  );
+}
+
+function DetailRow({ label, count, pts, bold }) {
+  return (
+    <div className={`ww-detail-row ${bold ? 'bold' : ''}`}>
+      <span className="ww-detail-label">{label}</span>
+      {count != null && <span className="ww-detail-count">×{count}</span>}
+      <span className="ww-detail-pts">{pts} pkt</span>
     </div>
   );
 }
