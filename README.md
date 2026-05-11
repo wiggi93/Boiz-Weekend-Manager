@@ -64,18 +64,10 @@ Für das echte Jungs-Wochenende, bei dem alle auf ihren eigenen Handys teilnehme
 
 Das Storage-Modul ist sauber abstrahiert (`src/storage.js`), sodass beim Backend-Swap nur diese eine Datei getauscht werden muss.
 
-## Deployment auf GitHub Pages
-
-1. Pushe auf GitHub (siehe unten).
-2. In den Repo-Settings → **Pages** → Source auf **GitHub Actions** stellen.
-3. Der Workflow in `.github/workflows/deploy.yml` baut und deployt automatisch bei jedem Push auf `master`.
-4. App ist dann erreichbar unter `https://<dein-username>.github.io/Boiz-Weekend-Manager/`
-
 ## Projekt-Struktur
 
 ```
 Boiz-Weekend-Manager/
-├── .github/workflows/deploy.yml   # Auto-Deploy auf GitHub Pages
 ├── public/favicon.svg
 ├── src/
 │   ├── App.jsx                    # Hauptkomponente
