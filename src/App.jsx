@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Beer, Wine, Trophy, Users, Settings, Plus, Minus, Check, X,
   RotateCcw, Home, User as UserIcon, Utensils,
-  ArrowLeft, LogOut, AlertTriangle, Calendar, ShieldCheck,
+  ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
-  Hourglass, Wrench,
+  Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isEventAdmin,
@@ -24,21 +24,24 @@ const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','
 const computeDrinkPoints = (s, ev) =>
   (s?.beer || 0) * (ev?.pointsPerBeer ?? 1) + (s?.mische || 0) * (ev?.pointsPerMische ?? 1);
 
-const teamOf = (userId, flunky) => {
-  if (!flunky) return null;
-  if ((flunky.teamA || []).includes(userId)) return 'A';
-  if ((flunky.teamB || []).includes(userId)) return 'B';
+const finishedGames = (flunky) => (flunky?.games || []).filter(g => g.winner === 'A' || g.winner === 'B');
+const currentGame = (flunky) => {
+  const games = flunky?.games || [];
+  const last = games[games.length - 1];
+  return last && last.winner == null ? last : null;
+};
+const teamOfInGame = (userId, game) => {
+  if (!game) return null;
+  if ((game.teamA || []).includes(userId)) return 'A';
+  if ((game.teamB || []).includes(userId)) return 'B';
   return null;
 };
-
 const computeFlunkyPoints = (userId, flunky) => {
   if (!flunky) return 0;
-  const team = teamOf(userId, flunky);
-  if (!team) return 0;
-  const wins = (flunky.sets || []).filter(s => s.winner === team).length;
-  return wins * (flunky.pointsPerWin || 0);
+  const ppw = flunky.pointsPerWin || 0;
+  return finishedGames(flunky).reduce((sum, g) =>
+    teamOfInGame(userId, g) === g.winner ? sum + ppw : sum, 0);
 };
-
 const computeTotalPoints = (userId, s, ev, flunky) =>
   computeDrinkPoints(s, ev) + computeFlunkyPoints(userId, flunky);
 
@@ -56,9 +59,11 @@ export default function App() {
   const [statsMap, setStatsMap] = useState({});
   const [flunky, setFlunky] = useState(null);
   const [allEvents, setAllEvents] = useState([]);
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState('home');
+  const [moduleTab, setModuleTab] = useState('overview');
+  const [moduleSettingsOpen, setModuleSettingsOpen] = useState(null); // module id or null
   const [authView, setAuthView] = useState('login');
-  const [lobbyView, setLobbyView] = useState('list'); // list | join | create | admin
+  const [lobbyView, setLobbyView] = useState('list');
   const [toast, setToast] = useState(null);
 
   const showToast = (msg) => {
@@ -70,18 +75,13 @@ export default function App() {
 
   const refreshMemberships = useCallback(async () => {
     if (!pb.authStore.isValid) { setMyMemberships([]); return; }
-    try {
-      const list = await listMyMemberships();
-      setMyMemberships(list);
-    } catch (e) { console.warn('refreshMemberships', e); }
+    try { setMyMemberships(await listMyMemberships()); }
+    catch (e) { console.warn('refreshMemberships', e); }
   }, []);
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null);
-      setEventMembers([]);
-      setStatsMap({});
-      setFlunky(null);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null);
       return;
     }
     try {
@@ -91,10 +91,7 @@ export default function App() {
         loadEventStats(currentEventId),
         getFlunky(currentEventId),
       ]);
-      setCurrentEvent(ev);
-      setEventMembers(members);
-      setStatsMap(stats);
-      setFlunky(fl);
+      setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats); setFlunky(fl);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -107,15 +104,10 @@ export default function App() {
     catch (e) { console.warn('refreshAllEvents', e); }
   }, [me]);
 
-  // initial boot
   useEffect(() => {
-    (async () => {
-      await refreshMemberships();
-      setBooted(true);
-    })();
+    (async () => { await refreshMemberships(); setBooted(true); })();
   }, [refreshMemberships, me?.id]);
 
-  // subscribe to membership changes for live "you got added" updates
   useEffect(() => {
     if (!me) return;
     let unsub;
@@ -123,10 +115,8 @@ export default function App() {
     return () => { if (unsub) unsub(); };
   }, [me, refreshMemberships]);
 
-  // load current event whenever id changes
   useEffect(() => { refreshCurrentEvent(); }, [refreshCurrentEvent]);
 
-  // subscribe to current event live updates
   useEffect(() => {
     if (!currentEventId) return;
     let unsub;
@@ -134,44 +124,35 @@ export default function App() {
     return () => { if (unsub) unsub(); };
   }, [currentEventId, refreshCurrentEvent]);
 
-  // when admin opens lobby admin tab, load all events
   useEffect(() => { if (lobbyView === 'admin') refreshAllEvents(); }, [lobbyView, refreshAllEvents]);
 
-  // ---------- Auth handlers ----------
-  const onLogin = async (email, password) => {
-    await login(email, password);
-    showToast('Eingeloggt 🍻');
-  };
+  // Reset module tab if currently active module gets disabled
+  useEffect(() => {
+    if (!currentEvent) return;
+    const mods = currentEvent.modules || [];
+    if (moduleTab !== 'overview' && !mods.includes(moduleTab)) setModuleTab('overview');
+  }, [currentEvent, moduleTab]);
 
-  const onRegister = async (data) => {
-    await register(data);
-    showToast(`Willkommen, ${data.displayName}! 🤘`);
-  };
-
+  // ---- Handlers ----
+  const onLogin = async (email, password) => { await login(email, password); showToast('Eingeloggt 🍻'); };
+  const onRegister = async (data) => { await register(data); showToast(`Willkommen, ${data.displayName}! 🤘`); };
   const onLogout = () => {
-    logout();
-    setCurrentEventId(null);
-    setMyMemberships([]);
-    setView('dashboard');
-    setLobbyView('list');
-    setAuthView('login');
+    logout(); setCurrentEventId(null); setMyMemberships([]);
+    setView('home'); setLobbyView('list'); setAuthView('login');
     showToast('Tschüss 👋');
   };
 
-  // ---------- Event handlers ----------
   const onJoin = async (code) => {
     const ev = await joinByCode(code);
     await refreshMemberships();
-    setCurrentEventId(ev.id);
-    setLobbyView('list');
+    setCurrentEventId(ev.id); setLobbyView('list');
     showToast(`In "${ev.name}" eingecheckt 🚪`);
   };
 
   const onCreateEvent = async (data) => {
     const ev = await createEvent(data);
     await refreshMemberships();
-    setCurrentEventId(ev.id);
-    setLobbyView('list');
+    setCurrentEventId(ev.id); setLobbyView('list');
     showToast(`Event "${ev.name}" erstellt — Code ${ev.code}`);
   };
 
@@ -185,6 +166,13 @@ export default function App() {
     if (!currentEvent) return;
     await updateEvent(currentEvent.id, { active: !currentEvent.active });
     showToast(currentEvent.active ? 'Event pausiert ⏸' : 'Event aktiv ▶');
+  };
+
+  const onToggleModule = async (id) => {
+    if (!currentEvent) return;
+    const mods = currentEvent.modules || [];
+    const next = mods.includes(id) ? mods.filter(x => x !== id) : [...mods, id];
+    await updateEvent(currentEvent.id, { modules: next });
   };
 
   const onResetCounters = async () => {
@@ -210,7 +198,14 @@ export default function App() {
     showToast('Profil gespeichert ✓');
   };
 
-  // ---------- Render ----------
+  const onFlunkyPatch = async (patch) => {
+    if (!flunky) return;
+    setFlunky(f => ({ ...f, ...patch }));
+    try { await updateFlunky(flunky.id, patch); }
+    catch (e) { console.warn('flunky update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
+  // ---- Render ----
   if (!booted) return <BootScreen />;
 
   if (!me) {
@@ -228,23 +223,17 @@ export default function App() {
       <div className="ww-app">
         <GrainOverlay />
         <Lobby
-          me={me}
-          memberships={myMemberships}
-          allEvents={allEvents}
-          view={lobbyView}
-          setView={setLobbyView}
-          onPick={(id) => setCurrentEventId(id)}
-          onJoin={onJoin}
-          onCreate={onCreateEvent}
-          onLogout={onLogout}
+          me={me} memberships={myMemberships} allEvents={allEvents}
+          view={lobbyView} setView={setLobbyView}
+          onPick={(id) => { setCurrentEventId(id); setModuleTab('overview'); }}
+          onJoin={onJoin} onCreate={onCreateEvent} onLogout={onLogout}
           onRefreshAll={refreshAllEvents}
           onDeleteEvent={async (id) => {
             if (!confirm('Event wirklich löschen?')) return;
             await deleteEvent(id); await refreshAllEvents(); showToast('Event gelöscht');
           }}
           onToggleActiveAdmin={async (id, next) => {
-            await updateEvent(id, { active: next });
-            await refreshAllEvents();
+            await updateEvent(id, { active: next }); await refreshAllEvents();
           }}
         />
         {toast && <Toast toast={toast} />}
@@ -255,28 +244,14 @@ export default function App() {
   if (!currentEvent) return <BootScreen />;
 
   const admin = isEventAdmin(me, currentEvent);
-  const modules = currentEvent.modules || ['drinks'];
-  const drinksOn = modules.includes('drinks');
-  const flunkyOn = modules.includes('flunky');
-
-  const onFlunkyPatch = async (patch) => {
-    if (!flunky) return;
-    setFlunky(f => ({ ...f, ...patch }));
-    try { await updateFlunky(flunky.id, patch); }
-    catch (e) { console.warn('flunky update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
-  };
+  const modules = currentEvent.modules || [];
 
   if (!currentEvent.active && !admin) {
     return (
       <div className="ww-app">
         <GrainOverlay />
-        <TopBar
-          me={me}
-          admin={admin}
-          eventName={currentEvent.name}
-          onSettings={() => setView('settings')}
-          onSwitchEvent={() => setCurrentEventId(null)}
-        />
+        <TopBar me={me} admin={admin} eventName={currentEvent.name}
+          onSettings={() => setView('settings')} onSwitchEvent={() => setCurrentEventId(null)} />
         <main className="ww-main">
           <WaitingScreen event={currentEvent} onLeave={onLeaveEvent} />
         </main>
@@ -289,21 +264,19 @@ export default function App() {
     <div className="ww-app">
       <GrainOverlay />
       <TopBar
-        me={me}
-        admin={admin}
-        eventName={currentEvent.name}
-        active={currentEvent.active}
-        onSettings={() => setView('settings')}
-        onSwitchEvent={() => setCurrentEventId(null)}
+        me={me} admin={admin} eventName={currentEvent.name} active={currentEvent.active}
+        onSettings={() => setView('settings')} onSwitchEvent={() => setCurrentEventId(null)}
       />
       <main className="ww-main">
-        {view === 'dashboard' && (
-          <Dashboard
-            me={me} event={currentEvent} members={eventMembers}
-            statsMap={statsMap} setStatsMap={setStatsMap}
-            drinksOn={drinksOn} flunkyOn={flunkyOn} flunky={flunky}
-            active={currentEvent.active} modules={modules}
-            admin={admin} onFlunkyPatch={onFlunkyPatch}
+        {view === 'home' && (
+          <HomeView
+            me={me} admin={admin} event={currentEvent}
+            members={eventMembers} statsMap={statsMap} setStatsMap={setStatsMap}
+            flunky={flunky} onFlunkyPatch={onFlunkyPatch}
+            modules={modules}
+            moduleTab={moduleTab} setModuleTab={setModuleTab}
+            moduleSettingsOpen={moduleSettingsOpen} setModuleSettingsOpen={setModuleSettingsOpen}
+            onSaveEvent={onSaveEvent}
           />
         )}
         {view === 'crew' && (
@@ -315,13 +288,9 @@ export default function App() {
         {view === 'settings' && (
           admin
             ? <EventSettingsView
-                event={currentEvent}
-                me={me}
-                members={eventMembers}
-                flunky={flunky}
-                onFlunkyPatch={onFlunkyPatch}
-                onSave={onSaveEvent}
-                onToggleActive={onToggleActive}
+                event={currentEvent} me={me} members={eventMembers}
+                onSave={onSaveEvent} onToggleActive={onToggleActive}
+                onToggleModule={onToggleModule}
                 onResetCounters={onResetCounters}
                 onDeleteEvent={async () => {
                   if (!confirm('Event endgültig löschen?')) return;
@@ -335,9 +304,9 @@ export default function App() {
                   if (!confirm('User wirklich löschen?')) return;
                   await deleteUser(id); showToast('User gelöscht');
                 }}
-                onBack={() => setView('dashboard')}
+                onBack={() => setView('home')}
               />
-            : <NotAllowed onBack={() => setView('dashboard')} />
+            : <NotAllowed onBack={() => setView('home')} />
         )}
       </main>
       {view !== 'settings' && <BottomNav view={view} setView={setView} />}
@@ -394,9 +363,9 @@ function LoginForm({ onSubmit }) {
   return (
     <div>
       <label className="ww-label"><Mail size={12} /> E-MAIL</label>
-      <input className="ww-input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+      <input className="ww-input" type="email" autoComplete="email" placeholder="deine@email.de" value={email} onChange={e => setEmail(e.target.value)} />
       <label className="ww-label"><Lock size={12} /> PASSWORT</label>
-      <input className="ww-input" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
+      <input className="ww-input" type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         <Check size={20} /><span>{busy ? '...' : 'EINLOGGEN'}</span>
@@ -423,9 +392,7 @@ function RegisterForm({ onSubmit }) {
       await onSubmit({
         email: email.trim(), password,
         displayName: displayName.trim(), emoji,
-        foodWishes: foodWishes.trim(),
-        drinkWishes: drinkWishes.trim(),
-        allergies: allergies.trim(),
+        foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim(),
       });
     } catch (e) {
       setErr(e?.response?.data
@@ -436,11 +403,11 @@ function RegisterForm({ onSubmit }) {
   return (
     <div>
       <label className="ww-label"><Mail size={12} /> E-MAIL</label>
-      <input className="ww-input" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
+      <input className="ww-input" type="email" autoComplete="email" placeholder="deine@email.de" value={email} onChange={e => setEmail(e.target.value)} />
       <label className="ww-label"><Lock size={12} /> PASSWORT (min. 8)</label>
-      <input className="ww-input" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} />
+      <input className="ww-input" type="password" autoComplete="new-password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
       <label className="ww-label">DEIN NAME</label>
-      <input className="ww-input" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} />
+      <input className="ww-input" placeholder="z.B. Max" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} />
       <label className="ww-label">AVATAR</label>
       <div className="ww-emoji-grid">
         {EMOJI_AVATARS.map(e => (
@@ -448,11 +415,11 @@ function RegisterForm({ onSubmit }) {
         ))}
       </div>
       <label className="ww-label"><Utensils size={12} /> ESSENSWÜNSCHE</label>
-      <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
+      <textarea className="ww-textarea" placeholder="z.B. Spareribs, Pizza, viel Fleisch..." value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
       <label className="ww-label"><Beer size={12} /> GETRÄNKEWÜNSCHE</label>
-      <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
+      <textarea className="ww-textarea" placeholder="z.B. Tannenzäpfle, Bourbon, Mate..." value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
       <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
-      <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
+      <textarea className="ww-textarea" placeholder="z.B. Laktose, keine Pilze..." value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         <UserPlus size={20} /><span>{busy ? '...' : 'SQUAD BEITRETEN'}</span>
@@ -462,7 +429,7 @@ function RegisterForm({ onSubmit }) {
 }
 
 // ============================================================
-// Lobby (event picker / join / create / admin)
+// Lobby
 // ============================================================
 
 function Lobby({
@@ -477,14 +444,12 @@ function Lobby({
         <h1 className="ww-display ww-title-huge">Events</h1>
         <p className="ww-muted">Tritt einem Event bei{siteAdmin ? ' oder erstelle ein neues' : ''}.</p>
       </div>
-
       <div className="ww-auth-tabs">
         <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
         <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
         {siteAdmin && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
         {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
       </div>
-
       {view === 'list' && (
         <div>
           {memberships.length === 0 && <p className="ww-muted">Noch keine Events. Joine eins per Code 🎟️</p>}
@@ -506,7 +471,6 @@ function Lobby({
           <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Ausloggen</button>
         </div>
       )}
-
       {view === 'join' && <JoinForm onSubmit={onJoin} />}
       {view === 'create' && siteAdmin && <CreateEventForm onSubmit={onCreate} />}
       {view === 'admin' && siteAdmin && (
@@ -533,8 +497,7 @@ function JoinForm({ onSubmit }) {
         className="ww-input ww-code-input"
         value={code}
         onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
-        placeholder="ABC123"
-        maxLength={6}
+        placeholder="ABC123" maxLength={6}
       />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${code.length === 6 && !busy ? '' : 'disabled'}`} onClick={submit} disabled={code.length !== 6 || busy}>
@@ -561,24 +524,20 @@ function CreateEventForm({ onSubmit }) {
         ? Object.entries(e.response.data).map(([k, v]) => `${k}: ${v.message}`).join(' / ')
         : (e?.response?.message || e?.message || 'Unbekannter Fehler');
       setErr(`${e?.status || ''} ${detail}`);
-      console.error('createEvent failed', e);
     } finally { setBusy(false); }
   };
   return (
     <div>
       <label className="ww-label">EVENT-NAME</label>
-      <input className="ww-input" value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder="Boiz Sommer-Wochenende" />
+      <input className="ww-input" value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder="z.B. Boiz Sommer-Wochenende" />
       <label className="ww-label">DATUM</label>
       <input className="ww-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
       <label className="ww-label">MODULE</label>
       <div className="ww-modules">
         {MODULES.map(m => (
-          <button
-            key={m.id}
+          <button key={m.id}
             className={`ww-mod-card ${modules.includes(m.id) ? 'sel' : ''} ${m.available ? '' : 'disabled'}`}
-            onClick={() => m.available && toggle(m.id)}
-            disabled={!m.available}
-          >
+            onClick={() => m.available && toggle(m.id)} disabled={!m.available}>
             <div className="ww-mod-icon">{m.icon}</div>
             <div className="ww-mod-name">{m.name}</div>
             {!m.available && <div className="ww-mod-soon">SOON</div>}
@@ -647,10 +606,6 @@ function TopBar({ me, admin, eventName, active, onSettings, onSwitchEvent }) {
   );
 }
 
-// ============================================================
-// Waiting screen
-// ============================================================
-
 function WaitingScreen({ event, onLeave }) {
   return (
     <div className="ww-waiting">
@@ -660,36 +615,149 @@ function WaitingScreen({ event, onLeave }) {
         Der Host hat <b>{event.name}</b> noch nicht aktiv gesetzt.<br />
         Sobald es losgeht, ploppt's automatisch auf.
       </p>
-      <button className="ww-text-btn" onClick={onLeave}>
-        <X size={14} /> Event verlassen
-      </button>
+      <button className="ww-text-btn" onClick={onLeave}><X size={14} /> Event verlassen</button>
     </div>
   );
 }
 
 // ============================================================
-// Dashboard
+// Home view: module tabs + content
 // ============================================================
 
-function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, flunkyOn, flunky, active, modules, admin, onFlunkyPatch }) {
-  const usersById = useMemo(() => {
-    const m = {};
-    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
-    return m;
-  }, [members]);
+function HomeView({
+  me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
+  modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
+  onSaveEvent,
+}) {
+  const enabledModules = MODULES.filter(m => modules.includes(m.id) && m.available);
+  const tabs = [{ id: 'overview', name: 'Stand', icon: '📊' }, ...enabledModules];
 
+  return (
+    <div className="ww-home">
+      <div className="ww-event-banner">
+        <div className="ww-tag">{formatDate(event.date)}</div>
+        <h1 className="ww-display ww-title-big">{event.name}</h1>
+      </div>
+
+      <div className="ww-mod-tabs">
+        {tabs.map(t => (
+          <button key={t.id} className={`ww-mod-tab ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
+            <span className="ww-mod-tab-icon">{t.icon}</span>
+            <span className="ww-mod-tab-name">{t.name}</span>
+          </button>
+        ))}
+      </div>
+
+      {moduleTab === 'overview' && (
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} />
+      )}
+      {moduleTab === 'drinks' && (
+        <DrinksView
+          me={me} event={event} members={members} statsMap={statsMap} setStatsMap={setStatsMap}
+          admin={admin} active={event.active}
+          onOpenSettings={() => setModuleSettingsOpen('drinks')}
+        />
+      )}
+      {moduleTab === 'flunky' && flunky && (
+        <FlunkyView
+          me={me} flunky={flunky} members={members} admin={admin} active={event.active}
+          onPatch={onFlunkyPatch}
+          onOpenSettings={() => setModuleSettingsOpen('flunky')}
+        />
+      )}
+
+      {moduleSettingsOpen === 'drinks' && admin && (
+        <ModuleSettingsDrawer title="🍺 Bier-Counter — Live Settings" onClose={() => setModuleSettingsOpen(null)}>
+          <DrinksLiveSettings event={event} onSave={onSaveEvent} />
+        </ModuleSettingsDrawer>
+      )}
+      {moduleSettingsOpen === 'flunky' && admin && flunky && (
+        <ModuleSettingsDrawer title="🎳 Flunkyball — Live Settings" onClose={() => setModuleSettingsOpen(null)}>
+          <FlunkyLiveSettings flunky={flunky} onPatch={onFlunkyPatch} />
+        </ModuleSettingsDrawer>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Overview (leaderboard / standings)
+// ============================================================
+
+function OverviewView({ me, event, members, statsMap, flunky }) {
+  const leaderboard = useMemo(() => members
+    .map(m => {
+      const u = m.expand?.user; if (!u) return null;
+      const s = statsMap[u.id] || { beer: 0, mische: 0 };
+      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky) };
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.points - a.points),
+    [members, statsMap, event, flunky]);
+
+  const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
+  const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
+  const myEntry = leaderboard.find(u => u.id === me.id);
+
+  return (
+    <>
+      <div className="ww-stats-row">
+        <StatPill label="Drinks" value={(myEntry?.beer || 0) + (myEntry?.mische || 0)} />
+        <StatPill label="Punkte" value={myEntry?.points || 0} accent />
+        <StatPill label="Rang" value={myRank ? `#${myRank}` : '–'} />
+      </div>
+      <section className="ww-section">
+        <div className="ww-section-head"><Trophy size={16} /><h3>LIVE LEADERBOARD</h3></div>
+        <div className="ww-board">
+          {leaderboard.map((u, i) => (
+            <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
+              <div className="ww-board-rank">{rankBadge(i)}</div>
+              <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
+              <div className="ww-board-name">{u.displayName || u.email}{u.id === me.id && <span className="ww-you">DU</span>}</div>
+              <div className="ww-board-bar-wrap">
+                <div className="ww-board-bar" style={{ width: `${(u.points / maxPoints) * 100}%` }} />
+              </div>
+              <div className="ww-board-pts">{u.points}<span>pkt</span></div>
+            </div>
+          ))}
+          {leaderboard.length === 0 && <div className="ww-empty">Noch keiner gepunktet 💀</div>}
+        </div>
+      </section>
+    </>
+  );
+}
+
+// ============================================================
+// Module header (title + gear for host)
+// ============================================================
+
+function ModuleHeader({ title, admin, onOpenSettings }) {
+  return (
+    <div className="ww-mod-header">
+      <h3 className="ww-mod-header-title">{title}</h3>
+      {admin && (
+        <button className="ww-icon-btn ww-icon-btn-sm" onClick={onOpenSettings} aria-label="Live Settings">
+          <Settings size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Drinks module view
+// ============================================================
+
+function DrinksView({ me, event, members, statsMap, setStatsMap, admin, active, onOpenSettings }) {
   const myStats = statsMap[me.id] || { id: null, beer: 0, mische: 0 };
 
-  // ---- Counter debounce: optimistic state + debounced write of latest absolute value ----
   const pendingWrite = useRef(null);
   const flushTimer = useRef(null);
-
   const scheduleWrite = (statsId, vals) => {
     pendingWrite.current = { statsId, vals };
     if (flushTimer.current) clearTimeout(flushTimer.current);
     flushTimer.current = setTimeout(async () => {
-      const w = pendingWrite.current;
-      pendingWrite.current = null;
+      const w = pendingWrite.current; pendingWrite.current = null;
       if (!w?.statsId) return;
       try { await setMyCount(w.statsId, w.vals); }
       catch (e) { console.warn('write failed', e); }
@@ -698,200 +766,30 @@ function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, flunky
 
   const bump = (kind, delta) => {
     if (!active) return;
-    const cur = statsMap[me.id];
-    if (!cur?.id) return;
+    const cur = statsMap[me.id]; if (!cur?.id) return;
     const nextVal = Math.max(0, (cur[kind] || 0) + delta);
     const next = { ...cur, [kind]: nextVal };
     setStatsMap(m => ({ ...m, [me.id]: next }));
     scheduleWrite(cur.id, { beer: next.beer, mische: next.mische });
   };
 
-  const leaderboard = useMemo(() => {
-    return members
-      .map(m => {
-        const u = m.expand?.user;
-        if (!u) return null;
-        const s = statsMap[u.id] || { beer: 0, mische: 0 };
-        return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky) };
-      })
-      .filter(Boolean)
-      .sort((a, b) => b.points - a.points);
-  }, [members, statsMap, event, flunky]);
-
-  const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
-  const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
-  const myPoints = computeTotalPoints(me.id, myStats, event, flunky);
-
   return (
-    <div className="ww-dash">
-      <div className="ww-event-banner">
-        <div className="ww-tag">{formatDate(event.date)}</div>
-        <h1 className="ww-display ww-title-big">{event.name}</h1>
+    <>
+      <ModuleHeader title="🍺 Bier-Counter" admin={admin} onOpenSettings={onOpenSettings} />
+      <div className="ww-counters">
+        <CounterCard icon={<Beer size={28} />} label={event.beerLabel} color="amber"
+          count={myStats.beer} disabled={!active}
+          onInc={() => bump('beer', +1)} onDec={() => bump('beer', -1)} />
+        <CounterCard icon={<Wine size={28} />} label={event.drinkLabel} color="red"
+          count={myStats.mische} disabled={!active}
+          onInc={() => bump('mische', +1)} onDec={() => bump('mische', -1)} />
       </div>
-
-      {drinksOn ? (
-        <>
-          <div className="ww-counters">
-            <CounterCard icon={<Beer size={28} />} label={event.beerLabel} color="amber"
-              count={myStats.beer} disabled={!active}
-              onInc={() => bump('beer', +1)} onDec={() => bump('beer', -1)} />
-            <CounterCard icon={<Wine size={28} />} label={event.drinkLabel} color="red"
-              count={myStats.mische} disabled={!active}
-              onInc={() => bump('mische', +1)} onDec={() => bump('mische', -1)} />
-          </div>
-
-          <div className="ww-stats-row">
-            <StatPill label="Drinks" value={(myStats.beer || 0) + (myStats.mische || 0)} />
-            <StatPill label="Punkte" value={myPoints} accent />
-            <StatPill label="Rang" value={myRank ? `#${myRank}` : '–'} />
-          </div>
-
-          <section className="ww-section">
-            <div className="ww-section-head"><Trophy size={16} /><h3>LIVE LEADERBOARD</h3></div>
-            <div className="ww-board">
-              {leaderboard.map((u, i) => (
-                <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
-                  <div className="ww-board-rank">{rankBadge(i)}</div>
-                  <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
-                  <div className="ww-board-name">{u.displayName || u.email}{u.id === me.id && <span className="ww-you">DU</span>}</div>
-                  <div className="ww-board-bar-wrap">
-                    <div className="ww-board-bar" style={{ width: `${(u.points / maxPoints) * 100}%` }} />
-                  </div>
-                  <div className="ww-board-pts">{u.points}<span>pkt</span></div>
-                </div>
-              ))}
-              {leaderboard.length === 0 && <div className="ww-empty">Noch keiner getrunken 💀</div>}
-            </div>
-          </section>
-        </>
-      ) : (
-        <section className="ww-section">
-          <div className="ww-empty">Keine Module aktiviert.</div>
-        </section>
-      )}
-
-      {flunkyOn && flunky && (
-        <FlunkySection
-          flunky={flunky} members={members} me={me}
-          admin={admin} active={active}
-          onPatch={onFlunkyPatch}
-        />
-      )}
-
-      {modules.filter(m => m !== 'drinks' && m !== 'flunky').map(id => {
-        const meta = moduleById(id);
-        if (!meta) return null;
-        return (
-          <section key={id} className="ww-section">
-            <div className="ww-section-head"><Wrench size={16} /><h3>{meta.icon} {meta.name.toUpperCase()}</h3></div>
-            <div className="ww-empty">{meta.name} kommt bald 🛠️</div>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-// ============================================================
-// Flunkyball dashboard section
-// ============================================================
-
-function FlunkySection({ flunky, members, me, admin, active, onPatch }) {
-  const usersById = useMemo(() => {
-    const m = {};
-    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
-    return m;
-  }, [members]);
-
-  const teamA = (flunky.teamA || []).map(id => usersById[id]).filter(Boolean);
-  const teamB = (flunky.teamB || []).map(id => usersById[id]).filter(Boolean);
-  const setsTotal = flunky.setsTotal || 5;
-  const setsArr = Array.from({ length: setsTotal }, (_, i) => {
-    const n = i + 1;
-    return (flunky.sets || []).find(s => s.n === n) || { n, winner: null };
-  });
-  const winsA = setsArr.filter(s => s.winner === 'A').length;
-  const winsB = setsArr.filter(s => s.winner === 'B').length;
-  const myTeam = teamOf(me.id, flunky);
-
-  const setWinner = (n, team) => {
-    if (!admin) return;
-    const cur = (flunky.sets || []).filter(s => s.n !== n);
-    const existing = (flunky.sets || []).find(s => s.n === n);
-    const next = existing?.winner === team ? cur : [...cur, { n, winner: team }];
-    onPatch({ sets: next });
-  };
-
-  const noTeams = teamA.length === 0 && teamB.length === 0;
-
-  return (
-    <section className="ww-section">
-      <div className="ww-section-head"><h3>🎳 FLUNKYBALL</h3></div>
-
-      {noTeams ? (
-        <div className="ww-empty">Host muss Teams einteilen (Settings).</div>
-      ) : (
-        <>
-          <div className="ww-flunky-teams">
-            <div className={`ww-flunky-team ${myTeam === 'A' ? 'mine' : ''}`}>
-              <div className="ww-flunky-team-head">
-                <span className="ww-flunky-team-label">TEAM A</span>
-                <span className="ww-flunky-score">{winsA}</span>
-              </div>
-              <div className="ww-flunky-roster">
-                {teamA.map(u => (
-                  <span key={u.id} className="ww-flunky-player">
-                    {u.emoji || '🍺'} {u.displayName || u.email}
-                  </span>
-                ))}
-              </div>
-            </div>
-            <div className="ww-flunky-vs">VS</div>
-            <div className={`ww-flunky-team ${myTeam === 'B' ? 'mine' : ''}`}>
-              <div className="ww-flunky-team-head">
-                <span className="ww-flunky-team-label">TEAM B</span>
-                <span className="ww-flunky-score">{winsB}</span>
-              </div>
-              <div className="ww-flunky-roster">
-                {teamB.map(u => (
-                  <span key={u.id} className="ww-flunky-player">
-                    {u.emoji || '🍺'} {u.displayName || u.email}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="ww-flunky-sets">
-            {setsArr.map(s => (
-              <div key={s.n} className="ww-flunky-set">
-                <div className="ww-flunky-set-label">SET {s.n}</div>
-                {admin && active ? (
-                  <div className="ww-flunky-set-actions">
-                    <button
-                      className={`ww-flunky-set-btn ${s.winner === 'A' ? 'won' : ''}`}
-                      onClick={() => setWinner(s.n, 'A')}
-                    >A</button>
-                    <button
-                      className={`ww-flunky-set-btn ${s.winner === 'B' ? 'won' : ''}`}
-                      onClick={() => setWinner(s.n, 'B')}
-                    >B</button>
-                  </div>
-                ) : (
-                  <div className="ww-flunky-set-result">
-                    {s.winner ? `🏆 ${s.winner}` : '—'}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-
-          <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
-            {flunky.pointsPerWin} Punkte pro gewonnenem Set für jeden Spieler im Gewinner-Team
-          </div>
-        </>
-      )}
-    </section>
+      <div className="ww-stats-row">
+        <StatPill label={event.beerLabel || 'Bier'} value={myStats.beer || 0} />
+        <StatPill label={event.drinkLabel || 'Mische'} value={myStats.mische || 0} />
+        <StatPill label="Punkte" value={computeDrinkPoints(myStats, event)} accent />
+      </div>
+    </>
   );
 }
 
@@ -929,6 +827,287 @@ function rankBadge(i) {
 }
 
 // ============================================================
+// Flunky module view (games)
+// ============================================================
+
+function FlunkyView({ me, flunky, members, admin, active, onPatch, onOpenSettings }) {
+  const [composing, setComposing] = useState(false);
+
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const games = flunky.games || [];
+  const cur = currentGame(flunky);
+  const finished = finishedGames(flunky);
+
+  const myWins = finished.filter(g => teamOfInGame(me.id, g) === g.winner).length;
+  const myLosses = finished.filter(g => teamOfInGame(me.id, g) && teamOfInGame(me.id, g) !== g.winner).length;
+
+  const finishGame = (winner) => {
+    if (!cur) return;
+    const next = games.map(g => g.id === cur.id ? { ...g, winner, endedAt: new Date().toISOString() } : g);
+    onPatch({ games: next });
+  };
+
+  const cancelCurrent = () => {
+    if (!cur) return;
+    if (!confirm('Spiel wirklich abbrechen?')) return;
+    onPatch({ games: games.filter(g => g.id !== cur.id) });
+  };
+
+  const startGame = (teamA, teamB) => {
+    const next = [...games, {
+      id: String(Date.now()),
+      teamA, teamB, winner: null,
+      createdAt: new Date().toISOString(),
+    }];
+    onPatch({ games: next });
+    setComposing(false);
+  };
+
+  return (
+    <>
+      <ModuleHeader title="🎳 Flunkyball" admin={admin} onOpenSettings={onOpenSettings} />
+
+      <div className="ww-stats-row">
+        <StatPill label="Siege" value={myWins} />
+        <StatPill label="Niederl." value={myLosses} />
+        <StatPill label="Pkt" value={myWins * (flunky.pointsPerWin || 0)} accent />
+      </div>
+
+      {cur && (
+        <div className="ww-game-card live">
+          <div className="ww-game-head"><span className="ww-game-tag live">🔴 LIVE</span></div>
+          <GameView game={cur} usersById={usersById} myId={me.id} />
+          {admin && active && (
+            <div className="ww-game-actions">
+              <button className="ww-mini-btn green" onClick={() => finishGame('A')}><Flag size={11} /> Team A gewinnt</button>
+              <button className="ww-mini-btn green" onClick={() => finishGame('B')}><Flag size={11} /> Team B gewinnt</button>
+              <button className="ww-mini-btn red" onClick={cancelCurrent}><X size={11} /> Abbrechen</button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {!cur && admin && active && !composing && (
+        <button className="ww-big-cta green" onClick={() => setComposing(true)}>
+          <Play size={20} /><span>NEUES SPIEL STARTEN</span>
+        </button>
+      )}
+
+      {!cur && admin && active && composing && (
+        <NewGameComposer members={members} usersById={usersById}
+          onCancel={() => setComposing(false)} onStart={startGame} />
+      )}
+
+      {!cur && !admin && (
+        <div className="ww-empty">Aktuell läuft kein Spiel — der Host startet eins, sobald's losgeht.</div>
+      )}
+
+      {finished.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><Trophy size={16} /><h3>HISTORIE</h3></div>
+          <div className="ww-game-list">
+            {[...finished].reverse().map((g, idx) => (
+              <div key={g.id} className="ww-game-card">
+                <div className="ww-game-head">
+                  <span className="ww-game-tag">SPIEL {finished.length - idx}</span>
+                  <span className="ww-game-result">🏆 Team {g.winner}</span>
+                </div>
+                <GameView game={g} usersById={usersById} myId={me.id} compact />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function GameView({ game, usersById, myId, compact }) {
+  const teamA = (game.teamA || []).map(id => usersById[id]).filter(Boolean);
+  const teamB = (game.teamB || []).map(id => usersById[id]).filter(Boolean);
+  const myTeam = teamOfInGame(myId, game);
+  const won = game.winner;
+  return (
+    <div className="ww-flunky-teams">
+      <div className={`ww-flunky-team ${myTeam === 'A' ? 'mine' : ''} ${won === 'A' ? 'won' : (won === 'B' ? 'lost' : '')}`}>
+        <div className="ww-flunky-team-head">
+          <span className="ww-flunky-team-label">TEAM A</span>
+          {won === 'A' && <span className="ww-flunky-score">🏆</span>}
+        </div>
+        <div className="ww-flunky-roster">
+          {teamA.map(u => (
+            <span key={u.id} className="ww-flunky-player">
+              {u.emoji || '🍺'} {compact ? (u.displayName || u.email).slice(0, 10) : (u.displayName || u.email)}
+            </span>
+          ))}
+        </div>
+      </div>
+      <div className="ww-flunky-vs">VS</div>
+      <div className={`ww-flunky-team ${myTeam === 'B' ? 'mine' : ''} ${won === 'B' ? 'won' : (won === 'A' ? 'lost' : '')}`}>
+        <div className="ww-flunky-team-head">
+          <span className="ww-flunky-team-label">TEAM B</span>
+          {won === 'B' && <span className="ww-flunky-score">🏆</span>}
+        </div>
+        <div className="ww-flunky-roster">
+          {teamB.map(u => (
+            <span key={u.id} className="ww-flunky-player">
+              {u.emoji || '🍺'} {compact ? (u.displayName || u.email).slice(0, 10) : (u.displayName || u.email)}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewGameComposer({ members, usersById, onCancel, onStart }) {
+  const [mode, setMode] = useState('random'); // 'random' | 'manual'
+  const [teamA, setTeamA] = useState([]);
+  const [teamB, setTeamB] = useState([]);
+
+  const shuffle = () => {
+    const ids = members.map(m => m.expand?.user?.id).filter(Boolean);
+    const shuffled = ids.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(p => p[1]);
+    const mid = Math.ceil(shuffled.length / 2);
+    setTeamA(shuffled.slice(0, mid));
+    setTeamB(shuffled.slice(mid));
+  };
+
+  useEffect(() => { if (mode === 'random') shuffle(); /* eslint-disable-next-line */ }, []);
+
+  const assign = (userId, team) => {
+    setTeamA(arr => arr.filter(id => id !== userId));
+    setTeamB(arr => arr.filter(id => id !== userId));
+    if (team === 'A') setTeamA(arr => [...arr.filter(id => id !== userId), userId]);
+    if (team === 'B') setTeamB(arr => [...arr.filter(id => id !== userId), userId]);
+  };
+
+  const teamOf_ = (id) => teamA.includes(id) ? 'A' : (teamB.includes(id) ? 'B' : null);
+
+  return (
+    <div className="ww-game-composer">
+      <div className="ww-auth-tabs" style={{ marginBottom: 14 }}>
+        <button className={`ww-auth-tab ${mode === 'random' ? 'active' : ''}`} onClick={() => setMode('random')}><Dice5 size={12} /> RANDOM</button>
+        <button className={`ww-auth-tab ${mode === 'manual' ? 'active' : ''}`} onClick={() => setMode('manual')}><Hand size={12} /> MANUELL</button>
+      </div>
+
+      {mode === 'random' && (
+        <>
+          <GameView game={{ teamA, teamB, winner: null }} usersById={usersById} myId={null} />
+          <button className="ww-mini-btn" onClick={shuffle} style={{ marginTop: 10 }}>🎲 Nochmal würfeln</button>
+        </>
+      )}
+
+      {mode === 'manual' && (
+        <div className="ww-flunky-assign" style={{ marginTop: 10 }}>
+          {members.map(m => {
+            const u = m.expand?.user; if (!u) return null;
+            const team = teamOf_(u.id);
+            return (
+              <div key={u.id} className="ww-flunky-assign-row">
+                <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                <div className="ww-flunky-assign-btns">
+                  <button className={`ww-mini-btn ${team === 'A' ? 'active' : ''}`} onClick={() => assign(u.id, team === 'A' ? null : 'A')}>A</button>
+                  <button className={`ww-mini-btn ${team === 'B' ? 'active' : ''}`} onClick={() => assign(u.id, team === 'B' ? null : 'B')}>B</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="ww-game-actions" style={{ marginTop: 14 }}>
+        <button className="ww-big-cta green" onClick={() => onStart(teamA, teamB)} disabled={teamA.length === 0 || teamB.length === 0}>
+          <Play size={18} /><span>SPIEL STARTEN</span>
+        </button>
+        <button className="ww-text-btn" onClick={onCancel}><X size={14} /> abbrechen</button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// Live settings drawer
+// ============================================================
+
+function ModuleSettingsDrawer({ title, onClose, children }) {
+  return (
+    <>
+      <div className="ww-drawer-backdrop" onClick={onClose} />
+      <div className="ww-drawer">
+        <div className="ww-drawer-head">
+          <h3>{title}</h3>
+          <button className="ww-icon-btn" onClick={onClose} aria-label="Schließen"><X size={16} /></button>
+        </div>
+        <div className="ww-drawer-body">{children}</div>
+      </div>
+    </>
+  );
+}
+
+function DrinksLiveSettings({ event, onSave }) {
+  const [beerLabel, setBeerLabel] = useState(event.beerLabel || 'Bier');
+  const [drinkLabel, setDrinkLabel] = useState(event.drinkLabel || 'Mische');
+  const [pb_, setPb] = useState(event.pointsPerBeer ?? 1);
+  const [pm, setPm] = useState(event.pointsPerMische ?? 1);
+  const save = () => onSave({
+    beerLabel: beerLabel.trim(), drinkLabel: drinkLabel.trim(),
+    pointsPerBeer: Number(pb_), pointsPerMische: Number(pm),
+  });
+  return (
+    <div>
+      <div className="ww-grid2">
+        <div>
+          <label className="ww-label">BIER-LABEL</label>
+          <input className="ww-input" value={beerLabel} onChange={e => setBeerLabel(e.target.value)} maxLength={12} />
+        </div>
+        <div>
+          <label className="ww-label">MISCHE-LABEL</label>
+          <input className="ww-input" value={drinkLabel} onChange={e => setDrinkLabel(e.target.value)} maxLength={12} />
+        </div>
+      </div>
+      <div className="ww-grid2">
+        <div>
+          <label className="ww-label">PKT / BIER</label>
+          <input className="ww-input" type="number" min={0} max={10} value={pb_} onChange={e => setPb(e.target.value)} />
+        </div>
+        <div>
+          <label className="ww-label">PKT / MISCHE</label>
+          <input className="ww-input" type="number" min={0} max={10} value={pm} onChange={e => setPm(e.target.value)} />
+        </div>
+      </div>
+      <button className="ww-big-cta" onClick={save}><Check size={20} /><span>SPEICHERN</span></button>
+    </div>
+  );
+}
+
+function FlunkyLiveSettings({ flunky, onPatch }) {
+  const [ppw, setPpw] = useState(flunky.pointsPerWin || 3);
+  useEffect(() => setPpw(flunky.pointsPerWin || 3), [flunky.pointsPerWin]);
+  const save = () => onPatch({ pointsPerWin: Number(ppw) });
+  const clearHistory = () => {
+    if (!confirm('Alle Spiele dieses Events löschen?')) return;
+    onPatch({ games: [] });
+  };
+  return (
+    <div>
+      <label className="ww-label">PUNKTE PRO SIEG (pro Spieler im Sieger-Team)</label>
+      <input className="ww-input" type="number" min={0} max={100} value={ppw} onChange={e => setPpw(e.target.value)} />
+      <button className="ww-big-cta" onClick={save}><Check size={20} /><span>SPEICHERN</span></button>
+      <button className="ww-danger-btn red" onClick={clearHistory} style={{ marginTop: 8 }}>
+        <Trash2 size={14} /> Historie & laufendes Spiel löschen
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
 // Crew
 // ============================================================
 
@@ -938,8 +1117,7 @@ function CrewView({ members, statsMap, event, flunky, myId }) {
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({members.length})</h3></div>
       <div className="ww-crew-list">
         {members.map(m => {
-          const u = m.expand?.user;
-          if (!u) return null;
+          const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
           const points = computeTotalPoints(u.id, s, event, flunky);
           return (
@@ -1003,22 +1181,13 @@ function ProfileView({ me, onSave, onLogout }) {
 }
 
 // ============================================================
-// Event Settings (host)
+// Event Settings (host) — slim, module configs live in module drawers
 // ============================================================
 
-function EventSettingsView({ event, me, members, flunky, onFlunkyPatch, onSave, onToggleActive, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser, onBack }) {
+function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser, onBack }) {
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
-  const [beerLabel, setBeerLabel] = useState(event.beerLabel || 'Bier');
-  const [drinkLabel, setDrinkLabel] = useState(event.drinkLabel || 'Mische');
-  const [pb_, setPb] = useState(event.pointsPerBeer ?? 1);
-  const [pm, setPm] = useState(event.pointsPerMische ?? 1);
-  const [mods, setMods] = useState(event.modules || ['drinks']);
-  const toggleMod = (id) => setMods(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
-
-  const copyCode = () => {
-    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(event.code);
-  };
+  const copyCode = () => navigator.clipboard?.writeText?.(event.code);
 
   return (
     <div className="ww-form-wrap">
@@ -1039,62 +1208,36 @@ function EventSettingsView({ event, me, members, flunky, onFlunkyPatch, onSave, 
       <input className="ww-input" value={name} onChange={e => setName(e.target.value)} />
       <label className="ww-label">DATUM</label>
       <input className="ww-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
-
-      <label className="ww-label">MODULE</label>
-      <div className="ww-modules">
-        {MODULES.map(m => (
-          <button
-            key={m.id}
-            className={`ww-mod-card ${mods.includes(m.id) ? 'sel' : ''} ${m.available ? '' : 'disabled'}`}
-            onClick={() => m.available && toggleMod(m.id)}
-            disabled={!m.available}
-          >
-            <div className="ww-mod-icon">{m.icon}</div>
-            <div className="ww-mod-name">{m.name}</div>
-            {!m.available && <div className="ww-mod-soon">SOON</div>}
-          </button>
-        ))}
-      </div>
-
-      <div className="ww-grid2">
-        <div>
-          <label className="ww-label">BIER-LABEL</label>
-          <input className="ww-input" value={beerLabel} onChange={e => setBeerLabel(e.target.value)} maxLength={12} />
-        </div>
-        <div>
-          <label className="ww-label">MISCHE-LABEL</label>
-          <input className="ww-input" value={drinkLabel} onChange={e => setDrinkLabel(e.target.value)} maxLength={12} />
-        </div>
-      </div>
-      <div className="ww-grid2">
-        <div>
-          <label className="ww-label">PKT / BIER</label>
-          <input className="ww-input" type="number" min={0} max={10} value={pb_} onChange={e => setPb(Number(e.target.value))} />
-        </div>
-        <div>
-          <label className="ww-label">PKT / MISCHE</label>
-          <input className="ww-input" type="number" min={0} max={10} value={pm} onChange={e => setPm(Number(e.target.value))} />
-        </div>
-      </div>
-      <button className="ww-big-cta" onClick={() => onSave({
-        name: name.trim(), date,
-        beerLabel: beerLabel.trim(), drinkLabel: drinkLabel.trim(),
-        pointsPerBeer: pb_, pointsPerMische: pm, modules: mods,
-      })}>
+      <button className="ww-big-cta" onClick={() => onSave({ name: name.trim(), date })}>
         <Check size={20} /><span>SPEICHERN</span>
       </button>
 
-      {mods.includes('flunky') && flunky && (
-        <FlunkySettings flunky={flunky} members={members} onPatch={onFlunkyPatch} />
-      )}
+      <label className="ww-label" style={{ marginTop: 14 }}>MODULE — LIVE TOGGLE</label>
+      <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>Tabs verschwinden bei den Spielern, wenn du ein Modul deaktivierst.</p>
+      <div className="ww-module-toggles">
+        {MODULES.map(m => {
+          const on = (event.modules || []).includes(m.id);
+          return (
+            <button key={m.id}
+              className={`ww-module-toggle ${on ? 'on' : ''} ${m.available ? '' : 'disabled'}`}
+              onClick={() => m.available && onToggleModule(m.id)}
+              disabled={!m.available}>
+              <span className="ww-mod-icon">{m.icon}</span>
+              <span className="ww-mod-name">{m.name}</span>
+              {m.available
+                ? (on ? <Eye size={14} /> : <EyeOff size={14} />)
+                : <span className="ww-mod-soon">SOON</span>}
+            </button>
+          );
+        })}
+      </div>
 
       {isSiteAdmin(me) && (
         <div className="ww-section">
           <div className="ww-section-head"><Shield size={16} /><h3>USER MANAGEMENT (GLOBAL)</h3></div>
           <div className="ww-user-mgmt">
             {members.map(m => {
-              const u = m.expand?.user;
-              if (!u || u.id === me.id) return null;
+              const u = m.expand?.user; if (!u || u.id === me.id) return null;
               return (
                 <div key={u.id} className="ww-user-mgmt-row">
                   <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
@@ -1126,82 +1269,6 @@ function EventSettingsView({ event, me, members, flunky, onFlunkyPatch, onSave, 
   );
 }
 
-function FlunkySettings({ flunky, members, onPatch }) {
-  const [setsTotal, setSetsTotal] = useState(flunky.setsTotal || 5);
-  const [pointsPerWin, setPointsPerWin] = useState(flunky.pointsPerWin || 3);
-
-  useEffect(() => {
-    setSetsTotal(flunky.setsTotal || 5);
-    setPointsPerWin(flunky.pointsPerWin || 3);
-  }, [flunky.setsTotal, flunky.pointsPerWin]);
-
-  const usersById = useMemo(() => {
-    const m = {};
-    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
-    return m;
-  }, [members]);
-
-  const assignUser = (userId, team) => {
-    const a = (flunky.teamA || []).filter(id => id !== userId);
-    const b = (flunky.teamB || []).filter(id => id !== userId);
-    if (team === 'A') a.push(userId);
-    else if (team === 'B') b.push(userId);
-    onPatch({ teamA: a, teamB: b });
-  };
-
-  const shuffleTeams = () => {
-    const ids = members.map(m => m.expand?.user?.id).filter(Boolean);
-    const shuffled = ids.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(p => p[1]);
-    const mid = Math.ceil(shuffled.length / 2);
-    onPatch({ teamA: shuffled.slice(0, mid), teamB: shuffled.slice(mid) });
-  };
-
-  const clearTeams = () => onPatch({ teamA: [], teamB: [], sets: [] });
-
-  const saveConfig = () => onPatch({ setsTotal: Number(setsTotal), pointsPerWin: Number(pointsPerWin) });
-
-  return (
-    <div className="ww-section">
-      <div className="ww-section-head"><h3>🎳 FLUNKYBALL</h3></div>
-
-      <div className="ww-grid2">
-        <div>
-          <label className="ww-label">ANZAHL SÄTZE</label>
-          <input className="ww-input" type="number" min={1} max={20} value={setsTotal} onChange={e => setSetsTotal(e.target.value)} onBlur={saveConfig} />
-        </div>
-        <div>
-          <label className="ww-label">PKT / SIEG</label>
-          <input className="ww-input" type="number" min={0} max={100} value={pointsPerWin} onChange={e => setPointsPerWin(e.target.value)} onBlur={saveConfig} />
-        </div>
-      </div>
-
-      <div className="ww-flunky-controls">
-        <button className="ww-mini-btn" onClick={shuffleTeams}>🎲 Teams würfeln</button>
-        <button className="ww-mini-btn red" onClick={clearTeams}>↺ Teams + Sätze leeren</button>
-      </div>
-
-      <label className="ww-label" style={{ marginTop: 14 }}>MANUELLE ZUORDNUNG</label>
-      <div className="ww-flunky-assign">
-        {members.map(m => {
-          const u = m.expand?.user;
-          if (!u) return null;
-          const team = teamOf(u.id, flunky);
-          return (
-            <div key={u.id} className="ww-flunky-assign-row">
-              <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
-              <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
-              <div className="ww-flunky-assign-btns">
-                <button className={`ww-mini-btn ${team === 'A' ? 'active' : ''}`} onClick={() => assignUser(u.id, team === 'A' ? null : 'A')}>A</button>
-                <button className={`ww-mini-btn ${team === 'B' ? 'active' : ''}`} onClick={() => assignUser(u.id, team === 'B' ? null : 'B')}>B</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function NotAllowed({ onBack }) {
   return (
     <div className="ww-form-wrap">
@@ -1213,12 +1280,12 @@ function NotAllowed({ onBack }) {
 }
 
 // ============================================================
-// Bottom nav
+// Bottom nav / toast / helpers
 // ============================================================
 
 function BottomNav({ view, setView }) {
   const items = [
-    { k: 'dashboard', icon: <Home size={20} />, label: 'Home' },
+    { k: 'home', icon: <Home size={20} />, label: 'Home' },
     { k: 'crew', icon: <Users size={20} />, label: 'Crew' },
     { k: 'profile', icon: <UserIcon size={20} />, label: 'Profil' },
   ];
@@ -1226,17 +1293,14 @@ function BottomNav({ view, setView }) {
     <nav className="ww-bottomnav">
       {items.map(it => (
         <button key={it.k} className={`ww-nav-btn ${view === it.k ? 'active' : ''}`} onClick={() => setView(it.k)}>
-          {it.icon}
-          <span>{it.label}</span>
+          {it.icon}<span>{it.label}</span>
         </button>
       ))}
     </nav>
   );
 }
 
-function Toast({ toast }) {
-  return <div className="ww-toast" key={toast.id}>{toast.msg}</div>;
-}
+function Toast({ toast }) { return <div className="ww-toast" key={toast.id}>{toast.msg}</div>; }
 
 function formatDate(iso) {
   if (!iso) return '';
@@ -1247,6 +1311,4 @@ function formatDate(iso) {
   } catch { return iso; }
 }
 
-function GrainOverlay() {
-  return <div className="ww-grain" aria-hidden="true" />;
-}
+function GrainOverlay() { return <div className="ww-grain" aria-hidden="true" />; }
