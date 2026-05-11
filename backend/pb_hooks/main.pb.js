@@ -33,7 +33,8 @@ onRecordCreateRequest((e) => {
   e.next();
 }, "events");
 
-// Auto-add creator as member of the event they just created.
+// Auto-add creator as member of the event they just created and seed
+// the per-event flunky state row.
 onRecordAfterCreateSuccess((e) => {
   try {
     const creator = e.record.get("createdBy");
@@ -45,7 +46,20 @@ onRecordAfterCreateSuccess((e) => {
       e.app.save(m);
     }
   } catch (err) {
-    console.log("event post-create:", err);
+    console.log("event member post-create:", err);
+  }
+  try {
+    const flunkyCol = e.app.findCollectionByNameOrId("flunky");
+    const f = new Record(flunkyCol);
+    f.set("event", e.record.id);
+    f.set("setsTotal", 5);
+    f.set("pointsPerWin", 3);
+    f.set("teamA", []);
+    f.set("teamB", []);
+    f.set("sets", []);
+    e.app.save(f);
+  } catch (err) {
+    console.log("flunky seed:", err);
   }
   e.next();
 }, "events");
