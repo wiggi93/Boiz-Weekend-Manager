@@ -64,10 +64,26 @@ Für das echte Jungs-Wochenende, bei dem alle auf ihren eigenen Handys teilnehme
 
 Das Storage-Modul ist sauber abstrahiert (`src/storage.js`), sodass beim Backend-Swap nur diese eine Datei getauscht werden muss.
 
+## Self-Hosting via Docker
+
+Die App wird bei jedem Push auf `master` als Docker-Image gebaut und nach Docker Hub gepusht (`<dockerhub-user>/boiz-weekend-manager:latest`). Auf dem HTPC läuft sie hinter Traefik unter `boiz.dr-disco.eu`. Watchtower zieht neue Images automatisch nachts.
+
+**Einmalige Setup-Schritte:**
+
+1. Docker-Hub-Account anlegen, Access Token erzeugen.
+2. In den GitHub-Repo-Settings unter **Secrets and variables → Actions** zwei Secrets anlegen:
+   - `DOCKERHUB_USERNAME`
+   - `DOCKERHUB_TOKEN`
+3. Im Compose-File auf dem HTPC (`services/docker-compose-boiz-weekend.yml`) ggf. den Image-Namen an deinen Docker-Hub-User anpassen (Default: `wiggi93/boiz-weekend-manager:latest`).
+4. DNS-Record für `boiz.dr-disco.eu` auf den HTPC zeigen lassen.
+
 ## Projekt-Struktur
 
 ```
 Boiz-Weekend-Manager/
+├── Dockerfile                     # Multi-Stage: Vite-Build → nginx
+├── nginx.conf                     # SPA-Fallback + asset caching
+├── .github/workflows/docker.yml   # Build & push to Docker Hub
 ├── public/favicon.svg
 ├── src/
 │   ├── App.jsx                    # Hauptkomponente
