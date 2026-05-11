@@ -16,15 +16,16 @@
 }
 
 .ww-app {
-  min-height: 100vh;
+  height: 100dvh;
   background: radial-gradient(ellipse at top, #1a1a1f 0%, var(--bg) 60%);
   color: var(--text);
   font-family: 'Manrope', system-ui, sans-serif;
   max-width: 540px;
   margin: 0 auto;
-  padding-bottom: 90px;
   position: relative;
-  overflow-x: hidden;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .ww-display {
@@ -80,7 +81,16 @@
 @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 
 /* ============ Auth ============ */
-.ww-auth { padding: 32px 20px; }
+.ww-auth {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: max(32px, calc(env(safe-area-inset-top) + 20px)) 20px max(32px, env(safe-area-inset-bottom));
+  scrollbar-width: none;
+}
+.ww-auth::-webkit-scrollbar { display: none; }
 .ww-auth-header { padding: 24px 0 36px; border-bottom: 1px solid var(--border); margin-bottom: 28px; }
 .ww-date-row { display: flex; align-items: center; gap: 6px; color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.1em; }
 .ww-auth-prompt {
@@ -176,10 +186,11 @@
 
 /* ============ Top bar ============ */
 .ww-topbar {
-  position: sticky; top: 0; z-index: 20;
+  flex: 0 0 auto;
+  z-index: 20;
   background: rgba(10,10,11,0.85); backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
-  padding: 14px 20px;
+  padding: max(14px, env(safe-area-inset-top)) 20px 14px;
   display: flex; align-items: center; justify-content: space-between;
 }
 .ww-topbar-left { display: flex; align-items: center; gap: 12px; }
@@ -195,7 +206,16 @@
 .ww-icon-btn:hover { border-color: var(--amber); color: var(--amber); }
 
 /* ============ Main ============ */
-.ww-main { padding: 20px; }
+.ww-main {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 20px 20px calc(90px + env(safe-area-inset-bottom));
+  scrollbar-width: none;
+}
+.ww-main::-webkit-scrollbar { display: none; }
 
 /* ============ Dashboard ============ */
 .ww-event-banner {
@@ -407,8 +427,7 @@
 
 /* ============ Bottom nav ============ */
 .ww-bottomnav {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  max-width: 540px; margin: 0 auto;
+  position: absolute; bottom: 0; left: 0; right: 0;
   background: rgba(10,10,11,0.92); backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
   display: grid; grid-template-columns: repeat(3, 1fr);
