@@ -8,12 +8,12 @@ pb.autoCancellation(false);
 export const isAdmin = (u) => !!u && u.role === 'admin';
 
 export async function loadEvent() {
-  const list = await pb.collection('event').getList(1, 1, { sort: 'created' });
+  const list = await pb.collection('event').getList(1, 1);
   return list.items[0] || null;
 }
 
 export async function loadUsers() {
-  return pb.collection('users').getFullList({ sort: 'created' });
+  return pb.collection('users').getFullList();
 }
 
 export async function loadStats() {
