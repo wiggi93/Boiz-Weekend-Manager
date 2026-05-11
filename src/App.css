@@ -591,3 +591,79 @@
 
 .ww-counter.disabled .ww-counter-tap { cursor: not-allowed; opacity: 0.5; }
 .ww-counter.disabled .ww-counter-minus { opacity: 0.4; cursor: not-allowed; }
+
+/* ============ Placeholders: clearly distinct from real input ============ */
+.ww-input::placeholder,
+.ww-textarea::placeholder {
+  color: var(--muted-2);
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* ============ Flunkyball ============ */
+.ww-flunky-teams {
+  display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px;
+  align-items: stretch; margin-bottom: 14px;
+}
+.ww-flunky-team {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ww-flunky-team.mine { border-color: var(--amber); background: rgba(245,165,36,0.06); }
+.ww-flunky-team-head { display: flex; align-items: center; justify-content: space-between; }
+.ww-flunky-team-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; letter-spacing: 0.2em; color: var(--muted);
+}
+.ww-flunky-score {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 28px; line-height: 1; color: var(--amber);
+}
+.ww-flunky-roster { display: flex; flex-direction: column; gap: 4px; }
+.ww-flunky-player { font-size: 12px; }
+.ww-flunky-vs {
+  align-self: center;
+  font-family: 'Bebas Neue', sans-serif;
+  color: var(--muted-2); font-size: 18px; letter-spacing: 0.1em;
+}
+
+.ww-flunky-sets {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 6px;
+}
+.ww-flunky-set {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px 6px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.ww-flunky-set-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 0.2em; color: var(--muted);
+}
+.ww-flunky-set-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; width: 100%; }
+.ww-flunky-set-btn {
+  background: var(--card-2); border: 1px solid var(--border);
+  color: var(--text); padding: 6px 0;
+  border-radius: 3px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 14px; letter-spacing: 0.1em; cursor: pointer;
+}
+.ww-flunky-set-btn.won {
+  background: var(--amber); color: #0a0a0b; border-color: var(--amber);
+}
+.ww-flunky-set-result {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 16px; color: var(--text);
+}
+
+.ww-flunky-controls { display: flex; gap: 6px; margin-top: 10px; }
+
+.ww-flunky-assign { display: flex; flex-direction: column; gap: 6px; }
+.ww-flunky-assign-row {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 4px; padding: 8px 10px;
+}
+.ww-flunky-assign-btns { display: flex; gap: 4px; }
+.ww-mini-btn.active { background: var(--amber); color: #0a0a0b; border-color: var(--amber); }

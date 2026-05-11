@@ -13,6 +13,7 @@ import {
   listMyMemberships, listEventMembers, joinByCode, leaveEvent,
   loadEventStats, setMyCount, resetEventStats,
   updateMyProfile, setUserRole, deleteUser,
+  getFlunky, updateFlunky,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
 import { MODULES, moduleById } from './modules.js';
@@ -20,8 +21,26 @@ import './App.css';
 
 const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘'];
 
-const computePoints = (s, ev) =>
+const computeDrinkPoints = (s, ev) =>
   (s?.beer || 0) * (ev?.pointsPerBeer ?? 1) + (s?.mische || 0) * (ev?.pointsPerMische ?? 1);
+
+const teamOf = (userId, flunky) => {
+  if (!flunky) return null;
+  if ((flunky.teamA || []).includes(userId)) return 'A';
+  if ((flunky.teamB || []).includes(userId)) return 'B';
+  return null;
+};
+
+const computeFlunkyPoints = (userId, flunky) => {
+  if (!flunky) return 0;
+  const team = teamOf(userId, flunky);
+  if (!team) return 0;
+  const wins = (flunky.sets || []).filter(s => s.winner === team).length;
+  return wins * (flunky.pointsPerWin || 0);
+};
+
+const computeTotalPoints = (userId, s, ev, flunky) =>
+  computeDrinkPoints(s, ev) + computeFlunkyPoints(userId, flunky);
 
 // ============================================================
 // Root
@@ -35,6 +54,7 @@ export default function App() {
   const [currentEvent, setCurrentEvent] = useState(null);
   const [eventMembers, setEventMembers] = useState([]);
   const [statsMap, setStatsMap] = useState({});
+  const [flunky, setFlunky] = useState(null);
   const [allEvents, setAllEvents] = useState([]);
   const [view, setView] = useState('dashboard');
   const [authView, setAuthView] = useState('login');
@@ -61,17 +81,20 @@ export default function App() {
       setCurrentEvent(null);
       setEventMembers([]);
       setStatsMap({});
+      setFlunky(null);
       return;
     }
     try {
-      const [ev, members, stats] = await Promise.all([
+      const [ev, members, stats, fl] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
+        getFlunky(currentEventId),
       ]);
       setCurrentEvent(ev);
       setEventMembers(members);
       setStatsMap(stats);
+      setFlunky(fl);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -234,6 +257,14 @@ export default function App() {
   const admin = isEventAdmin(me, currentEvent);
   const modules = currentEvent.modules || ['drinks'];
   const drinksOn = modules.includes('drinks');
+  const flunkyOn = modules.includes('flunky');
+
+  const onFlunkyPatch = async (patch) => {
+    if (!flunky) return;
+    setFlunky(f => ({ ...f, ...patch }));
+    try { await updateFlunky(flunky.id, patch); }
+    catch (e) { console.warn('flunky update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
 
   if (!currentEvent.active && !admin) {
     return (
@@ -270,12 +301,13 @@ export default function App() {
           <Dashboard
             me={me} event={currentEvent} members={eventMembers}
             statsMap={statsMap} setStatsMap={setStatsMap}
-            drinksOn={drinksOn} active={currentEvent.active}
-            modules={modules}
+            drinksOn={drinksOn} flunkyOn={flunkyOn} flunky={flunky}
+            active={currentEvent.active} modules={modules}
+            admin={admin} onFlunkyPatch={onFlunkyPatch}
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} myId={me.id} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} myId={me.id} />
         )}
         {view === 'profile' && (
           <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
@@ -286,6 +318,8 @@ export default function App() {
                 event={currentEvent}
                 me={me}
                 members={eventMembers}
+                flunky={flunky}
+                onFlunkyPatch={onFlunkyPatch}
                 onSave={onSaveEvent}
                 onToggleActive={onToggleActive}
                 onResetCounters={onResetCounters}
@@ -637,7 +671,7 @@ function WaitingScreen({ event, onLeave }) {
 // Dashboard
 // ============================================================
 
-function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, active, modules }) {
+function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, flunkyOn, flunky, active, modules, admin, onFlunkyPatch }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -678,15 +712,15 @@ function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, active
         const u = m.expand?.user;
         if (!u) return null;
         const s = statsMap[u.id] || { beer: 0, mische: 0 };
-        return { ...u, beer: s.beer, mische: s.mische, points: computePoints(s, event) };
+        return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky) };
       })
       .filter(Boolean)
       .sort((a, b) => b.points - a.points);
-  }, [members, statsMap, event]);
+  }, [members, statsMap, event, flunky]);
 
   const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
   const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
-  const myPoints = computePoints(myStats, event);
+  const myPoints = computeTotalPoints(me.id, myStats, event, flunky);
 
   return (
     <div className="ww-dash">
@@ -736,7 +770,15 @@ function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, active
         </section>
       )}
 
-      {modules.filter(m => m !== 'drinks').map(id => {
+      {flunkyOn && flunky && (
+        <FlunkySection
+          flunky={flunky} members={members} me={me}
+          admin={admin} active={active}
+          onPatch={onFlunkyPatch}
+        />
+      )}
+
+      {modules.filter(m => m !== 'drinks' && m !== 'flunky').map(id => {
         const meta = moduleById(id);
         if (!meta) return null;
         return (
@@ -747,6 +789,109 @@ function Dashboard({ me, event, members, statsMap, setStatsMap, drinksOn, active
         );
       })}
     </div>
+  );
+}
+
+// ============================================================
+// Flunkyball dashboard section
+// ============================================================
+
+function FlunkySection({ flunky, members, me, admin, active, onPatch }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const teamA = (flunky.teamA || []).map(id => usersById[id]).filter(Boolean);
+  const teamB = (flunky.teamB || []).map(id => usersById[id]).filter(Boolean);
+  const setsTotal = flunky.setsTotal || 5;
+  const setsArr = Array.from({ length: setsTotal }, (_, i) => {
+    const n = i + 1;
+    return (flunky.sets || []).find(s => s.n === n) || { n, winner: null };
+  });
+  const winsA = setsArr.filter(s => s.winner === 'A').length;
+  const winsB = setsArr.filter(s => s.winner === 'B').length;
+  const myTeam = teamOf(me.id, flunky);
+
+  const setWinner = (n, team) => {
+    if (!admin) return;
+    const cur = (flunky.sets || []).filter(s => s.n !== n);
+    const existing = (flunky.sets || []).find(s => s.n === n);
+    const next = existing?.winner === team ? cur : [...cur, { n, winner: team }];
+    onPatch({ sets: next });
+  };
+
+  const noTeams = teamA.length === 0 && teamB.length === 0;
+
+  return (
+    <section className="ww-section">
+      <div className="ww-section-head"><h3>🎳 FLUNKYBALL</h3></div>
+
+      {noTeams ? (
+        <div className="ww-empty">Host muss Teams einteilen (Settings).</div>
+      ) : (
+        <>
+          <div className="ww-flunky-teams">
+            <div className={`ww-flunky-team ${myTeam === 'A' ? 'mine' : ''}`}>
+              <div className="ww-flunky-team-head">
+                <span className="ww-flunky-team-label">TEAM A</span>
+                <span className="ww-flunky-score">{winsA}</span>
+              </div>
+              <div className="ww-flunky-roster">
+                {teamA.map(u => (
+                  <span key={u.id} className="ww-flunky-player">
+                    {u.emoji || '🍺'} {u.displayName || u.email}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className="ww-flunky-vs">VS</div>
+            <div className={`ww-flunky-team ${myTeam === 'B' ? 'mine' : ''}`}>
+              <div className="ww-flunky-team-head">
+                <span className="ww-flunky-team-label">TEAM B</span>
+                <span className="ww-flunky-score">{winsB}</span>
+              </div>
+              <div className="ww-flunky-roster">
+                {teamB.map(u => (
+                  <span key={u.id} className="ww-flunky-player">
+                    {u.emoji || '🍺'} {u.displayName || u.email}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="ww-flunky-sets">
+            {setsArr.map(s => (
+              <div key={s.n} className="ww-flunky-set">
+                <div className="ww-flunky-set-label">SET {s.n}</div>
+                {admin && active ? (
+                  <div className="ww-flunky-set-actions">
+                    <button
+                      className={`ww-flunky-set-btn ${s.winner === 'A' ? 'won' : ''}`}
+                      onClick={() => setWinner(s.n, 'A')}
+                    >A</button>
+                    <button
+                      className={`ww-flunky-set-btn ${s.winner === 'B' ? 'won' : ''}`}
+                      onClick={() => setWinner(s.n, 'B')}
+                    >B</button>
+                  </div>
+                ) : (
+                  <div className="ww-flunky-set-result">
+                    {s.winner ? `🏆 ${s.winner}` : '—'}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+            {flunky.pointsPerWin} Punkte pro gewonnenem Set für jeden Spieler im Gewinner-Team
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -787,7 +932,7 @@ function rankBadge(i) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, myId }) {
+function CrewView({ members, statsMap, event, flunky, myId }) {
   return (
     <div className="ww-crew">
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({members.length})</h3></div>
@@ -796,7 +941,7 @@ function CrewView({ members, statsMap, event, myId }) {
           const u = m.expand?.user;
           if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
-          const points = computePoints(s, event);
+          const points = computeTotalPoints(u.id, s, event, flunky);
           return (
             <div key={u.id} className={`ww-crew-card ${u.id === myId ? 'me' : ''}`}>
               <div className="ww-crew-head">
@@ -861,7 +1006,7 @@ function ProfileView({ me, onSave, onLogout }) {
 // Event Settings (host)
 // ============================================================
 
-function EventSettingsView({ event, me, members, onSave, onToggleActive, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser, onBack }) {
+function EventSettingsView({ event, me, members, flunky, onFlunkyPatch, onSave, onToggleActive, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser, onBack }) {
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
   const [beerLabel, setBeerLabel] = useState(event.beerLabel || 'Bier');
@@ -939,6 +1084,10 @@ function EventSettingsView({ event, me, members, onSave, onToggleActive, onReset
         <Check size={20} /><span>SPEICHERN</span>
       </button>
 
+      {mods.includes('flunky') && flunky && (
+        <FlunkySettings flunky={flunky} members={members} onPatch={onFlunkyPatch} />
+      )}
+
       {isSiteAdmin(me) && (
         <div className="ww-section">
           <div className="ww-section-head"><Shield size={16} /><h3>USER MANAGEMENT (GLOBAL)</h3></div>
@@ -972,6 +1121,82 @@ function EventSettingsView({ event, me, members, onSave, onToggleActive, onReset
         <button className="ww-danger-btn red" onClick={onDeleteEvent}>
           <X size={14} /> Event endgültig löschen
         </button>
+      </div>
+    </div>
+  );
+}
+
+function FlunkySettings({ flunky, members, onPatch }) {
+  const [setsTotal, setSetsTotal] = useState(flunky.setsTotal || 5);
+  const [pointsPerWin, setPointsPerWin] = useState(flunky.pointsPerWin || 3);
+
+  useEffect(() => {
+    setSetsTotal(flunky.setsTotal || 5);
+    setPointsPerWin(flunky.pointsPerWin || 3);
+  }, [flunky.setsTotal, flunky.pointsPerWin]);
+
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const assignUser = (userId, team) => {
+    const a = (flunky.teamA || []).filter(id => id !== userId);
+    const b = (flunky.teamB || []).filter(id => id !== userId);
+    if (team === 'A') a.push(userId);
+    else if (team === 'B') b.push(userId);
+    onPatch({ teamA: a, teamB: b });
+  };
+
+  const shuffleTeams = () => {
+    const ids = members.map(m => m.expand?.user?.id).filter(Boolean);
+    const shuffled = ids.map(v => [Math.random(), v]).sort((x, y) => x[0] - y[0]).map(p => p[1]);
+    const mid = Math.ceil(shuffled.length / 2);
+    onPatch({ teamA: shuffled.slice(0, mid), teamB: shuffled.slice(mid) });
+  };
+
+  const clearTeams = () => onPatch({ teamA: [], teamB: [], sets: [] });
+
+  const saveConfig = () => onPatch({ setsTotal: Number(setsTotal), pointsPerWin: Number(pointsPerWin) });
+
+  return (
+    <div className="ww-section">
+      <div className="ww-section-head"><h3>🎳 FLUNKYBALL</h3></div>
+
+      <div className="ww-grid2">
+        <div>
+          <label className="ww-label">ANZAHL SÄTZE</label>
+          <input className="ww-input" type="number" min={1} max={20} value={setsTotal} onChange={e => setSetsTotal(e.target.value)} onBlur={saveConfig} />
+        </div>
+        <div>
+          <label className="ww-label">PKT / SIEG</label>
+          <input className="ww-input" type="number" min={0} max={100} value={pointsPerWin} onChange={e => setPointsPerWin(e.target.value)} onBlur={saveConfig} />
+        </div>
+      </div>
+
+      <div className="ww-flunky-controls">
+        <button className="ww-mini-btn" onClick={shuffleTeams}>🎲 Teams würfeln</button>
+        <button className="ww-mini-btn red" onClick={clearTeams}>↺ Teams + Sätze leeren</button>
+      </div>
+
+      <label className="ww-label" style={{ marginTop: 14 }}>MANUELLE ZUORDNUNG</label>
+      <div className="ww-flunky-assign">
+        {members.map(m => {
+          const u = m.expand?.user;
+          if (!u) return null;
+          const team = teamOf(u.id, flunky);
+          return (
+            <div key={u.id} className="ww-flunky-assign-row">
+              <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+              <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+              <div className="ww-flunky-assign-btns">
+                <button className={`ww-mini-btn ${team === 'A' ? 'active' : ''}`} onClick={() => assignUser(u.id, team === 'A' ? null : 'A')}>A</button>
+                <button className={`ww-mini-btn ${team === 'B' ? 'active' : ''}`} onClick={() => assignUser(u.id, team === 'B' ? null : 'B')}>B</button>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

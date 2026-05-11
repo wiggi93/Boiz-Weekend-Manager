@@ -127,6 +127,19 @@ export async function deleteUser(userId) {
   return pb.collection('users').delete(userId);
 }
 
+// ---- Flunkyball ----
+export async function getFlunky(eventId) {
+  try {
+    return await pb.collection('flunky').getFirstListItem(`event="${eventId}"`);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateFlunky(id, patch) {
+  return pb.collection('flunky').update(id, patch);
+}
+
 // ---- Realtime ----
 export async function subscribeEvent(eventId, onChange) {
   const safe = (p) => p.catch(() => () => {});
@@ -136,6 +149,9 @@ export async function subscribeEvent(eventId, onChange) {
       if (ev.record?.event === eventId) onChange(ev);
     })),
     safe(pb.collection('event_members').subscribe('*', (ev) => {
+      if (ev.record?.event === eventId) onChange(ev);
+    })),
+    safe(pb.collection('flunky').subscribe('*', (ev) => {
       if (ev.record?.event === eventId) onChange(ev);
     })),
     safe(pb.collection('users').subscribe('*', onChange)),
