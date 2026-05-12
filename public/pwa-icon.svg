@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="35%" r="80%">
+      <stop offset="0%" stop-color="#222226"/>
+      <stop offset="100%" stop-color="#0a0a0b"/>
+    </radialGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5a524"/>
+      <stop offset="100%" stop-color="#d68a0c"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="0" fill="url(#bg)"/>
+
+  <!-- Beer mug -->
+  <g transform="translate(118 110)">
+    <!-- handle (back) -->
+    <path d="M 220 60 q 70 0 70 70 v 100 q 0 70 -70 70 v -36 q 34 0 34 -34 v -100 q 0 -34 -34 -34 z" fill="url(#amber)"/>
+    <!-- mug body -->
+    <rect x="0" y="50" width="220" height="240" rx="20" fill="url(#amber)"/>
+    <!-- inner highlight -->
+    <rect x="22" y="76" width="20" height="190" rx="10" fill="#ffffff" opacity="0.30"/>
+    <!-- foam -->
+    <ellipse cx="38" cy="50" rx="40" ry="30" fill="#ffffff"/>
+    <ellipse cx="92" cy="38" rx="46" ry="32" fill="#ffffff"/>
+    <ellipse cx="150" cy="44" rx="42" ry="30" fill="#ffffff"/>
+    <ellipse cx="200" cy="50" rx="34" ry="26" fill="#ffffff"/>
+  </g>
+</svg>

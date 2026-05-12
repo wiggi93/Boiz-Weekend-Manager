@@ -44,6 +44,29 @@ npm run preview
 
 Die App läuft dann unter `http://localhost:5173/Boiz-Weekend-Manager/`.
 
+## Als App installieren (PWA)
+
+Die App ist eine **Progressive Web App** — auf Handy installieren, Icon kommt auf den Home-Bildschirm, läuft im Vollbild ohne Browser-Chrome.
+
+### iOS (Safari)
+1. `https://boiz.dr-disco.eu` in Safari öffnen
+2. Teilen-Symbol → **Zum Home-Bildschirm** → Hinzufügen
+
+### Android (Chrome)
+1. `https://boiz.dr-disco.eu` in Chrome öffnen
+2. Chrome zeigt nach kurzem Surfen einen **Install-Banner**, oder
+3. Menü (⋮) → **App installieren**
+
+Nach der Installation: eigenes App-Icon, Splash-Screen, Vollbild, automatische Updates beim nächsten Öffnen.
+
+### Icons neu bauen
+
+```bash
+npm run generate-pwa-assets
+```
+
+Source-Icon liegt in `public/pwa-icon.svg`.
+
 ## Architektur
 
 - **Frontend:** React + Vite, im Docker-Image als nginx-served Static Bundle
