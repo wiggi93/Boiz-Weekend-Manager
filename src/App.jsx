@@ -83,6 +83,28 @@ export default function App() {
 
   useEffect(() => pb.authStore.onChange(() => setMe(pb.authStore.record)), []);
 
+  // Refresh own auth record from server on boot so role changes made while
+  // we were offline (e.g., admin promoted us to host) are picked up.
+  useEffect(() => {
+    if (pb.authStore.isValid) {
+      pb.collection('users').authRefresh().catch(() => {
+        // token invalid / user deleted → clear so user re-logs
+        pb.authStore.clear();
+      });
+    }
+  }, []);
+
+  // Live subscription on own user record. When admin changes our role,
+  // pull a fresh auth record so the UI flips to host/admin mode immediately.
+  useEffect(() => {
+    if (!me?.id) return;
+    let unsub;
+    pb.collection('users').subscribe(me.id, () => {
+      pb.collection('users').authRefresh().catch(() => {});
+    }).then(fn => { unsub = fn; }).catch(() => {});
+    return () => { if (unsub) unsub(); };
+  }, [me?.id]);
+
   const refreshMemberships = useCallback(async () => {
     if (!pb.authStore.isValid) { setMyMemberships([]); return; }
     try { setMyMemberships(await listMyMemberships()); }
