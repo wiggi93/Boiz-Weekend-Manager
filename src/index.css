@@ -11,6 +11,9 @@ html, body, #root {
   height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -19,8 +22,21 @@ body {
   color: #f4f4f5;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   position: fixed;
   inset: 0;
+}
+
+input, textarea, [contenteditable] {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Disable double-tap-to-zoom on interactive elements */
+button, a, .ww-counter-tap, .ww-drink-tap, .ww-board-row.clickable, .ww-crew-head.clickable {
+  touch-action: manipulation;
 }
 
 button {

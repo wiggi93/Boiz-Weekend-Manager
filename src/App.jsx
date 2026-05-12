@@ -270,7 +270,9 @@ export default function App() {
       <div className="ww-app">
         <GrainOverlay />
         <TopBar me={me} admin={admin} eventName={currentEvent.name}
-          onSettings={() => setView('settings')} onSwitchEvent={() => setCurrentEventId(null)} />
+          settingsActive={false}
+          onToggleSettings={() => setView('settings')}
+          onSwitchEvent={() => setCurrentEventId(null)} />
         <main className="ww-main">
           <WaitingScreen event={currentEvent} onLeave={onLeaveEvent} />
         </main>
@@ -284,7 +286,9 @@ export default function App() {
       <GrainOverlay />
       <TopBar
         me={me} admin={admin} eventName={currentEvent.name} active={currentEvent.active}
-        onSettings={() => setView('settings')} onSwitchEvent={() => setCurrentEventId(null)}
+        settingsActive={view === 'settings'}
+        onToggleSettings={() => setView(v => v === 'settings' ? 'home' : 'settings')}
+        onSwitchEvent={() => setCurrentEventId(null)}
       />
       <main className="ww-main">
         {view === 'home' && (
@@ -324,7 +328,6 @@ export default function App() {
                   if (!confirm('User wirklich löschen?')) return;
                   await deleteUser(id); showToast('User gelöscht');
                 }}
-                onBack={() => setView('home')}
               />
             : <NotAllowed onBack={() => setView('home')} />
         )}
@@ -611,7 +614,7 @@ function AdminAllEvents({ events, onPick, onDelete, onToggleActive }) {
 // Top bar
 // ============================================================
 
-function TopBar({ me, admin, eventName, active, onSettings, onSwitchEvent }) {
+function TopBar({ me, admin, eventName, active, settingsActive, onToggleSettings, onSwitchEvent }) {
   return (
     <header className="ww-topbar">
       <div className="ww-topbar-left">
@@ -628,7 +631,13 @@ function TopBar({ me, admin, eventName, active, onSettings, onSwitchEvent }) {
         </div>
       </div>
       {admin && (
-        <button className="ww-icon-btn" onClick={onSettings} aria-label="Settings">
+        <button
+          className={`ww-icon-btn ${settingsActive ? 'active' : ''}`}
+          onClick={onToggleSettings}
+          aria-label={settingsActive ? 'Settings schließen' : 'Settings öffnen'}
+          aria-pressed={settingsActive}
+          title={settingsActive ? 'Zurück zum Event' : 'Event-Settings'}
+        >
           <Settings size={18} />
         </button>
       )}
@@ -1293,14 +1302,13 @@ function ProfileView({ me, onSave, onLogout }) {
 // Event Settings (host) — slim, module configs live in module drawers
 // ============================================================
 
-function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser, onBack }) {
+function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser }) {
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
   const copyCode = () => navigator.clipboard?.writeText?.(event.code);
 
   return (
     <div className="ww-form-wrap">
-      <button className="ww-back" onClick={onBack}><ArrowLeft size={18} /> zurück</button>
       <h2 className="ww-display ww-title-big">Event-Settings</h2>
 
       <div className="ww-code-box">
@@ -1383,7 +1391,7 @@ function NotAllowed({ onBack }) {
     <div className="ww-form-wrap">
       <h2 className="ww-display ww-title-big">Kein Zutritt</h2>
       <p className="ww-muted">Nur der Host darf hier rein.</p>
-      <button className="ww-big-cta" onClick={onBack}><ArrowLeft size={20} /><span>ZURÜCK</span></button>
+      {onBack && <button className="ww-big-cta" onClick={onBack}><ArrowLeft size={20} /><span>ZURÜCK</span></button>}
     </div>
   );
 }
