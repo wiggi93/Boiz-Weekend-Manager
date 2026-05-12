@@ -464,14 +464,16 @@
 
 /* ============ Auth tabs / errors ============ */
 .ww-auth-tabs {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  display: flex; gap: 2px; flex-wrap: wrap;
   background: var(--border); border-radius: 4px; padding: 2px;
   margin-bottom: 22px;
 }
 .ww-auth-tab {
+  flex: 1 1 auto; min-width: 56px;
   background: transparent; border: none; color: var(--muted);
-  padding: 12px; cursor: pointer; border-radius: 3px;
+  padding: 12px 8px; cursor: pointer; border-radius: 3px;
   font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 0.15em;
+  text-align: center;
 }
 .ww-auth-tab.active { background: var(--card-2); color: var(--amber); }
 .ww-err {
