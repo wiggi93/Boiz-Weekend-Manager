@@ -10,7 +10,7 @@ import {
   pb, isSiteAdmin, isHost, isEventAdmin,
   login, register, logout,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
-  listMyMemberships, listEventMembers, joinByCode, leaveEvent,
+  listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember,
   loadEventStats, setMyCount, resetEventStats,
   updateMyProfile, setUserRole, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
@@ -210,10 +210,8 @@ export default function App() {
 
   useEffect(() => { if (lobbyView === 'admin') refreshAllEvents(); }, [lobbyView, refreshAllEvents]);
 
-  // Load global user list when admin opens settings
-  useEffect(() => {
-    if (view === 'settings' && isSiteAdmin(me)) refreshAllUsers();
-  }, [view, me, refreshAllUsers]);
+  // Load global user list when admin opens the USER tab in the lobby
+  useEffect(() => { if (lobbyView === 'users') refreshAllUsers(); }, [lobbyView, refreshAllUsers]);
 
   // Reset module tab if currently active module gets disabled
   useEffect(() => {
@@ -326,7 +324,7 @@ export default function App() {
       <div className="ww-app">
         <GrainOverlay />
         <Lobby
-          me={me} memberships={myMemberships} allEvents={allEvents}
+          me={me} memberships={myMemberships} allEvents={allEvents} allUsers={allUsers}
           view={lobbyView} setView={setLobbyView}
           onPick={(id) => { setCurrentEventId(id); setModuleTab('overview'); }}
           onJoin={onJoin} onCreate={onCreateEvent} onLogout={onLogout}
@@ -337,6 +335,17 @@ export default function App() {
           }}
           onToggleActiveAdmin={async (id, next) => {
             await updateEvent(id, { active: next }); await refreshAllEvents();
+          }}
+          onSetUserRole={async (id, role) => {
+            await setUserRole(id, role);
+            await refreshAllUsers();
+            showToast(`Rolle: ${role.toUpperCase()}`);
+          }}
+          onDeleteUser={async (id) => {
+            if (!confirm('User wirklich löschen? Gilt global, alle Events.')) return;
+            await deleteUser(id);
+            await refreshAllUsers();
+            showToast('User gelöscht');
           }}
         />
         {toast && <Toast toast={toast} />}
@@ -397,7 +406,6 @@ export default function App() {
           admin
             ? <EventSettingsView
                 event={currentEvent} me={me} members={eventMembers}
-                allUsers={allUsers}
                 onSave={onSaveEvent} onToggleActive={onToggleActive}
                 onToggleModule={onToggleModule}
                 onResetCounters={onResetCounters}
@@ -408,16 +416,10 @@ export default function App() {
                   await refreshMemberships();
                   showToast('Event gelöscht');
                 }}
-                onSetUserRole={async (id, role) => {
-                  await setUserRole(id, role);
-                  await refreshAllUsers();
-                  showToast(role === 'admin' ? 'Zum Admin gemacht ⚡' : 'Auf Member zurückgesetzt');
-                }}
-                onDeleteUser={async (id) => {
-                  if (!confirm('User wirklich löschen? (gilt global, alle Events)')) return;
-                  await deleteUser(id);
-                  await refreshAllUsers();
-                  showToast('User gelöscht');
+                onKickMember={async (memberId) => {
+                  if (!confirm('User wirklich aus diesem Event entfernen?')) return;
+                  try { await kickMember(memberId); showToast('Aus Event entfernt'); }
+                  catch (e) { showToast('Konnte nicht entfernen 😬'); }
                 }}
               />
             : <NotAllowed onBack={() => setView('home')} />
@@ -557,8 +559,8 @@ function RegisterForm({ onSubmit }) {
 // ============================================================
 
 function Lobby({
-  me, memberships, allEvents, view, setView, onPick, onJoin, onCreate,
-  onLogout, onDeleteEvent, onToggleActiveAdmin,
+  me, memberships, allEvents, allUsers, view, setView, onPick, onJoin, onCreate,
+  onLogout, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser,
 }) {
   const siteAdmin = isSiteAdmin(me);
   const canCreate = isHost(me); // admin or host
@@ -574,6 +576,7 @@ function Lobby({
         <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
         {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
         {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
+        {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
       </div>
       {view === 'list' && (
         <div>
@@ -601,6 +604,45 @@ function Lobby({
       {view === 'admin' && siteAdmin && (
         <AdminAllEvents events={allEvents} onPick={onPick} onDelete={onDeleteEvent} onToggleActive={onToggleActiveAdmin} />
       )}
+      {view === 'users' && siteAdmin && (
+        <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} />
+      )}
+    </div>
+  );
+}
+
+function AdminAllUsers({ me, users, onSetRole, onDelete }) {
+  if (users.length === 0) return <p className="ww-muted">Lade…</p>;
+  return (
+    <div>
+      <p className="ww-muted" style={{ fontSize: 12 }}>
+        Alle registrierten User. Tap auf <b>M</b> / <b>H</b> / <b>A</b> setzt die Rolle:
+        Member kann nur joinen, Host darf Events erstellen, Admin alles.
+      </p>
+      <div className="ww-user-mgmt">
+        {users.filter(u => u.id !== me.id).map(u => (
+          <div key={u.id} className="ww-user-mgmt-row">
+            <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+            <span className="ww-user-mgmt-name">
+              {u.displayName || u.email}
+              {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
+              {u.role === 'host' && <span className="ww-host-badge"><Shield size={9} /> HOST</span>}
+            </span>
+            <div className="ww-role-pick" role="radiogroup" aria-label="Rolle">
+              {['member', 'host', 'admin'].map(r => (
+                <button
+                  key={r}
+                  className={`ww-role-btn ${(u.role || 'member') === r ? 'active' : ''}`}
+                  onClick={() => (u.role || 'member') !== r && onSetRole(u.id, r)}
+                  aria-pressed={(u.role || 'member') === r}
+                  title={r.toUpperCase()}
+                >{r[0].toUpperCase()}</button>
+              ))}
+            </div>
+            <button className="ww-mini-btn red" onClick={() => onDelete(u.id)} title="User löschen"><X size={12} /></button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1398,7 +1440,7 @@ function ProfileView({ me, onSave, onLogout }) {
 // Event Settings (host) — slim, module configs live in module drawers
 // ============================================================
 
-function EventSettingsView({ event, me, members, allUsers, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onSetUserRole, onDeleteUser }) {
+function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onKickMember }) {
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
   const copyCode = () => navigator.clipboard?.writeText?.(event.code);
@@ -1445,39 +1487,33 @@ function EventSettingsView({ event, me, members, allUsers, onSave, onToggleActiv
         })}
       </div>
 
-      {isSiteAdmin(me) && (
-        <div className="ww-section">
-          <div className="ww-section-head"><Shield size={16} /><h3>USER MANAGEMENT (GLOBAL)</h3></div>
-          <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
-            Alle registrierten User. Löschen entfernt den User aus allen Events.
-          </p>
-          <div className="ww-user-mgmt">
-            {allUsers.length === 0 && <div className="ww-muted" style={{ fontSize: 12 }}>Lade…</div>}
-            {allUsers.filter(u => u.id !== me.id).map(u => (
-              <div key={u.id} className="ww-user-mgmt-row">
+      <div className="ww-section">
+        <div className="ww-section-head"><Users size={16} /><h3>MITGLIEDER ({members.length})</h3></div>
+        <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
+          Wer ist in diesem Event drin. Entfernen wirft den User nur aus diesem Event.
+        </p>
+        <div className="ww-user-mgmt">
+          {members.map(m => {
+            const u = m.expand?.user; if (!u) return null;
+            const isMe = u.id === me.id;
+            return (
+              <div key={m.id} className="ww-user-mgmt-row">
                 <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
                 <span className="ww-user-mgmt-name">
-                  {u.displayName || u.email}
+                  {u.displayName || u.email}{isMe && <span className="ww-you">DU</span>}
                   {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
                   {u.role === 'host' && <span className="ww-host-badge"><Shield size={9} /> HOST</span>}
                 </span>
-                <div className="ww-role-pick" role="radiogroup" aria-label="Rolle">
-                  {['member', 'host', 'admin'].map(r => (
-                    <button
-                      key={r}
-                      className={`ww-role-btn ${(u.role || 'member') === r ? 'active' : ''}`}
-                      onClick={() => (u.role || 'member') !== r && onSetUserRole(u.id, r)}
-                      aria-pressed={(u.role || 'member') === r}
-                      title={r.toUpperCase()}
-                    >{r[0].toUpperCase()}</button>
-                  ))}
-                </div>
-                <button className="ww-mini-btn red" onClick={() => onDeleteUser(u.id)}><X size={12} /></button>
+                {!isMe && (
+                  <button className="ww-mini-btn red" onClick={() => onKickMember(m.id)} title="Aus Event entfernen">
+                    <X size={12} />
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
-      )}
+      </div>
 
       <div className="ww-danger">
         <div className="ww-danger-head"><AlertTriangle size={14} /> DANGER ZONE</div>

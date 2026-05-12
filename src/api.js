@@ -94,6 +94,10 @@ export async function leaveEvent(eventId, userId) {
   return pb.collection('event_members').delete(m.id);
 }
 
+export async function kickMember(memberRecordId) {
+  return pb.collection('event_members').delete(memberRecordId);
+}
+
 // ---- Stats ----
 export async function loadEventStats(eventId) {
   const list = await pb.collection('stats').getFullList({ filter: `event="${eventId}"` });
