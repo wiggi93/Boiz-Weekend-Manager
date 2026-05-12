@@ -62,6 +62,10 @@ export default function App() {
   const [flunky, setFlunky] = useState(null);
   const flunkyRef = useRef(null);
   useEffect(() => { flunkyRef.current = flunky; }, [flunky]);
+  // Tracks the latest optimistic values for my own drink stats so realtime
+  // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
+  // by DrinksBar on every bump; cleared on event switch.
+  const myOptRef = useRef({ beer: 0, mische: 0 });
   const [allEvents, setAllEvents] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [view, setView] = useState('home');
@@ -127,14 +131,82 @@ export default function App() {
     return () => { if (unsub) unsub(); };
   }, [me, refreshMemberships]);
 
-  useEffect(() => { refreshCurrentEvent(); }, [refreshCurrentEvent]);
+  useEffect(() => {
+    refreshCurrentEvent();
+    // reset own-optimistic baseline on event switch
+    myOptRef.current = { beer: 0, mische: 0 };
+  }, [refreshCurrentEvent]);
+
+  // Sync own-optimistic baseline from initial / refreshed stats
+  useEffect(() => {
+    const mine = statsMap[me?.id];
+    if (mine) myOptRef.current = { beer: mine.beer || 0, mische: mine.mische || 0 };
+  }, [statsMap, me?.id]);
+
+  // Stable realtime handler — applies records incrementally, no refetch storm.
+  const realtimeHandler = useCallback((collection, ev) => {
+    const rec = ev.record;
+    if (!rec) return;
+    const myId = pb.authStore.record?.id;
+
+    if (collection === 'events') {
+      if (ev.action === 'delete') { setCurrentEventId(null); return; }
+      setCurrentEvent(prev => {
+        const next = prev ? { ...prev, ...rec } : rec;
+        eventRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    if (collection === 'stats') {
+      if (ev.action === 'delete') {
+        setStatsMap(m => { const c = { ...m }; delete c[rec.user]; return c; });
+        return;
+      }
+      // Skip our own write echo if the broadcast matches what we optimistically already show.
+      // Different values would mean an external change (e.g., admin reset) — accept those.
+      if (rec.user === myId) {
+        const opt = myOptRef.current;
+        if ((rec.beer || 0) === opt.beer && (rec.mische || 0) === opt.mische) return;
+        myOptRef.current = { beer: rec.beer || 0, mische: rec.mische || 0 };
+      }
+      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0 } }));
+      return;
+    }
+
+    if (collection === 'flunky') {
+      setFlunky(prev => {
+        const next = prev ? { ...prev, ...rec } : rec;
+        flunkyRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    if (collection === 'event_members') {
+      // Members need expand=user; refetch members list once (one HTTP call,
+      // not the whole event payload).
+      const eid = eventRef.current?.id;
+      if (eid) listEventMembers(eid).then(setEventMembers).catch(() => {});
+      return;
+    }
+
+    if (collection === 'users') {
+      // Profile change: patch the embedded user in our members list.
+      setEventMembers(prev => prev.map(m =>
+        m.expand?.user?.id === rec.id ? { ...m, expand: { ...m.expand, user: { ...m.expand.user, ...rec } } } : m
+      ));
+      return;
+    }
+  }, []);
 
   useEffect(() => {
     if (!currentEventId) return;
     let unsub;
-    subscribeEvent(currentEventId, () => refreshCurrentEvent()).then(fn => { unsub = fn; });
+    subscribeEvent(currentEventId, realtimeHandler).then(fn => { unsub = fn; });
     return () => { if (unsub) unsub(); };
-  }, [currentEventId, refreshCurrentEvent]);
+  }, [currentEventId, realtimeHandler]);
 
   useEffect(() => { if (lobbyView === 'admin') refreshAllEvents(); }, [lobbyView, refreshAllEvents]);
 
@@ -686,7 +758,7 @@ function WaitingScreen({ event, onLeave }) {
 function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
   modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
-  onSaveEvent, onShowUserDetail,
+  onSaveEvent, onShowUserDetail, myOptRef,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   const enabledTabModules = MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
@@ -705,6 +777,7 @@ function HomeView({
           me={me} event={event} statsMap={statsMap} setStatsMap={setStatsMap}
           admin={admin} active={event.active}
           onOpenSettings={() => setModuleSettingsOpen('drinks')}
+          myOptRef={myOptRef}
         />
       )}
 
@@ -746,7 +819,7 @@ function HomeView({
 // Sticky drinks bar (replaces the old drinks tab)
 // ============================================================
 
-function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSettings }) {
+function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSettings, myOptRef }) {
   const myStats = statsMap[me.id] || { id: null, beer: 0, mische: 0 };
   const pendingWrite = useRef(null);
   const flushTimer = useRef(null);
@@ -768,6 +841,9 @@ function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSett
     const nextVal = Math.max(0, (cur[kind] || 0) + delta);
     const next = { ...cur, [kind]: nextVal };
     setStatsMap(m => ({ ...m, [me.id]: next }));
+    // Update the App-level ref so the realtime handler can recognise its
+    // own echo and skip it (no flicker on rapid tapping).
+    if (myOptRef) myOptRef.current = { beer: next.beer, mische: next.mische };
     scheduleWrite(cur.id, { beer: next.beer, mische: next.mische });
   };
 
