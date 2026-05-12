@@ -337,15 +337,30 @@ export default function App() {
             await updateEvent(id, { active: next }); await refreshAllEvents();
           }}
           onSetUserRole={async (id, role) => {
-            await setUserRole(id, role);
-            await refreshAllUsers();
-            showToast(`Rolle: ${role.toUpperCase()}`);
+            // Optimistic: update the row immediately so the picker reflects the click
+            setAllUsers(prev => prev.map(u => u.id === id ? { ...u, role } : u));
+            try {
+              await setUserRole(id, role);
+              showToast(`Rolle: ${role.toUpperCase()}`);
+              await refreshAllUsers();
+            } catch (e) {
+              const detail = e?.response?.data
+                ? Object.entries(e.response.data).map(([k, v]) => `${k}: ${v.message}`).join(' / ')
+                : (e?.response?.message || e?.message || 'unbekannt');
+              showToast(`Fehler: ${e?.status || ''} ${detail}`);
+              await refreshAllUsers();
+            }
           }}
           onDeleteUser={async (id) => {
             if (!confirm('User wirklich löschen? Gilt global, alle Events.')) return;
-            await deleteUser(id);
-            await refreshAllUsers();
-            showToast('User gelöscht');
+            try {
+              await deleteUser(id);
+              showToast('User gelöscht');
+              await refreshAllUsers();
+            } catch (e) {
+              showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`);
+              await refreshAllUsers();
+            }
           }}
         />
         {toast && <Toast toast={toast} />}
