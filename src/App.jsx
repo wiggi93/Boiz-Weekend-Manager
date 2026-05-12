@@ -55,9 +55,13 @@ export default function App() {
   const [myMemberships, setMyMemberships] = useState([]);
   const [currentEventId, setCurrentEventId] = useState(null);
   const [currentEvent, setCurrentEvent] = useState(null);
+  const eventRef = useRef(null);
+  useEffect(() => { eventRef.current = currentEvent; }, [currentEvent]);
   const [eventMembers, setEventMembers] = useState([]);
   const [statsMap, setStatsMap] = useState({});
   const [flunky, setFlunky] = useState(null);
+  const flunkyRef = useRef(null);
+  useEffect(() => { flunkyRef.current = flunky; }, [flunky]);
   const [allEvents, setAllEvents] = useState([]);
   const [view, setView] = useState('home');
   const [moduleTab, setModuleTab] = useState('overview');
@@ -158,22 +162,34 @@ export default function App() {
   };
 
   const onSaveEvent = async (patch) => {
-    if (!currentEvent) return;
-    await updateEvent(currentEvent.id, patch);
-    showToast('Event aktualisiert ✓');
+    const cur = eventRef.current;
+    if (!cur) return;
+    const nextEv = { ...cur, ...patch };
+    eventRef.current = nextEv; setCurrentEvent(nextEv);
+    try { await updateEvent(cur.id, patch); showToast('Event aktualisiert ✓'); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
   const onToggleActive = async () => {
-    if (!currentEvent) return;
-    await updateEvent(currentEvent.id, { active: !currentEvent.active });
-    showToast(currentEvent.active ? 'Event pausiert ⏸' : 'Event aktiv ▶');
+    const cur = eventRef.current;
+    if (!cur) return;
+    const next = !cur.active;
+    const nextEv = { ...cur, active: next };
+    eventRef.current = nextEv; setCurrentEvent(nextEv);
+    showToast(next ? 'Event aktiv ▶' : 'Event pausiert ⏸');
+    try { await updateEvent(cur.id, { active: next }); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
   const onToggleModule = async (id) => {
-    if (!currentEvent) return;
-    const mods = currentEvent.modules || [];
-    const next = mods.includes(id) ? mods.filter(x => x !== id) : [...mods, id];
-    await updateEvent(currentEvent.id, { modules: next });
+    const cur = eventRef.current;
+    if (!cur) return;
+    const mods = cur.modules || [];
+    const nextMods = mods.includes(id) ? mods.filter(x => x !== id) : [...mods, id];
+    const nextEv = { ...cur, modules: nextMods };
+    eventRef.current = nextEv; setCurrentEvent(nextEv);
+    try { await updateEvent(cur.id, { modules: nextMods }); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
   const onResetCounters = async () => {
@@ -200,9 +216,11 @@ export default function App() {
   };
 
   const onFlunkyPatch = async (patch) => {
-    if (!flunky) return;
-    setFlunky(f => ({ ...f, ...patch }));
-    try { await updateFlunky(flunky.id, patch); }
+    const cur = flunkyRef.current;
+    if (!cur) return;
+    const nextF = { ...cur, ...patch };
+    flunkyRef.current = nextF; setFlunky(nextF);
+    try { await updateFlunky(cur.id, patch); }
     catch (e) { console.warn('flunky update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
@@ -998,10 +1016,8 @@ function NewGameComposer({ members, usersById, onCancel, onStart }) {
   useEffect(() => { if (mode === 'random') shuffle(); /* eslint-disable-next-line */ }, []);
 
   const assign = (userId, team) => {
-    setTeamA(arr => arr.filter(id => id !== userId));
-    setTeamB(arr => arr.filter(id => id !== userId));
-    if (team === 'A') setTeamA(arr => [...arr.filter(id => id !== userId), userId]);
-    if (team === 'B') setTeamB(arr => [...arr.filter(id => id !== userId), userId]);
+    setTeamA(arr => team === 'A' ? [...arr.filter(id => id !== userId), userId] : arr.filter(id => id !== userId));
+    setTeamB(arr => team === 'B' ? [...arr.filter(id => id !== userId), userId] : arr.filter(id => id !== userId));
   };
 
   const teamOf_ = (id) => teamA.includes(id) ? 'A' : (teamB.includes(id) ? 'B' : null);
