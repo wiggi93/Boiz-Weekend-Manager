@@ -7,7 +7,14 @@ pb.autoCancellation(false);
 
 export const isSiteAdmin = (u) => !!u && u.role === 'admin';
 export const isHost = (u) => !!u && (u.role === 'admin' || u.role === 'host');
-export const isEventAdmin = (u, ev) => isSiteAdmin(u) || (!!u && !!ev && ev.createdBy === u.id);
+export const isEventCreator = (u, ev) => !!u && !!ev && ev.createdBy === u.id;
+export const isEventHost = (u, ev) =>
+  !!u && !!ev && Array.isArray(ev.hostUsers) && ev.hostUsers.includes(u.id);
+// Event-admin: anyone allowed to change live event state (start/pause,
+// modules, score games, kick). The original creator, anyone they
+// promoted to event-host, and the site admin.
+export const isEventAdmin = (u, ev) =>
+  isSiteAdmin(u) || isEventCreator(u, ev) || isEventHost(u, ev);
 
 // ---- Auth ----
 export async function login(email, password) {

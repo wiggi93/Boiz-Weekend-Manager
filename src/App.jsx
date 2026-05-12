@@ -4,10 +4,10 @@ import {
   RotateCcw, Home, User as UserIcon, Utensils,
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
-  Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag,
+  Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
 } from 'lucide-react';
 import {
-  pb, isSiteAdmin, isHost, isEventAdmin,
+  pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
   login, register, logout,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember,
@@ -457,6 +457,22 @@ export default function App() {
                   if (!confirm('User wirklich aus diesem Event entfernen?')) return;
                   try { await kickMember(memberId); showToast('Aus Event entfernt'); }
                   catch (e) { showToast('Konnte nicht entfernen 😬'); }
+                }}
+                onToggleEventHost={async (userId, makeHost) => {
+                  const cur = Array.isArray(currentEvent.hostUsers) ? currentEvent.hostUsers : [];
+                  const next = makeHost
+                    ? [...new Set([...cur, userId])]
+                    : cur.filter(id => id !== userId);
+                  // optimistic
+                  const nextEv = { ...currentEvent, hostUsers: next };
+                  eventRef.current = nextEv; setCurrentEvent(nextEv);
+                  try {
+                    await updateEvent(currentEvent.id, { hostUsers: next });
+                    showToast(makeHost ? 'Zum Event-Host gemacht 👑' : 'Event-Host-Rolle entzogen');
+                  } catch (e) {
+                    showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`);
+                    refreshCurrentEvent();
+                  }
                 }}
               />
             : <NotAllowed onBack={() => setView('home')} />
@@ -1477,7 +1493,8 @@ function ProfileView({ me, onSave, onLogout }) {
 // Event Settings (host) — slim, module configs live in module drawers
 // ============================================================
 
-function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onKickMember }) {
+function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onKickMember, onToggleEventHost }) {
+  const canManageHosts = isEventCreator(me, event) || isSiteAdmin(me);
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
   const copyCode = () => navigator.clipboard?.writeText?.(event.code);
@@ -1527,21 +1544,35 @@ function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggl
       <div className="ww-section">
         <div className="ww-section-head"><Users size={16} /><h3>MITGLIEDER ({members.length})</h3></div>
         <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
-          Wer ist in diesem Event drin. Entfernen wirft den User nur aus diesem Event.
+          {canManageHosts
+            ? 'Event-Host-Rolle gilt nur in diesem Event (start/pause, Module, scoren). Entfernen wirft den User nur aus diesem Event.'
+            : 'Wer ist in diesem Event drin.'}
         </p>
         <div className="ww-user-mgmt">
           {members.map(m => {
             const u = m.expand?.user; if (!u) return null;
             const isMe = u.id === me.id;
+            const isCreator = event.createdBy === u.id;
+            const isThisEventHost = Array.isArray(event.hostUsers) && event.hostUsers.includes(u.id);
             return (
               <div key={m.id} className="ww-user-mgmt-row">
                 <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
                 <span className="ww-user-mgmt-name">
                   {u.displayName || u.email}{isMe && <span className="ww-you">DU</span>}
+                  {isCreator && <span className="ww-host-badge"><Crown size={9} /> CREATOR</span>}
+                  {!isCreator && isThisEventHost && <span className="ww-event-host-badge"><Crown size={9} /> EVENT-HOST</span>}
                   {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
-                  {u.role === 'host' && <span className="ww-host-badge"><Shield size={9} /> HOST</span>}
                 </span>
-                {!isMe && (
+                {canManageHosts && !isMe && !isCreator && (
+                  <button
+                    className={`ww-mini-btn ${isThisEventHost ? 'active' : ''}`}
+                    onClick={() => onToggleEventHost(u.id, !isThisEventHost)}
+                    title={isThisEventHost ? 'Event-Host-Rolle entziehen' : 'Zum Event-Host machen'}
+                  >
+                    {isThisEventHost ? '→ Member' : '→ Host'}
+                  </button>
+                )}
+                {!isMe && !isCreator && (
                   <button className="ww-mini-btn red" onClick={() => onKickMember(m.id)} title="Aus Event entfernen">
                     <X size={12} />
                   </button>

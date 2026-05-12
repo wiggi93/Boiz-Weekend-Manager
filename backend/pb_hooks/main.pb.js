@@ -33,8 +33,8 @@ onRecordCreateRequest((e) => {
   e.next();
 }, "events");
 
-// Auto-add creator as member of the event they just created and seed
-// the per-event flunky state row.
+// Auto-add creator as member of the event they just created, mark
+// them as the initial event-host, and seed the per-event flunky row.
 onRecordAfterCreateSuccess((e) => {
   try {
     const creator = e.record.get("createdBy");
@@ -44,6 +44,12 @@ onRecordAfterCreateSuccess((e) => {
       m.set("event", e.record.id);
       m.set("user", creator);
       e.app.save(m);
+
+      const hosts = e.record.get("hostUsers");
+      if (!Array.isArray(hosts) || !hosts.includes(creator)) {
+        e.record.set("hostUsers", [creator]);
+        e.app.save(e.record);
+      }
     }
   } catch (err) {
     console.log("event member post-create:", err);
@@ -57,6 +63,35 @@ onRecordAfterCreateSuccess((e) => {
     e.app.save(f);
   } catch (err) {
     console.log("flunky seed:", err);
+  }
+  e.next();
+}, "events");
+
+// Privilege guard: only the event creator (or site admin) may change
+// `createdBy` or `hostUsers`. Event-hosts have other update rights
+// (active toggle, modules, settings) but not the ability to promote
+// themselves or unmask the creator.
+onRecordUpdateRequest((e) => {
+  try {
+    const auth = e.auth;
+    if (!auth) { e.next(); return; }
+    if (auth.get("role") === "admin") { e.next(); return; }
+
+    const original = e.app.findRecordById("events", e.record.id);
+    if (original.get("createdBy") === auth.id) { e.next(); return; }
+
+    // Non-creator, non-admin: lock these fields
+    const lockedFields = ["createdBy", "hostUsers"];
+    for (const f of lockedFields) {
+      const before = JSON.stringify(original.get(f) ?? null);
+      const after = JSON.stringify(e.record.get(f) ?? null);
+      if (before !== after) {
+        throw new BadRequestError(`field "${f}" can only be changed by the event creator`);
+      }
+    }
+  } catch (err) {
+    if (err && err.constructor && err.constructor.name === "BadRequestError") throw err;
+    console.log("event update guard:", err);
   }
   e.next();
 }, "events");

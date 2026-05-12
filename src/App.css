@@ -940,3 +940,12 @@
 }
 .ww-role-btn:hover { color: var(--text); }
 .ww-role-btn.active { background: var(--amber); color: #0a0a0b; font-weight: 700; }
+
+/* Per-event host badge (distinct from global HOST role) */
+.ww-event-host-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  margin-left: 8px; padding: 2px 6px; border-radius: 3px;
+  background: rgba(99,102,241,0.18); color: #a5b4fc;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px; letter-spacing: 0.15em; vertical-align: middle;
+}
