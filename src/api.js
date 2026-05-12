@@ -142,20 +142,19 @@ export async function updateFlunky(id, patch) {
 }
 
 // ---- Realtime ----
+// onChange receives (collection, event) so the consumer can dispatch
+// incremental updates instead of refetching everything.
 export async function subscribeEvent(eventId, onChange) {
   const safe = (p) => p.catch(() => () => {});
+  const wrap = (collection, predicate) => (ev) => {
+    if (!predicate || predicate(ev)) onChange(collection, ev);
+  };
   const unsubs = await Promise.all([
-    safe(pb.collection('events').subscribe(eventId, onChange)),
-    safe(pb.collection('stats').subscribe('*', (ev) => {
-      if (ev.record?.event === eventId) onChange(ev);
-    })),
-    safe(pb.collection('event_members').subscribe('*', (ev) => {
-      if (ev.record?.event === eventId) onChange(ev);
-    })),
-    safe(pb.collection('flunky').subscribe('*', (ev) => {
-      if (ev.record?.event === eventId) onChange(ev);
-    })),
-    safe(pb.collection('users').subscribe('*', onChange)),
+    safe(pb.collection('events').subscribe(eventId, wrap('events'))),
+    safe(pb.collection('stats').subscribe('*', wrap('stats', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('event_members').subscribe('*', wrap('event_members', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('flunky').subscribe('*', wrap('flunky', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('users').subscribe('*', wrap('users'))),
   ]);
   return () => unsubs.forEach(fn => { try { fn(); } catch (_) {} });
 }
