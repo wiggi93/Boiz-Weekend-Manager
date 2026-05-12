@@ -6,6 +6,7 @@ export const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);
 
 export const isSiteAdmin = (u) => !!u && u.role === 'admin';
+export const isHost = (u) => !!u && (u.role === 'admin' || u.role === 'host');
 export const isEventAdmin = (u, ev) => isSiteAdmin(u) || (!!u && !!ev && ev.createdBy === u.id);
 
 // ---- Auth ----
