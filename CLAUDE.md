@@ -27,16 +27,13 @@ API rules enforce that:
 ## Maintainer's working preferences
 
 1. **Act directly, no permission-asking.** Maintainer has said multiple times he wants commits/pushes/PRs/merges to happen autonomously. Don't ask "should I commit?" — just do it.
-2. **Always open a PR _yourself_ and enable auto-merge.** Don't leave a "click here to open a PR" link for the user. The full sequence at the end of every task is:
+2. **Just commit and push to your branch — that's it.** A separate workflow (`.github/workflows/auto-pr.yml`) detects every push to `claude/**`, builds, opens the PR, squash-merges to master, and triggers the docker deploy pipeline. You do NOT need to run `gh pr create` or `gh pr merge` yourself — those would fail anyway because the action's bash sandbox blocks all outbound network. End your task after `git push`; the rest is automatic. The full sequence is:
    ```bash
-   git checkout -b <type>/<short-slug>
+   git checkout -b <type>/<short-slug>   # or use whatever branch the action put you on
    git add -A
    git commit -m "..."
    git push -u origin HEAD
-   gh pr create --title "..." --body "..."
-   gh pr merge --squash --delete-branch --auto
    ```
-   `gh` is pre-authenticated via the `GH_TOKEN` env (no `gh auth login` needed). `--auto` waits for required CI checks; if none are required, merges immediately. If anything in the chain errors, fix and retry — do not just push to a branch and stop.
 3. **One feature = one branch + one PR**, even when working from `master`. Branch names: `feat/...`, `fix/...`, `chore/...`, `perf/...`, `ci/...`.
 4. **PR descriptions: include a Summary, What changed, and a Test plan checklist.** Look at recent PRs (`gh pr list --state merged --limit 5`) for the established format.
 5. **Speak German in user-facing strings and toasts**; commit messages and PR bodies in English.

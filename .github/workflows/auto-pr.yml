@@ -1,0 +1,55 @@
+name: Auto-PR for Claude branches
+
+# When the Claude Code Action pushes a branch matching claude/**, this
+# workflow runs OUTSIDE the action's network sandbox. It can call gh,
+# npm, and the GitHub API freely. Job: sanity-build, open the PR if
+# missing, squash-merge to master, then trigger the docker pipeline.
+
+on:
+  push:
+    branches: ['claude/**']
+
+jobs:
+  ship:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Sanity build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Open PR, merge, kick docker deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          BRANCH="${GITHUB_REF_NAME}"
+
+          EXISTING=$(gh pr list --head "$BRANCH" --base master --json number -q '.[0].number' || true)
+          if [ -z "$EXISTING" ]; then
+            TITLE=$(git log -1 --pretty=format:'%s')
+            BODY=$(git log -1 --pretty=format:'%b')
+            if [ -z "$BODY" ]; then BODY="Auto-PR for Claude branch \`$BRANCH\`."; fi
+            gh pr create --title "$TITLE" --body "$BODY" --base master --head "$BRANCH"
+          else
+            echo "PR #$EXISTING already exists for $BRANCH"
+          fi
+
+          gh pr merge "$BRANCH" --squash --delete-branch
+
+          # GITHUB_TOKEN-initiated pushes don't trigger downstream workflows,
+          # so dispatch the docker build + Watchtower deploy ourselves.
+          gh workflow run docker.yml --ref master
