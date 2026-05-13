@@ -97,6 +97,7 @@ export default function App() {
   const [allEvents, setAllEvents] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [view, setView] = useState('home');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [moduleTab, setModuleTab] = useState('overview');
   const [moduleSettingsOpen, setModuleSettingsOpen] = useState(null); // module id or null
   const [detailUserId, setDetailUserId] = useState(null);
@@ -512,12 +513,17 @@ export default function App() {
       <div className="ww-app">
         <GrainOverlay />
         <TopBar me={me} admin={admin} eventName={currentEvent.name}
-          settingsActive={false}
-          onToggleSettings={() => setView('settings')}
+          settingsActive={settingsOpen}
+          onToggleSettings={() => setSettingsOpen(v => !v)}
           onSwitchEvent={() => setCurrentEventId(null)} />
         <main className="ww-main">
           <WaitingScreen event={currentEvent} onLeave={onLeaveEvent} />
         </main>
+        {settingsOpen && (
+          <ModuleSettingsDrawer title="⚙️ Event-Settings" onClose={() => setSettingsOpen(false)}>
+            <NotAllowed onBack={() => setSettingsOpen(false)} />
+          </ModuleSettingsDrawer>
+        )}
         {toast && <Toast toast={toast} />}
       </div>
     );
@@ -528,8 +534,8 @@ export default function App() {
       <GrainOverlay />
       <TopBar
         me={me} admin={admin} eventName={currentEvent.name} active={currentEvent.active}
-        settingsActive={view === 'settings'}
-        onToggleSettings={() => setView(v => v === 'settings' ? 'home' : 'settings')}
+        settingsActive={settingsOpen}
+        onToggleSettings={() => setSettingsOpen(v => !v)}
         onSwitchEvent={() => setCurrentEventId(null)}
       />
       <main className="ww-main">
@@ -556,8 +562,11 @@ export default function App() {
         {view === 'profile' && (
           <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
         )}
-        {view === 'settings' && (
-          admin
+      </main>
+      <BottomNav view={view} setView={setView} />
+      {settingsOpen && (
+        <ModuleSettingsDrawer title="⚙️ Event-Settings" onClose={() => setSettingsOpen(false)}>
+          {admin
             ? <EventSettingsView
                 event={currentEvent} me={me} members={eventMembers}
                 customModules={customModules}
@@ -572,6 +581,7 @@ export default function App() {
                   setCurrentEventId(null);
                   await refreshMemberships();
                   showToast('Event gelöscht');
+                  setSettingsOpen(false);
                 }}
                 onKickMember={async (memberId) => {
                   if (!confirm('User wirklich aus diesem Event entfernen?')) return;
@@ -583,7 +593,6 @@ export default function App() {
                   const next = makeHost
                     ? [...new Set([...cur, userId])]
                     : cur.filter(id => id !== userId);
-                  // optimistic
                   const nextEv = { ...currentEvent, hostUsers: next };
                   eventRef.current = nextEv; setCurrentEvent(nextEv);
                   try {
@@ -595,10 +604,10 @@ export default function App() {
                   }
                 }}
               />
-            : <NotAllowed onBack={() => setView('home')} />
-        )}
-      </main>
-      {view !== 'settings' && <BottomNav view={view} setView={setView} />}
+            : <NotAllowed onBack={() => setSettingsOpen(false)} />
+          }
+        </ModuleSettingsDrawer>
+      )}
       {detailUserId && (
         <UserDetailDrawer
           user={(eventMembers.find(m => m.expand?.user?.id === detailUserId) || {}).expand?.user}
@@ -1547,7 +1556,13 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
     : (mod.participants || []).includes(me.id) ? me.id : null;
 
   const myWins = winsByEntrant[myEntrantId] || 0;
-  const myPts = myWins * (mod.pointsPerWin || 0);
+
+  // Only the entrant with the most sets (no tie) gets pointsPerWin
+  const maxSetsWon = Math.max(0, ...Object.values(winsByEntrant));
+  const matchWinnerId = maxSetsWon > 0 && Object.values(winsByEntrant).filter(v => v === maxSetsWon).length === 1
+    ? Object.keys(winsByEntrant).find(id => winsByEntrant[id] === maxSetsWon)
+    : null;
+  const myPts = myEntrantId && myEntrantId === matchWinnerId ? (mod.pointsPerWin || 0) : 0;
 
   const ready = entrants.length >= 2;
 
@@ -1663,7 +1678,7 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
               })}
             </div>
             <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
-              {mod.pointsPerWin || 0} Punkte pro gewonnenem Set für {mod.mode === 'teams' ? 'jeden Spieler im Sieger-Team' : 'den Sieger'}
+              {mod.pointsPerWin || 0} Punkte für {mod.mode === 'teams' ? 'das Team mit den meisten Sätzen' : 'den Spieler mit den meisten Sätzen'}
             </div>
           </section>
         </>
@@ -2127,9 +2142,7 @@ function EventSettingsView({ event, me, members, customModules, onCustomCreate, 
   const copyCode = () => navigator.clipboard?.writeText?.(event.code);
 
   return (
-    <div className="ww-form-wrap">
-      <h2 className="ww-display ww-title-big">Event-Settings</h2>
-
+    <div>
       <div className="ww-code-box">
         <div className="ww-muted" style={{ fontSize: 11, letterSpacing: '0.2em' }}>JOIN-CODE</div>
         <div className="ww-code-val">{event.code}</div>
