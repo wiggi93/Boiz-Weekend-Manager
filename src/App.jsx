@@ -356,9 +356,36 @@ export default function App() {
 
   const onResetCounters = async () => {
     if (!currentEvent) return;
-    if (!confirm('Alle Counter dieses Events zurücksetzen?')) return;
-    await resetEventStats(currentEvent.id);
-    showToast('Counter zurückgesetzt 🔄');
+    if (!confirm('Alle Counter und Modul-Spiele dieses Events zurücksetzen?')) return;
+    try {
+      await resetEventStats(currentEvent.id);
+      // Optimistic stats wipe so the UI updates before realtime echo arrives.
+      setStatsMap(prev => {
+        const next = {};
+        for (const k of Object.keys(prev)) next[k] = { ...prev[k], beer: 0, mische: 0 };
+        return next;
+      });
+      myOptRef.current = { beer: 0, mische: 0 };
+
+      const flunkyCur = flunkyRef.current;
+      if (flunkyCur?.id && (flunkyCur.games?.length || 0) > 0) {
+        const nextF = { ...flunkyCur, games: [] };
+        flunkyRef.current = nextF; setFlunky(nextF);
+        await updateFlunky(flunkyCur.id, { games: [] });
+      }
+
+      const mods = customModules || [];
+      if (mods.length) {
+        setCustomModules(prev => prev.map(c => ({ ...c, sets: [] })));
+        await Promise.all(mods.map(cm => updateCustomModule(cm.id, { sets: [] })));
+      }
+
+      showToast('Counter & Spiele zurückgesetzt 🔄');
+    } catch (e) {
+      console.warn('reset', e);
+      showToast('Reset fehlgeschlagen 😬');
+      refreshCurrentEvent();
+    }
   };
 
   const onLeaveEvent = async () => {
@@ -1279,6 +1306,11 @@ function FlunkyView({ me, flunky, members, admin, active, onPatch, onOpenSetting
     onPatch({ games: games.filter(g => g.id !== cur.id) });
   };
 
+  const deleteGame = (gameId) => {
+    if (!confirm('Dieses Spiel wirklich löschen?')) return;
+    onPatch({ games: games.filter(g => g.id !== gameId) });
+  };
+
   const startGame = (teamA, teamB) => {
     const next = [...games, {
       id: String(Date.now()),
@@ -1336,7 +1368,17 @@ function FlunkyView({ me, flunky, members, admin, active, onPatch, onOpenSetting
               <div key={g.id} className="ww-game-card">
                 <div className="ww-game-head">
                   <span className="ww-game-tag">SPIEL {finished.length - idx}</span>
-                  <span className="ww-game-result">🏆 Team {g.winner}</span>
+                  <div className="ww-game-head-right">
+                    <span className="ww-game-result">🏆 Team {g.winner}</span>
+                    {admin && (
+                      <button
+                        className="ww-icon-del"
+                        onClick={() => deleteGame(g.id)}
+                        title="Spiel löschen"
+                        aria-label="Spiel löschen"
+                      ><X size={11} /></button>
+                    )}
+                  </div>
                 </div>
                 <GameView game={g} usersById={usersById} myId={me.id} compact />
               </div>
@@ -1484,6 +1526,11 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
     onPatch({ sets: nextSets });
   };
 
+  const clearSet = (n) => {
+    if (!admin) return;
+    onPatch({ sets: (mod.sets || []).filter(s => s.n !== n) });
+  };
+
   // Score per entrant (team or participant)
   const entrants = mod.mode === 'teams'
     ? (mod.teams || [])
@@ -1573,19 +1620,42 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
                   <div key={s.n} className="ww-flunky-set">
                     <div className="ww-flunky-set-label">SET {s.n}</div>
                     {admin && active ? (
-                      <div className="ww-set-picker">
-                        {entrants.map((e, idx) => (
+                      <>
+                        <div className="ww-set-picker">
+                          {entrants.map((e, idx) => (
+                            <button
+                              key={e.id}
+                              className={`ww-flunky-set-btn ${s.winner === e.id ? 'won' : ''}`}
+                              style={s.winner === e.id ? { background: ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length], borderColor: ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length] } : {}}
+                              onClick={() => setWinner(s.n, e.id)}
+                            >{e.name.slice(0, 8)}</button>
+                          ))}
+                        </div>
+                        {s.winner && (
                           <button
-                            key={e.id}
-                            className={`ww-flunky-set-btn ${s.winner === e.id ? 'won' : ''}`}
-                            style={s.winner === e.id ? { background: ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length], borderColor: ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length] } : {}}
-                            onClick={() => setWinner(s.n, e.id)}
-                          >{e.name.slice(0, 8)}</button>
-                        ))}
-                      </div>
+                            className="ww-icon-del"
+                            onClick={() => clearSet(s.n)}
+                            title="Set leeren"
+                            aria-label="Set leeren"
+                          ><X size={10} /></button>
+                        )}
+                      </>
                     ) : (
                       <div className="ww-flunky-set-result">
-                        {winnerEntrant ? `🏆 ${winnerEntrant.name.slice(0, 10)}` : '—'}
+                        {winnerEntrant ? (
+                          <>
+                            🏆 {winnerEntrant.name.slice(0, 10)}
+                            {admin && (
+                              <button
+                                className="ww-icon-del"
+                                onClick={() => clearSet(s.n)}
+                                title="Set leeren"
+                                aria-label="Set leeren"
+                                style={{ marginLeft: 6 }}
+                              ><X size={10} /></button>
+                            )}
+                          </>
+                        ) : '—'}
                       </div>
                     )}
                   </div>
