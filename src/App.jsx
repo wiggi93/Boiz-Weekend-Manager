@@ -22,6 +22,9 @@ import './App.css';
 
 const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘'];
 
+// Pickable icons for custom competition modules. Bias toward sport / game / bar themes.
+const MODULE_ICONS = ['🎯','🎳','🎱','🏓','🏐','🏀','⚽','🎾','🏈','🥏','🥅','🏑','🏏','🏌️','🎮','🎲','🃏','🧠','🚣','🧗','🏇','🏎️','🛹','🚴','🏹','🪁','🥊','🥋','🍻','🍺','🥃','🔥'];
+
 const computeDrinkPoints = (s, ev) =>
   (s?.beer || 0) * (ev?.pointsPerBeer ?? 1) + (s?.mische || 0) * (ev?.pointsPerMische ?? 1);
 
@@ -602,16 +605,20 @@ function BootScreen() {
 function AuthScreen({ view, setView, onLogin, onRegister }) {
   return (
     <div className="ww-auth">
-      <div className="ww-auth-header">
-        <div className="ww-tag">BOIZ</div>
-        <h1 className="ww-display ww-title-huge">Weekend Manager</h1>
-        <p className="ww-muted">Logg dich ein oder mach einen Account.</p>
+      <div className="ww-auth-fixed">
+        <div className="ww-auth-header">
+          <div className="ww-tag">BOIZ</div>
+          <h1 className="ww-display ww-title-huge">Weekend Manager</h1>
+          <p className="ww-muted">Logg dich ein oder mach einen Account.</p>
+        </div>
+        <div className="ww-auth-tabs">
+          <button className={`ww-auth-tab ${view === 'login' ? 'active' : ''}`} onClick={() => setView('login')}>LOGIN</button>
+          <button className={`ww-auth-tab ${view === 'register' ? 'active' : ''}`} onClick={() => setView('register')}>NEU HIER</button>
+        </div>
       </div>
-      <div className="ww-auth-tabs">
-        <button className={`ww-auth-tab ${view === 'login' ? 'active' : ''}`} onClick={() => setView('login')}>LOGIN</button>
-        <button className={`ww-auth-tab ${view === 'register' ? 'active' : ''}`} onClick={() => setView('register')}>NEU HIER</button>
+      <div className="ww-auth-scroll">
+        {view === 'login' ? <LoginForm onSubmit={onLogin} /> : <RegisterForm onSubmit={onRegister} />}
       </div>
-      {view === 'login' ? <LoginForm onSubmit={onLogin} /> : <RegisterForm onSubmit={onRegister} />}
     </div>
   );
 }
@@ -709,18 +716,21 @@ function Lobby({
   const canCreate = isHost(me); // admin or host
   return (
     <div className="ww-auth">
-      <div className="ww-auth-header">
-        <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
-        <h1 className="ww-display ww-title-huge">Events</h1>
-        <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>
+      <div className="ww-auth-fixed">
+        <div className="ww-auth-header">
+          <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
+          <h1 className="ww-display ww-title-huge">Events</h1>
+          <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>
+        </div>
+        <div className="ww-auth-tabs">
+          <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
+          <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
+          {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
+          {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
+          {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
+        </div>
       </div>
-      <div className="ww-auth-tabs">
-        <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
-        <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
-        {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
-        {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
-        {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
-      </div>
+      <div className="ww-auth-scroll">
       {view === 'list' && (
         <div>
           {memberships.length === 0 && <p className="ww-muted">Noch keine Events. Joine eins per Code 🎟️</p>}
@@ -750,6 +760,7 @@ function Lobby({
       {view === 'users' && siteAdmin && (
         <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} />
       )}
+      </div>
     </div>
   );
 }
@@ -1640,18 +1651,21 @@ function CustomModuleSettings({ mod, members, onPatch, onDelete }) {
       <label className="ww-label">NAME</label>
       <input className="ww-input" value={name} onChange={e => setName(e.target.value)} onBlur={saveBasics} maxLength={60} />
 
-      <div className="ww-grid2">
-        <div>
-          <label className="ww-label">ICON</label>
-          <input className="ww-input" value={icon} onChange={e => setIcon(e.target.value)} onBlur={saveBasics} maxLength={4} placeholder="🎯" />
-        </div>
-        <div>
-          <label className="ww-label">MODUS</label>
-          <div className="ww-auth-tabs" style={{ marginBottom: 0 }}>
-            <button className={`ww-auth-tab ${mode === 'teams' ? 'active' : ''}`} onClick={() => { setMode('teams'); onPatch({ mode: 'teams' }); }}>TEAMS</button>
-            <button className={`ww-auth-tab ${mode === 'solo' ? 'active' : ''}`} onClick={() => { setMode('solo'); onPatch({ mode: 'solo' }); }}>SOLO</button>
-          </div>
-        </div>
+      <label className="ww-label">ICON</label>
+      <div className="ww-emoji-grid">
+        {MODULE_ICONS.map(e => (
+          <button
+            key={e} type="button"
+            className={`ww-emoji-btn ${icon === e ? 'sel' : ''}`}
+            onClick={() => { setIcon(e); onPatch({ icon: e }); }}
+          >{e}</button>
+        ))}
+      </div>
+
+      <label className="ww-label">MODUS</label>
+      <div className="ww-auth-tabs" style={{ marginBottom: 0 }}>
+        <button className={`ww-auth-tab ${mode === 'teams' ? 'active' : ''}`} onClick={() => { setMode('teams'); onPatch({ mode: 'teams' }); }}>TEAMS</button>
+        <button className={`ww-auth-tab ${mode === 'solo' ? 'active' : ''}`} onClick={() => { setMode('solo'); onPatch({ mode: 'solo' }); }}>SOLO</button>
       </div>
 
       <div className="ww-grid2">
