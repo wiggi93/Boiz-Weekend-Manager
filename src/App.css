@@ -826,6 +826,18 @@
   font-family: 'Bebas Neue', sans-serif;
   font-size: 14px; color: var(--amber); letter-spacing: 0.1em;
 }
+.ww-game-head-right { display: flex; align-items: center; gap: 8px; }
+.ww-icon-del {
+  width: 22px; height: 22px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 4px;
+  cursor: pointer;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.ww-icon-del:hover, .ww-icon-del:focus-visible {
+  background: var(--red); color: white; border-color: var(--red);
+}
 .ww-game-actions {
   display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
 }
