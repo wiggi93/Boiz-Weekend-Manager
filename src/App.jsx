@@ -1006,24 +1006,6 @@ function HomeView({
             <span className="ww-mod-tab-name">{t.name}</span>
           </button>
         ))}
-        {admin && (
-          <button
-            className="ww-mod-tab ww-mod-tab-add"
-            onClick={async () => {
-              const name = prompt('Name des neuen Moduls?', 'Cornhole');
-              if (!name) return;
-              await onCustomCreate({
-                name: name.trim(), icon: '🎯', mode: 'teams',
-                teamCount: 2, pointsPerWin: 3, totalSets: 3,
-                teams: [], participants: [], sets: [],
-              });
-            }}
-            title="Custom Modul hinzufügen"
-          >
-            <Plus size={14} />
-            <span className="ww-mod-tab-name">MODUL</span>
-          </button>
-        )}
       </div>
 
       {moduleTab === 'overview' && (
