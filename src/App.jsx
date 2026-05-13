@@ -271,11 +271,14 @@ export default function App() {
   // Load global user list when admin opens the USER tab in the lobby
   useEffect(() => { if (lobbyView === 'users') refreshAllUsers(); }, [lobbyView, refreshAllUsers]);
 
-  // Reset module tab if currently active module gets disabled
+  // Reset module tab if currently active static module gets disabled.
+  // Custom modules (cm-*) aren't in event.modules, they live in their own
+  // collection — leave them alone.
   useEffect(() => {
     if (!currentEvent) return;
     const mods = currentEvent.modules || [];
-    if (moduleTab !== 'overview' && !mods.includes(moduleTab)) setModuleTab('overview');
+    if (moduleTab === 'overview' || moduleTab.startsWith('cm-')) return;
+    if (!mods.includes(moduleTab)) setModuleTab('overview');
   }, [currentEvent, moduleTab]);
 
   // ---- Handlers ----
@@ -295,7 +298,23 @@ export default function App() {
   };
 
   const onCreateEvent = async (data) => {
-    const ev = await createEvent(data);
+    const { customModules: drafts = [], ...rest } = data;
+    const ev = await createEvent(rest);
+    // Best-effort: create the queued custom modules right after the event exists.
+    for (const d of drafts) {
+      try {
+        await createCustomModule({
+          name: d.name?.trim() || 'Modul',
+          icon: d.icon || '🎯',
+          mode: d.mode || 'teams',
+          teamCount: d.teamCount || 2,
+          pointsPerWin: d.pointsPerWin ?? 3,
+          totalSets: d.totalSets || 3,
+          teams: [], participants: [], sets: [],
+          event: ev.id,
+        });
+      } catch (e) { console.warn('custom module draft failed', e); }
+    }
     await refreshMemberships();
     setCurrentEventId(ev.id); setLobbyView('list');
     showToast(`Event "${ev.name}" erstellt — Code ${ev.code}`);
@@ -510,6 +529,9 @@ export default function App() {
           admin
             ? <EventSettingsView
                 event={currentEvent} me={me} members={eventMembers}
+                customModules={customModules}
+                onCustomCreate={onCustomCreate}
+                onCustomDelete={onCustomDelete}
                 onSave={onSaveEvent} onToggleActive={onToggleActive}
                 onToggleModule={onToggleModule}
                 onResetCounters={onResetCounters}
@@ -799,14 +821,28 @@ function CreateEventForm({ onSubmit }) {
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
   const [modules, setModules] = useState(['drinks']);
+  const [customModulesDraft, setCustomModulesDraft] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const valid = name.trim().length >= 2;
   const toggle = (id) => setModules(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
+
+  const addCustomDraft = () => {
+    const n = prompt('Name des Moduls?', 'Cornhole');
+    if (!n || !n.trim()) return;
+    const modeInput = (prompt('Modus? "teams" oder "solo"', 'teams') || 'teams').toLowerCase();
+    const mode = modeInput === 'solo' ? 'solo' : 'teams';
+    setCustomModulesDraft(arr => [...arr, {
+      name: n.trim(), icon: '🎯', mode,
+      teamCount: 2, pointsPerWin: 3, totalSets: 3,
+    }]);
+  };
+  const removeCustomDraft = (i) => setCustomModulesDraft(arr => arr.filter((_, j) => j !== i));
+
   const submit = async () => {
     if (!valid) return;
     setBusy(true); setErr('');
-    try { await onSubmit({ name: name.trim(), date, modules }); }
+    try { await onSubmit({ name: name.trim(), date, modules, customModules: customModulesDraft }); }
     catch (e) {
       const detail = e?.response?.data
         ? Object.entries(e.response.data).map(([k, v]) => `${k}: ${v.message}`).join(' / ')
@@ -831,7 +867,21 @@ function CreateEventForm({ onSubmit }) {
             {!m.available && <div className="ww-mod-soon">SOON</div>}
           </button>
         ))}
+        {customModulesDraft.map((cm, i) => (
+          <button key={`d-${i}`} className="ww-mod-card sel" onClick={() => removeCustomDraft(i)} title="Entfernen">
+            <div className="ww-mod-icon">{cm.icon}</div>
+            <div className="ww-mod-name">{cm.name}</div>
+            <div className="ww-mod-soon">{cm.mode.toUpperCase()} · ×</div>
+          </button>
+        ))}
+        <button className="ww-mod-card ww-mod-card-add" onClick={addCustomDraft} title="Custom Modul hinzufügen">
+          <Plus size={22} />
+          <div className="ww-mod-name">CUSTOM</div>
+        </button>
       </div>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Custom-Module sind Competitions wie Cornhole, Tischtennis usw. Teams oder Solo-Modus, Punkte und Sätze einstellbar — die genaue Konfiguration machst du nach dem Erstellen im Event.
+      </p>
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         <Plus size={20} /><span>{busy ? '...' : 'EVENT ERSTELLEN'}</span>
@@ -956,6 +1006,24 @@ function HomeView({
             <span className="ww-mod-tab-name">{t.name}</span>
           </button>
         ))}
+        {admin && (
+          <button
+            className="ww-mod-tab ww-mod-tab-add"
+            onClick={async () => {
+              const name = prompt('Name des neuen Moduls?', 'Cornhole');
+              if (!name) return;
+              await onCustomCreate({
+                name: name.trim(), icon: '🎯', mode: 'teams',
+                teamCount: 2, pointsPerWin: 3, totalSets: 3,
+                teams: [], participants: [], sets: [],
+              });
+            }}
+            title="Custom Modul hinzufügen"
+          >
+            <Plus size={14} />
+            <span className="ww-mod-tab-name">MODUL</span>
+          </button>
+        )}
       </div>
 
       {moduleTab === 'overview' && (
@@ -974,31 +1042,6 @@ function HomeView({
           onPatch={(patch) => onCustomPatch(activeCustom.id, patch)}
           onOpenSettings={() => setModuleSettingsOpen(moduleTab)}
         />
-      )}
-
-      {admin && (
-        <div className="ww-custom-add">
-          <button
-            className="ww-mini-btn"
-            onClick={async () => {
-              const name = prompt('Name des Moduls?', 'Cornhole');
-              if (!name) return;
-              await onCustomCreate({
-                name: name.trim(),
-                icon: '🎯',
-                mode: 'teams',
-                teamCount: 2,
-                pointsPerWin: 3,
-                totalSets: 3,
-                teams: [],
-                participants: [],
-                sets: [],
-              });
-            }}
-          >
-            <Plus size={12} /> Custom Modul
-          </button>
-        </div>
       )}
 
       {moduleSettingsOpen === 'drinks' && admin && (
@@ -1986,7 +2029,7 @@ function ProfileView({ me, onSave, onLogout }) {
 // Event Settings (host) — slim, module configs live in module drawers
 // ============================================================
 
-function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onKickMember, onToggleEventHost }) {
+function EventSettingsView({ event, me, members, customModules, onCustomCreate, onCustomDelete, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onKickMember, onToggleEventHost }) {
   const canManageHosts = isEventCreator(me, event) || isSiteAdmin(me);
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
@@ -2032,6 +2075,35 @@ function EventSettingsView({ event, me, members, onSave, onToggleActive, onToggl
             </button>
           );
         })}
+        {(customModules || []).map(cm => (
+          <div key={cm.id} className="ww-module-toggle on">
+            <span className="ww-mod-icon">{cm.icon || '🎯'}</span>
+            <span className="ww-mod-name">{cm.name}</span>
+            <span className="ww-muted" style={{ fontSize: 10, letterSpacing: '0.1em', marginRight: 4 }}>
+              {(cm.mode || 'teams').toUpperCase()}
+            </span>
+            <button className="ww-mini-btn red" onClick={() => onCustomDelete(cm.id)} title="Modul löschen">
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+        <button
+          className="ww-module-toggle"
+          onClick={async () => {
+            const name = prompt('Name des Moduls?', 'Cornhole');
+            if (!name || !name.trim()) return;
+            const modeInput = (prompt('Modus? "teams" oder "solo"', 'teams') || 'teams').toLowerCase();
+            const mode = modeInput === 'solo' ? 'solo' : 'teams';
+            await onCustomCreate({
+              name: name.trim(), icon: '🎯', mode,
+              teamCount: 2, pointsPerWin: 3, totalSets: 3,
+              teams: [], participants: [], sets: [],
+            });
+          }}
+        >
+          <span className="ww-mod-icon"><Plus size={20} /></span>
+          <span className="ww-mod-name">CUSTOM MODUL HINZUFÜGEN</span>
+        </button>
       </div>
 
       <div className="ww-section">
