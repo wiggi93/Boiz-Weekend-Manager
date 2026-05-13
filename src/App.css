@@ -456,6 +456,8 @@
   transition: color 0.15s, background 0.15s;
 }
 .ww-nav-btn.active { color: var(--amber); background: rgba(245,165,36,0.08); }
+.ww-nav-btn-danger:hover, .ww-nav-btn-danger:active { color: #ef4444; background: rgba(239,68,68,0.08); }
+.ww-auth--with-nav .ww-auth-scroll { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 
 /* ============ Toast ============ */
 .ww-toast {

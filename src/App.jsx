@@ -434,6 +434,7 @@ export default function App() {
           view={lobbyView} setView={setLobbyView}
           onPick={(id) => { setCurrentEventId(id); setModuleTab('overview'); }}
           onJoin={onJoin} onCreate={onCreateEvent} onLogout={onLogout}
+          onSaveProfile={onSaveProfile}
           onRefreshAll={refreshAllEvents}
           onDeleteEvent={async (id) => {
             if (!confirm('Event wirklich löschen?')) return;
@@ -710,58 +711,82 @@ function RegisterForm({ onSubmit }) {
 
 function Lobby({
   me, memberships, allEvents, allUsers, view, setView, onPick, onJoin, onCreate,
-  onLogout, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser,
+  onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser,
 }) {
+  const [section, setSection] = useState('events');
   const siteAdmin = isSiteAdmin(me);
-  const canCreate = isHost(me); // admin or host
+  const canCreate = isHost(me);
   return (
-    <div className="ww-auth">
-      <div className="ww-auth-fixed">
-        <div className="ww-auth-header">
-          <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
-          <h1 className="ww-display ww-title-huge">Events</h1>
-          <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>
-        </div>
-        <div className="ww-auth-tabs">
-          <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
-          <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
-          {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
-          {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
-          {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
-        </div>
-      </div>
-      <div className="ww-auth-scroll">
-      {view === 'list' && (
-        <div>
-          {memberships.length === 0 && <p className="ww-muted">Noch keine Events. Joine eins per Code 🎟️</p>}
-          <div className="ww-user-grid">
-            {memberships.map(m => {
-              const ev = m.expand?.event;
-              if (!ev) return null;
-              return (
-                <button key={m.id} className="ww-user-card" onClick={() => onPick(ev.id)}>
-                  <div className="ww-user-emoji">{ev.active ? '🟢' : '⏸'}</div>
-                  <div>
-                    <div className="ww-user-name">{ev.name}</div>
-                    <div className="ww-muted" style={{ fontSize: 11 }}>{formatDate(ev.date)} · CODE {ev.code}</div>
-                  </div>
-                </button>
-              );
-            })}
+    <div className="ww-auth ww-auth--with-nav">
+      {section === 'events' && (
+        <div className="ww-auth-fixed">
+          <div className="ww-auth-header">
+            <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
+            <h1 className="ww-display ww-title-huge">Events</h1>
+            <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>
           </div>
-          <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Ausloggen</button>
+          <div className="ww-auth-tabs">
+            <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
+            <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
+            {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
+            {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
+            {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
+          </div>
         </div>
       )}
-      {view === 'join' && <JoinForm onSubmit={onJoin} />}
-      {view === 'create' && canCreate && <CreateEventForm onSubmit={onCreate} />}
-      {view === 'admin' && siteAdmin && (
-        <AdminAllEvents events={allEvents} onPick={onPick} onDelete={onDeleteEvent} onToggleActive={onToggleActiveAdmin} />
-      )}
-      {view === 'users' && siteAdmin && (
-        <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} />
-      )}
+      <div className="ww-auth-scroll">
+        {section === 'events' && (
+          <>
+            {view === 'list' && (
+              <div>
+                {memberships.length === 0 && <p className="ww-muted">Noch keine Events. Joine eins per Code 🎟️</p>}
+                <div className="ww-user-grid">
+                  {memberships.map(m => {
+                    const ev = m.expand?.event;
+                    if (!ev) return null;
+                    return (
+                      <button key={m.id} className="ww-user-card" onClick={() => onPick(ev.id)}>
+                        <div className="ww-user-emoji">{ev.active ? '🟢' : '⏸'}</div>
+                        <div>
+                          <div className="ww-user-name">{ev.name}</div>
+                          <div className="ww-muted" style={{ fontSize: 11 }}>{formatDate(ev.date)} · CODE {ev.code}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {view === 'join' && <JoinForm onSubmit={onJoin} />}
+            {view === 'create' && canCreate && <CreateEventForm onSubmit={onCreate} />}
+            {view === 'admin' && siteAdmin && (
+              <AdminAllEvents events={allEvents} onPick={onPick} onDelete={onDeleteEvent} onToggleActive={onToggleActiveAdmin} />
+            )}
+            {view === 'users' && siteAdmin && (
+              <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} />
+            )}
+          </>
+        )}
+        {section === 'profile' && <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />}
       </div>
+      <LobbyNav section={section} setSection={setSection} onLogout={onLogout} />
     </div>
+  );
+}
+
+function LobbyNav({ section, setSection, onLogout }) {
+  return (
+    <nav className="ww-bottomnav">
+      <button className={`ww-nav-btn ${section === 'events' ? 'active' : ''}`} onClick={() => setSection('events')}>
+        <Home size={20} /><span>Events</span>
+      </button>
+      <button className={`ww-nav-btn ${section === 'profile' ? 'active' : ''}`} onClick={() => setSection('profile')}>
+        <UserIcon size={20} /><span>Profil</span>
+      </button>
+      <button className="ww-nav-btn ww-nav-btn-danger" onClick={onLogout}>
+        <LogOut size={20} /><span>Logout</span>
+      </button>
+    </nav>
   );
 }
 
