@@ -11,14 +11,15 @@ on:
     types: [opened, assigned]
 
 jobs:
-  claude:
-    # Only run for the repo owner so randos can't burn API credits.
+  # Default path: uses the OAuth token (counts against the Claude.ai Pro/Max
+  # subscription). Triggered by @claude but NOT by @claude-api.
+  claude-oauth:
     if: |
       github.event.sender.login == github.repository_owner && (
-        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '@claude-api')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && !contains(github.event.comment.body, '@claude-api')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && !contains(github.event.review.body, '@claude-api')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && !contains(github.event.issue.body, '@claude-api') && !contains(github.event.issue.title, '@claude-api'))
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -29,21 +30,46 @@ jobs:
       actions: read
       id-token: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 1
-
-      - name: Run Claude
-        uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@v1
         with:
-          # Prefer the Claude.ai OAuth token (counts against your Pro/Max
-          # subscription) if set; otherwise fall back to the direct API key.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_tools: |
+            Bash(gh pr *)
+            Bash(gh issue *)
+            Bash(gh run *)
+            Bash(gh workflow *)
+            Bash(git *)
+            Bash(npm *)
+
+  # Fallback path: uses the pay-per-use Anthropic API key (charged against
+  # the $20 credit balance). Triggered explicitly by @claude-api.
+  claude-api:
+    if: |
+      github.event.sender.login == github.repository_owner && (
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude-api')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude-api')) ||
+        (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude-api')) ||
+        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude-api') || contains(github.event.issue.title, '@claude-api')))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: anthropics/claude-code-action@v1
+        with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Default model is fine. Override here if you want a specific one.
-          # model: claude-sonnet-4-5
-          # Allow Claude to use the gh CLI so it can open and auto-merge PRs.
+          trigger_phrase: '@claude-api'
           allowed_tools: |
             Bash(gh pr *)
             Bash(gh issue *)
