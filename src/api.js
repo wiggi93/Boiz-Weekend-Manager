@@ -152,6 +152,26 @@ export async function updateFlunky(id, patch) {
   return pb.collection('flunky').update(id, patch);
 }
 
+// ---- Custom modules ----
+export async function listCustomModules(eventId) {
+  return pb.collection('custom_modules').getFullList({
+    filter: `event="${eventId}"`,
+    sort: 'created',
+  });
+}
+
+export async function createCustomModule(data) {
+  return pb.collection('custom_modules').create(data);
+}
+
+export async function updateCustomModule(id, patch) {
+  return pb.collection('custom_modules').update(id, patch);
+}
+
+export async function deleteCustomModule(id) {
+  return pb.collection('custom_modules').delete(id);
+}
+
 // ---- Realtime ----
 // onChange receives (collection, event) so the consumer can dispatch
 // incremental updates instead of refetching everything.
@@ -165,6 +185,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('stats').subscribe('*', wrap('stats', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('event_members').subscribe('*', wrap('event_members', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('flunky').subscribe('*', wrap('flunky', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('custom_modules').subscribe('*', wrap('custom_modules', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('users').subscribe('*', wrap('users'))),
   ]);
   return () => unsubs.forEach(fn => { try { fn(); } catch (_) {} });
