@@ -14,6 +14,7 @@ import {
   loadEventStats, setMyCount, resetEventStats,
   updateMyProfile, setUserRole, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
+  listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
 import { MODULES, moduleById } from './modules.js';
@@ -42,8 +43,31 @@ const computeFlunkyPoints = (userId, flunky) => {
   return finishedGames(flunky).reduce((sum, g) =>
     teamOfInGame(userId, g) === g.winner ? sum + ppw : sum, 0);
 };
-const computeTotalPoints = (userId, s, ev, flunky) =>
-  computeDrinkPoints(s, ev) + computeFlunkyPoints(userId, flunky);
+
+const computeCustomPoints = (userId, customModules) => {
+  if (!customModules?.length) return 0;
+  let total = 0;
+  for (const cm of customModules) {
+    const ppw = cm.pointsPerWin || 0;
+    const sets = cm.sets || [];
+    if (cm.mode === 'teams') {
+      const teams = cm.teams || [];
+      for (const s of sets) {
+        if (!s.winner) continue;
+        const t = teams.find(x => x.id === s.winner);
+        if (t && Array.isArray(t.members) && t.members.includes(userId)) total += ppw;
+      }
+    } else {
+      for (const s of sets) {
+        if (s.winner === userId) total += ppw;
+      }
+    }
+  }
+  return total;
+};
+
+const computeTotalPoints = (userId, s, ev, flunky, customModules) =>
+  computeDrinkPoints(s, ev) + computeFlunkyPoints(userId, flunky) + computeCustomPoints(userId, customModules);
 
 // ============================================================
 // Root
@@ -62,6 +86,7 @@ export default function App() {
   const [flunky, setFlunky] = useState(null);
   const flunkyRef = useRef(null);
   useEffect(() => { flunkyRef.current = flunky; }, [flunky]);
+  const [customModules, setCustomModules] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
   // by DrinksBar on every bump; cleared on event switch.
@@ -113,17 +138,18 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setCustomModules([]);
       return;
     }
     try {
-      const [ev, members, stats, fl] = await Promise.all([
+      const [ev, members, stats, fl, cms] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
         getFlunky(currentEventId),
+        listCustomModules(currentEventId),
       ]);
-      setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats); setFlunky(fl);
+      setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats); setFlunky(fl); setCustomModules(cms);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -202,6 +228,16 @@ export default function App() {
         const next = prev ? { ...prev, ...rec } : rec;
         flunkyRef.current = next;
         return next;
+      });
+      return;
+    }
+
+    if (collection === 'custom_modules') {
+      setCustomModules(prev => {
+        if (ev.action === 'delete') return prev.filter(c => c.id !== rec.id);
+        const idx = prev.findIndex(c => c.id === rec.id);
+        if (idx === -1) return [...prev, rec];
+        const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
       });
       return;
     }
@@ -328,6 +364,32 @@ export default function App() {
     catch (e) { console.warn('flunky update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
+  // ---- Custom modules ----
+  const onCustomCreate = async (data) => {
+    try {
+      await createCustomModule({ ...data, event: currentEventId });
+      showToast('Modul erstellt 🎯');
+    } catch (e) {
+      showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`);
+    }
+  };
+
+  const onCustomPatch = async (id, patch) => {
+    // optimistic
+    setCustomModules(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+    try { await updateCustomModule(id, patch); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
+  const onCustomDelete = async (id) => {
+    if (!confirm('Modul wirklich löschen?')) return;
+    try {
+      await deleteCustomModule(id);
+      setCustomModules(prev => prev.filter(c => c.id !== id));
+      showToast('Modul gelöscht');
+    } catch (e) { showToast('Fehler 😬'); }
+  };
+
   // ---- Render ----
   if (!booted) return <BootScreen />;
 
@@ -426,15 +488,20 @@ export default function App() {
             me={me} admin={admin} event={currentEvent}
             members={eventMembers} statsMap={statsMap} setStatsMap={setStatsMap}
             flunky={flunky} onFlunkyPatch={onFlunkyPatch}
+            customModules={customModules}
+            onCustomCreate={onCustomCreate}
+            onCustomPatch={onCustomPatch}
+            onCustomDelete={onCustomDelete}
             modules={modules}
             moduleTab={moduleTab} setModuleTab={setModuleTab}
             moduleSettingsOpen={moduleSettingsOpen} setModuleSettingsOpen={setModuleSettingsOpen}
             onSaveEvent={onSaveEvent}
             onShowUserDetail={setDetailUserId}
+            myOptRef={myOptRef}
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} myId={me.id} onShowUserDetail={setDetailUserId} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} customModules={customModules} myId={me.id} onShowUserDetail={setDetailUserId} />
         )}
         {view === 'profile' && (
           <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
@@ -485,6 +552,7 @@ export default function App() {
           stats={statsMap[detailUserId]}
           event={currentEvent}
           flunky={flunky}
+          customModules={customModules}
           isMe={detailUserId === me.id}
           onClose={() => setDetailUserId(null)}
         />
@@ -852,13 +920,18 @@ function WaitingScreen({ event, onLeave }) {
 
 function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
+  customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   const enabledTabModules = MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
-  const tabs = [{ id: 'overview', name: 'Stand', icon: '📊' }, ...enabledTabModules];
+  const customTabs = (customModules || []).map(cm => ({ id: `cm-${cm.id}`, name: cm.name || 'Modul', icon: cm.icon || '🎯', cm }));
+  const tabs = [{ id: 'overview', name: 'Stand', icon: '📊' }, ...enabledTabModules, ...customTabs];
   const drinksOn = modules.includes('drinks');
+  const activeCustom = moduleTab?.startsWith?.('cm-')
+    ? customModules.find(c => `cm-${c.id}` === moduleTab)
+    : null;
 
   return (
     <div className="ww-home">
@@ -886,7 +959,7 @@ function HomeView({
       </div>
 
       {moduleTab === 'overview' && (
-        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} onShowUserDetail={onShowUserDetail} />
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} customModules={customModules} onShowUserDetail={onShowUserDetail} />
       )}
       {moduleTab === 'flunky' && flunky && (
         <FlunkyView
@@ -894,6 +967,38 @@ function HomeView({
           onPatch={onFlunkyPatch}
           onOpenSettings={() => setModuleSettingsOpen('flunky')}
         />
+      )}
+      {activeCustom && (
+        <CustomModuleView
+          me={me} mod={activeCustom} members={members} admin={admin} active={event.active}
+          onPatch={(patch) => onCustomPatch(activeCustom.id, patch)}
+          onOpenSettings={() => setModuleSettingsOpen(moduleTab)}
+        />
+      )}
+
+      {admin && (
+        <div className="ww-custom-add">
+          <button
+            className="ww-mini-btn"
+            onClick={async () => {
+              const name = prompt('Name des Moduls?', 'Cornhole');
+              if (!name) return;
+              await onCustomCreate({
+                name: name.trim(),
+                icon: '🎯',
+                mode: 'teams',
+                teamCount: 2,
+                pointsPerWin: 3,
+                totalSets: 3,
+                teams: [],
+                participants: [],
+                sets: [],
+              });
+            }}
+          >
+            <Plus size={12} /> Custom Modul
+          </button>
+        </div>
       )}
 
       {moduleSettingsOpen === 'drinks' && admin && (
@@ -906,6 +1011,26 @@ function HomeView({
           <FlunkyLiveSettings flunky={flunky} onPatch={onFlunkyPatch} />
         </ModuleSettingsDrawer>
       )}
+      {moduleSettingsOpen?.startsWith?.('cm-') && admin && (() => {
+        const cm = customModules.find(c => `cm-${c.id}` === moduleSettingsOpen);
+        if (!cm) return null;
+        return (
+          <ModuleSettingsDrawer
+            title={`${cm.icon || '🎯'} ${cm.name} — Live Settings`}
+            onClose={() => setModuleSettingsOpen(null)}
+          >
+            <CustomModuleSettings
+              mod={cm} members={members}
+              onPatch={(patch) => onCustomPatch(cm.id, patch)}
+              onDelete={() => {
+                onCustomDelete(cm.id);
+                setModuleSettingsOpen(null);
+                setModuleTab('overview');
+              }}
+            />
+          </ModuleSettingsDrawer>
+        );
+      })()}
     </div>
   );
 }
@@ -985,16 +1110,16 @@ function DrinkPill({ emoji, label, count, disabled, onInc, onDec }) {
 // Overview (leaderboard / standings)
 // ============================================================
 
-function OverviewView({ me, event, members, statsMap, flunky, onShowUserDetail }) {
+function OverviewView({ me, event, members, statsMap, flunky, customModules, onShowUserDetail }) {
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
       const s = statsMap[u.id] || { beer: 0, mische: 0 };
-      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky) };
+      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky, customModules) };
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points),
-    [members, statsMap, event, flunky]);
+    [members, statsMap, event, flunky, customModules]);
 
   const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
   const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
@@ -1266,6 +1391,344 @@ function NewGameComposer({ members, usersById, onCancel, onStart }) {
 }
 
 // ============================================================
+// Custom-module view + settings (generic competition)
+// ============================================================
+
+const ENTRANT_PALETTE = ['#f5a524', '#22c55e', '#6366f1', '#ef4444', '#06b6d4', '#a855f7', '#eab308', '#ec4899'];
+
+function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSettings }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const totalSets = Math.max(1, mod.totalSets || 1);
+  const setsArr = Array.from({ length: totalSets }, (_, i) => {
+    const n = i + 1;
+    const found = (mod.sets || []).find(s => s.n === n);
+    return found || { n, winner: null };
+  });
+
+  const setWinner = (n, winner) => {
+    if (!admin || !active) return;
+    const existing = (mod.sets || []).find(s => s.n === n);
+    let nextSets;
+    if (existing && existing.winner === winner) {
+      // toggle off
+      nextSets = (mod.sets || []).filter(s => s.n !== n);
+    } else {
+      nextSets = [...(mod.sets || []).filter(s => s.n !== n), { n, winner }];
+    }
+    onPatch({ sets: nextSets });
+  };
+
+  // Score per entrant (team or participant)
+  const entrants = mod.mode === 'teams'
+    ? (mod.teams || [])
+    : (mod.participants || []).map(uid => {
+        const u = usersById[uid];
+        return { id: uid, name: u?.displayName || u?.email || '?', user: u };
+      });
+
+  const winsByEntrant = {};
+  for (const s of (mod.sets || [])) if (s.winner) winsByEntrant[s.winner] = (winsByEntrant[s.winner] || 0) + 1;
+
+  const myEntrantId = mod.mode === 'teams'
+    ? (mod.teams || []).find(t => Array.isArray(t.members) && t.members.includes(me.id))?.id
+    : (mod.participants || []).includes(me.id) ? me.id : null;
+
+  const myWins = winsByEntrant[myEntrantId] || 0;
+  const myPts = myWins * (mod.pointsPerWin || 0);
+
+  const ready = entrants.length >= 2;
+
+  return (
+    <>
+      <ModuleHeader title={`${mod.icon || '🎯'} ${mod.name}`} admin={admin} onOpenSettings={onOpenSettings} />
+
+      <div className="ww-stats-row">
+        <StatPill label="Sets" value={`${setsArr.filter(s => s.winner).length}/${totalSets}`} />
+        <StatPill label={mod.mode === 'teams' ? 'Mein Team' : 'Meine Siege'} value={myWins} />
+        <StatPill label="Pkt" value={myPts} accent />
+      </div>
+
+      {!ready && (
+        <div className="ww-empty">
+          {mod.mode === 'teams'
+            ? 'Host muss mind. 2 Teams einteilen (Zahnrad oben rechts).'
+            : 'Host muss mind. 2 Teilnehmer auswählen (Zahnrad oben rechts).'}
+        </div>
+      )}
+
+      {ready && (
+        <>
+          <section className="ww-section">
+            <div className="ww-section-head">
+              <Trophy size={16} />
+              <h3>{mod.mode === 'teams' ? 'TEAMS' : 'TEILNEHMER'}</h3>
+            </div>
+            <div className="ww-entrant-grid">
+              {entrants.map((e, idx) => {
+                const wins = winsByEntrant[e.id] || 0;
+                const isMine = e.id === myEntrantId;
+                const color = ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length];
+                return (
+                  <div key={e.id} className={`ww-entrant-card ${isMine ? 'mine' : ''}`} style={{ borderColor: color }}>
+                    <div className="ww-entrant-head">
+                      <span className="ww-entrant-name" style={{ color }}>{e.name}</span>
+                      <span className="ww-entrant-score">{wins}</span>
+                    </div>
+                    {mod.mode === 'teams' && (
+                      <div className="ww-flunky-roster">
+                        {(e.members || []).map(uid => {
+                          const u = usersById[uid];
+                          if (!u) return null;
+                          return (
+                            <span key={uid} className="ww-flunky-player">
+                              {u.emoji || '🍺'} {u.displayName || u.email}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {mod.mode === 'solo' && e.user && (
+                      <div className="ww-flunky-roster">
+                        <span className="ww-flunky-player">{e.user.emoji || '🍺'} {e.user.displayName || e.user.email}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="ww-section">
+            <div className="ww-section-head"><Flag size={16} /><h3>SETS</h3></div>
+            <div className="ww-flunky-sets">
+              {setsArr.map(s => {
+                const winnerEntrant = entrants.find(e => e.id === s.winner);
+                return (
+                  <div key={s.n} className="ww-flunky-set">
+                    <div className="ww-flunky-set-label">SET {s.n}</div>
+                    {admin && active ? (
+                      <div className="ww-set-picker">
+                        {entrants.map((e, idx) => (
+                          <button
+                            key={e.id}
+                            className={`ww-flunky-set-btn ${s.winner === e.id ? 'won' : ''}`}
+                            style={s.winner === e.id ? { background: ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length], borderColor: ENTRANT_PALETTE[idx % ENTRANT_PALETTE.length] } : {}}
+                            onClick={() => setWinner(s.n, e.id)}
+                          >{e.name.slice(0, 8)}</button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="ww-flunky-set-result">
+                        {winnerEntrant ? `🏆 ${winnerEntrant.name.slice(0, 10)}` : '—'}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+              {mod.pointsPerWin || 0} Punkte pro gewonnenem Set für {mod.mode === 'teams' ? 'jeden Spieler im Sieger-Team' : 'den Sieger'}
+            </div>
+          </section>
+        </>
+      )}
+    </>
+  );
+}
+
+function CustomModuleSettings({ mod, members, onPatch, onDelete }) {
+  const [name, setName] = useState(mod.name || '');
+  const [icon, setIcon] = useState(mod.icon || '🎯');
+  const [mode, setMode] = useState(mod.mode || 'teams');
+  const [teamCount, setTeamCount] = useState(mod.teamCount || 2);
+  const [pointsPerWin, setPointsPerWin] = useState(mod.pointsPerWin || 3);
+  const [totalSets, setTotalSets] = useState(mod.totalSets || 3);
+
+  useEffect(() => {
+    setName(mod.name || ''); setIcon(mod.icon || '🎯');
+    setMode(mod.mode || 'teams'); setTeamCount(mod.teamCount || 2);
+    setPointsPerWin(mod.pointsPerWin || 3); setTotalSets(mod.totalSets || 3);
+  }, [mod.id]);
+
+  const memberIds = members.map(m => m.expand?.user?.id).filter(Boolean);
+
+  const saveBasics = () => onPatch({
+    name: name.trim() || 'Modul',
+    icon: icon.trim() || '🎯',
+    mode,
+    teamCount: Number(teamCount) || 2,
+    pointsPerWin: Number(pointsPerWin) || 0,
+    totalSets: Number(totalSets) || 1,
+  });
+
+  // Team management (teams mode)
+  const teams = Array.isArray(mod.teams) ? mod.teams : [];
+  const teamCountTarget = Math.max(2, Number(teamCount) || 2);
+
+  const ensureTeams = () => {
+    // Make sure teams array has exactly teamCountTarget rows, preserving existing
+    const cur = teams.slice(0, teamCountTarget);
+    while (cur.length < teamCountTarget) {
+      cur.push({ id: `t${Date.now()}-${cur.length}`, name: `Team ${String.fromCharCode(65 + cur.length)}`, members: [] });
+    }
+    onPatch({ teams: cur, teamCount: teamCountTarget });
+  };
+
+  const shuffleTeams = () => {
+    const ids = [...memberIds].map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+    const groups = Array.from({ length: teamCountTarget }, () => []);
+    ids.forEach((id, i) => { groups[i % teamCountTarget].push(id); });
+    const next = teams.length === teamCountTarget && teams.length > 0
+      ? teams.map((t, i) => ({ ...t, members: groups[i] }))
+      : groups.map((m, i) => ({ id: `t${Date.now()}-${i}`, name: `Team ${String.fromCharCode(65 + i)}`, members: m }));
+    onPatch({ teams: next, teamCount: teamCountTarget });
+  };
+
+  const assignToTeam = (userId, teamIdx) => {
+    let cur = teams.slice();
+    while (cur.length < teamCountTarget) cur.push({ id: `t${Date.now()}-${cur.length}`, name: `Team ${String.fromCharCode(65 + cur.length)}`, members: [] });
+    cur = cur.map((t, i) => ({ ...t, members: (t.members || []).filter(id => id !== userId) }));
+    if (teamIdx != null && teamIdx >= 0 && teamIdx < cur.length) {
+      cur[teamIdx] = { ...cur[teamIdx], members: [...cur[teamIdx].members, userId] };
+    }
+    onPatch({ teams: cur });
+  };
+
+  const teamIdxOf = (userId) => teams.findIndex(t => Array.isArray(t.members) && t.members.includes(userId));
+
+  // Solo management
+  const participants = Array.isArray(mod.participants) ? mod.participants : [];
+  const toggleParticipant = (userId) => {
+    const has = participants.includes(userId);
+    onPatch({ participants: has ? participants.filter(id => id !== userId) : [...participants, userId] });
+  };
+  const setAllParticipants = () => onPatch({ participants: memberIds });
+  const clearParticipants = () => onPatch({ participants: [] });
+
+  return (
+    <div>
+      <label className="ww-label">NAME</label>
+      <input className="ww-input" value={name} onChange={e => setName(e.target.value)} onBlur={saveBasics} maxLength={60} />
+
+      <div className="ww-grid2">
+        <div>
+          <label className="ww-label">ICON</label>
+          <input className="ww-input" value={icon} onChange={e => setIcon(e.target.value)} onBlur={saveBasics} maxLength={4} placeholder="🎯" />
+        </div>
+        <div>
+          <label className="ww-label">MODUS</label>
+          <div className="ww-auth-tabs" style={{ marginBottom: 0 }}>
+            <button className={`ww-auth-tab ${mode === 'teams' ? 'active' : ''}`} onClick={() => { setMode('teams'); onPatch({ mode: 'teams' }); }}>TEAMS</button>
+            <button className={`ww-auth-tab ${mode === 'solo' ? 'active' : ''}`} onClick={() => { setMode('solo'); onPatch({ mode: 'solo' }); }}>SOLO</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="ww-grid2">
+        <div>
+          <label className="ww-label">PKT / SIEG</label>
+          <input className="ww-input" type="number" min={0} max={1000} value={pointsPerWin} onChange={e => setPointsPerWin(e.target.value)} onBlur={saveBasics} />
+        </div>
+        <div>
+          <label className="ww-label">ANZAHL SÄTZE</label>
+          <input className="ww-input" type="number" min={1} max={99} value={totalSets} onChange={e => setTotalSets(e.target.value)} onBlur={saveBasics} />
+        </div>
+      </div>
+
+      {mode === 'teams' && (
+        <>
+          <label className="ww-label">ANZAHL TEAMS</label>
+          <input className="ww-input" type="number" min={2} max={12} value={teamCount} onChange={e => setTeamCount(e.target.value)} onBlur={saveBasics} />
+
+          <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
+            <button className="ww-mini-btn" onClick={ensureTeams}>Teams initialisieren</button>
+            <button className="ww-mini-btn" onClick={shuffleTeams}>🎲 Würfeln</button>
+            <button className="ww-mini-btn red" onClick={() => onPatch({ teams: teams.map(t => ({ ...t, members: [] })), sets: [] })}>↺ Reset</button>
+          </div>
+
+          <label className="ww-label" style={{ marginTop: 14 }}>TEAM-NAMEN</label>
+          <div className="ww-flunky-assign">
+            {teams.slice(0, teamCountTarget).map((t, i) => (
+              <div key={t.id} className="ww-flunky-assign-row">
+                <span className="ww-user-mgmt-emoji" style={{ color: ENTRANT_PALETTE[i % ENTRANT_PALETTE.length] }}>●</span>
+                <input
+                  className="ww-input"
+                  style={{ margin: 0, flex: 1 }}
+                  value={t.name}
+                  onChange={e => {
+                    const next = teams.map((x, j) => j === i ? { ...x, name: e.target.value } : x);
+                    onPatch({ teams: next });
+                  }}
+                  maxLength={20}
+                />
+              </div>
+            ))}
+          </div>
+
+          <label className="ww-label" style={{ marginTop: 14 }}>ZUORDNUNG</label>
+          <div className="ww-flunky-assign">
+            {members.map(m => {
+              const u = m.expand?.user; if (!u) return null;
+              const idx = teamIdxOf(u.id);
+              return (
+                <div key={u.id} className="ww-flunky-assign-row">
+                  <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                  <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                  <div className="ww-flunky-assign-btns">
+                    {Array.from({ length: teamCountTarget }).map((_, ti) => (
+                      <button
+                        key={ti}
+                        className={`ww-mini-btn ${idx === ti ? 'active' : ''}`}
+                        onClick={() => assignToTeam(u.id, idx === ti ? null : ti)}
+                        title={teams[ti]?.name || `Team ${String.fromCharCode(65 + ti)}`}
+                      >{String.fromCharCode(65 + ti)}</button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {mode === 'solo' && (
+        <>
+          <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
+            <button className="ww-mini-btn" onClick={setAllParticipants}>Alle dabei</button>
+            <button className="ww-mini-btn red" onClick={clearParticipants}>↺ Leer</button>
+          </div>
+          <label className="ww-label" style={{ marginTop: 14 }}>TEILNEHMER</label>
+          <div className="ww-flunky-assign">
+            {members.map(m => {
+              const u = m.expand?.user; if (!u) return null;
+              const on = participants.includes(u.id);
+              return (
+                <div key={u.id} className="ww-flunky-assign-row">
+                  <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                  <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                  <button className={`ww-mini-btn ${on ? 'active' : ''}`} onClick={() => toggleParticipant(u.id)}>
+                    {on ? <><Check size={11} /> dabei</> : 'mitspielen'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      <button className="ww-danger-btn red" onClick={onDelete} style={{ marginTop: 18 }}>
+        <Trash2 size={14} /> Modul löschen
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
 // Live settings drawer
 // ============================================================
 
@@ -1344,7 +1807,7 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, myId, onShowUserDetail }) {
+function CrewView({ members, statsMap, event, flunky, customModules, myId, onShowUserDetail }) {
   return (
     <div className="ww-crew">
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({members.length})</h3></div>
@@ -1352,7 +1815,7 @@ function CrewView({ members, statsMap, event, flunky, myId, onShowUserDetail }) 
         {members.map(m => {
           const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
-          const points = computeTotalPoints(u.id, s, event, flunky);
+          const points = computeTotalPoints(u.id, s, event, flunky, customModules);
           return (
             <div key={u.id} className={`ww-crew-card ${u.id === myId ? 'me' : ''}`}>
               <button className="ww-crew-head clickable" onClick={() => onShowUserDetail?.(u.id)}>
@@ -1379,7 +1842,7 @@ function CrewView({ members, statsMap, event, flunky, myId, onShowUserDetail }) 
 // User detail drawer (point breakdown)
 // ============================================================
 
-function UserDetailDrawer({ user, stats, event, flunky, isMe, onClose }) {
+function UserDetailDrawer({ user, stats, event, flunky, customModules, isMe, onClose }) {
   if (!user) return null;
   const s = stats || { beer: 0, mische: 0 };
   const beerPts = (s.beer || 0) * (event.pointsPerBeer ?? 1);
@@ -1393,7 +1856,27 @@ function UserDetailDrawer({ user, stats, event, flunky, isMe, onClose }) {
   const lostGames = playedGames.filter(g => teamOfInGame(user.id, g) !== g.winner);
   const flunkyPts = wonGames.length * ppw;
 
-  const total = drinkPts + flunkyPts;
+  // Per-custom-module breakdown for this user
+  const customBreakdown = (customModules || []).map(cm => {
+    const ppwc = cm.pointsPerWin || 0;
+    const sets = cm.sets || [];
+    let wins = 0;
+    if (cm.mode === 'teams') {
+      const teams = cm.teams || [];
+      for (const s of sets) {
+        if (!s.winner) continue;
+        const t = teams.find(x => x.id === s.winner);
+        if (t && Array.isArray(t.members) && t.members.includes(user.id)) wins++;
+      }
+    } else {
+      for (const s of sets) if (s.winner === user.id) wins++;
+    }
+    return { cm, wins, pts: wins * ppwc };
+  }).filter(x => x.wins > 0);
+
+  const customPts = customBreakdown.reduce((s, x) => s + x.pts, 0);
+
+  const total = drinkPts + flunkyPts + customPts;
 
   return (
     <ModuleSettingsDrawer
@@ -1425,6 +1908,16 @@ function UserDetailDrawer({ user, stats, event, flunky, isMe, onClose }) {
                 <DetailRow label="Summe" pts={flunkyPts} bold />
               </>
             )}
+          </div>
+        )}
+
+        {customBreakdown.length > 0 && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🎯 CUSTOM MODULE</div>
+            {customBreakdown.map(({ cm, wins, pts }) => (
+              <DetailRow key={cm.id} label={`${cm.icon || '🎯'} ${cm.name} (${wins}× × ${cm.pointsPerWin || 0} pkt)`} pts={pts} />
+            ))}
+            <DetailRow label="Summe" pts={customPts} bold />
           </div>
         )}
 
