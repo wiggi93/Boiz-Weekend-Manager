@@ -37,6 +37,9 @@ jobs:
       - name: Run Claude
         uses: anthropics/claude-code-action@v1
         with:
+          # Prefer the Claude.ai OAuth token (counts against your Pro/Max
+          # subscription) if set; otherwise fall back to the direct API key.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Default model is fine. Override here if you want a specific one.
           # model: claude-sonnet-4-5
