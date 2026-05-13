@@ -34,15 +34,17 @@ jobs:
         with:
           fetch-depth: 1
       - uses: anthropics/claude-code-action@v1
+        env:
+          # gh CLI auto-auths off this; needed so Claude can `gh pr create`
+          # and `gh pr merge --auto` without a separate login step.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           allowed_tools: |
-            Bash(gh pr *)
-            Bash(gh issue *)
-            Bash(gh run *)
-            Bash(gh workflow *)
-            Bash(git *)
-            Bash(npm *)
+            Bash(gh:*)
+            Bash(git:*)
+            Bash(npm:*)
+            Bash(curl:*)
 
   # Fallback path: uses the pay-per-use Anthropic API key (charged against
   # the $20 credit balance). Triggered explicitly by @claude-api.
@@ -67,13 +69,13 @@ jobs:
         with:
           fetch-depth: 1
       - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: '@claude-api'
           allowed_tools: |
-            Bash(gh pr *)
-            Bash(gh issue *)
-            Bash(gh run *)
-            Bash(gh workflow *)
-            Bash(git *)
-            Bash(npm *)
+            Bash(gh:*)
+            Bash(git:*)
+            Bash(npm:*)
+            Bash(curl:*)

@@ -27,7 +27,16 @@ API rules enforce that:
 ## Maintainer's working preferences
 
 1. **Act directly, no permission-asking.** Maintainer has said multiple times he wants commits/pushes/PRs/merges to happen autonomously. Don't ask "should I commit?" — just do it.
-2. **Always merge your own PRs** unless the work is ambiguous and you want a second look. Use `gh pr merge --squash --delete-branch --auto` so the merge happens when CI is green. (`--auto` waits for required checks; if none are required, merges immediately.)
+2. **Always open a PR _yourself_ and enable auto-merge.** Don't leave a "click here to open a PR" link for the user. The full sequence at the end of every task is:
+   ```bash
+   git checkout -b <type>/<short-slug>
+   git add -A
+   git commit -m "..."
+   git push -u origin HEAD
+   gh pr create --title "..." --body "..."
+   gh pr merge --squash --delete-branch --auto
+   ```
+   `gh` is pre-authenticated via the `GH_TOKEN` env (no `gh auth login` needed). `--auto` waits for required CI checks; if none are required, merges immediately. If anything in the chain errors, fix and retry — do not just push to a branch and stop.
 3. **One feature = one branch + one PR**, even when working from `master`. Branch names: `feat/...`, `fix/...`, `chore/...`, `perf/...`, `ci/...`.
 4. **PR descriptions: include a Summary, What changed, and a Test plan checklist.** Look at recent PRs (`gh pr list --state merged --limit 5`) for the established format.
 5. **Speak German in user-facing strings and toasts**; commit messages and PR bodies in English.
