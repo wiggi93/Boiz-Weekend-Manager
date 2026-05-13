@@ -62,11 +62,11 @@ jobs:
         run: |
           curl -fsS --max-time 30 \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
-            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-backend:latest"
+            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-backend"
       - name: Wait for backend
         run: sleep 8
       - name: Update frontend
         run: |
           curl -fsS --max-time 30 \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
-            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-manager:latest"
+            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-manager"
