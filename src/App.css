@@ -997,3 +997,17 @@
   grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
   width: 100%;
 }
+
+/* Plus-tab in module strip + create-form "add custom" card */
+.ww-mod-tab-add {
+  border-style: dashed;
+  color: var(--amber);
+  background: transparent;
+}
+.ww-mod-tab-add:hover { background: rgba(245,165,36,0.1); }
+
+.ww-mod-card-add {
+  border-style: dashed; color: var(--amber);
+  background: transparent;
+}
+.ww-mod-card-add:hover { background: rgba(245,165,36,0.08); }
