@@ -31,6 +31,13 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/_/],
+        // Activate the new service worker the moment it's downloaded;
+        // take control of all open clients without waiting for a manual reload.
+        // Combined with the in-app reload nudge below, users see new versions
+        // on next foreground without having to delete + reinstall the PWA.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             // Never cache PocketBase API/realtime — always fresh
