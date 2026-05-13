@@ -44,6 +44,30 @@ npm run preview
 
 Die App läuft dann unter `http://localhost:5173/Boiz-Weekend-Manager/`.
 
+## Vom Handy aus weiterentwickeln (Claude Code Action)
+
+Auf Issues und PRs reicht ein Kommentar mit `@claude <auftrag>` aus der GitHub iOS-App, um eine Code-Änderung anzustoßen — kein lokaler Checkout nötig.
+
+**Beispiel** (auf einem neuen Issue):
+
+> @claude bau ein Go-Kart-Modul: jeder Spieler fährt einzeln drei Runden, schnellste Zeit pro Runde bekommt Punkte. Icon 🏎️.
+
+Was passiert:
+1. GitHub-Action `claude.yml` startet
+2. Claude liest die Codebase + `CLAUDE.md`, schreibt Migration + Frontend, öffnet einen PR
+3. `gh pr merge --auto --squash` mergt sobald die Build-Action grün ist
+4. Docker-Hub-Push → Watchtower-Webhook → HTPC pullt automatisch (~2 min ab Merge)
+5. PWA holt sich beim nächsten Öffnen den neuen Bundle
+
+**Einmaliges Setup:**
+
+```bash
+# Anthropic API Key auf https://console.anthropic.com/settings/keys erstellen
+gh secret set ANTHROPIC_API_KEY --body "sk-ant-..." --repo wiggi93/Boiz-Weekend-Manager
+```
+
+Der `if: sender.login == repository_owner`-Filter im Workflow verhindert, dass Fremde durch einen `@claude`-Kommentar deine API-Credits abräumen.
+
 ## Als App installieren (PWA)
 
 Die App ist eine **Progressive Web App** — auf Handy installieren, Icon kommt auf den Home-Bildschirm, läuft im Vollbild ohne Browser-Chrome.
