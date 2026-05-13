@@ -19,12 +19,14 @@ document.addEventListener('touchend', (e) => {
 }, { passive: false });
 document.addEventListener('dblclick', (e) => e.preventDefault());
 
-// Auto-reload when a new service worker is ready, but only if the document
-// isn't actively focused (to avoid yanking the page out from under a tapping
-// user). When focused, show a small "neu laden" banner instead.
-registerSW({
+// New-version detection. Workbox is configured in 'prompt' mode, so a new
+// SW lands in "waiting" instead of silently swapping. We surface a small
+// amber pill at the bottom; tapping it (or backgrounding the app) calls
+// updateSW(true) which fires skipWaiting → controllerchange → page reload.
+const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
+    if (document.getElementById('ww-update-banner')) return;
     const banner = document.createElement('div');
     banner.id = 'ww-update-banner';
     banner.style.cssText = [
@@ -36,21 +38,28 @@ registerSW({
       'display:flex', 'align-items:center', 'gap:8px',
     ].join(';');
     banner.textContent = '✨ Neue Version — tippen zum Laden';
-    banner.addEventListener('click', () => location.reload());
+    banner.addEventListener('click', () => updateSW(true));
     document.body.appendChild(banner);
 
-    // If user goes away (tabs out / app backgrounded), reload silently on return
-    const reloadIfBackgrounded = () => {
-      if (document.visibilityState === 'visible' && !document.hasFocus()) return;
+    // If the user tabs/apps away, apply the update silently so they come
+    // back to the new bundle.
+    const onHidden = () => {
       if (document.visibilityState === 'hidden') {
-        document.addEventListener('visibilitychange', () => {
-          if (document.visibilityState === 'visible') location.reload();
-        }, { once: true });
+        document.removeEventListener('visibilitychange', onHidden);
+        updateSW(true);
       }
     };
-    reloadIfBackgrounded();
+    document.addEventListener('visibilitychange', onHidden);
   },
 });
+
+// Periodically check for SW updates while the PWA stays open (iOS users
+// often leave it foregrounded for hours).
+if ('serviceWorker' in navigator) {
+  setInterval(() => {
+    navigator.serviceWorker.getRegistration().then(r => r?.update());
+  }, 30 * 60 * 1000); // every 30 min
+}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

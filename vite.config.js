@@ -6,7 +6,12 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' so the SW enters the "waiting" state on update; the React
+      // app's onNeedRefresh callback then shows the in-app "neue Version"
+      // pill instead of silently swapping the SW. Combined with
+      // updateSW(true) on banner tap, this gives users a visible,
+      // user-initiated update flow (which iOS PWAs sorely need).
+      registerType: 'prompt',
       includeAssets: ['favicon.svg', 'favicon.ico', 'apple-touch-icon-180x180.png'],
       manifest: {
         name: 'Boiz Weekend Manager',
@@ -31,12 +36,10 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/_/],
-        // Activate the new service worker the moment it's downloaded;
-        // take control of all open clients without waiting for a manual reload.
-        // Combined with the in-app reload nudge below, users see new versions
-        // on next foreground without having to delete + reinstall the PWA.
-        skipWaiting: true,
-        clientsClaim: true,
+        // Intentionally NOT setting skipWaiting/clientsClaim here — let the
+        // new SW sit in "waiting" until the user taps the in-app banner,
+        // which calls updateSW(true). That sequence is what lets us actually
+        // show "neue Version" before swapping.
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
