@@ -14,6 +14,7 @@ import {
   loadEventStats, setMyCount, resetEventStats,
   updateMyProfile, setUserRole, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
+  getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard,
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
@@ -47,30 +48,62 @@ const computeFlunkyPoints = (userId, flunky) => {
     teamOfInGame(userId, g) === g.winner ? sum + ppw : sum, 0);
 };
 
+const customGameWins = (userId, mode, sets, teams) => {
+  let n = 0;
+  if (mode === 'teams') {
+    for (const s of sets || []) {
+      if (!s.winner) continue;
+      const t = (teams || []).find(x => x.id === s.winner);
+      if (t && Array.isArray(t.members) && t.members.includes(userId)) n++;
+    }
+  } else {
+    for (const s of sets || []) {
+      if (s.winner === userId) n++;
+    }
+  }
+  return n;
+};
+
 const computeCustomPoints = (userId, customModules) => {
   if (!customModules?.length) return 0;
   let total = 0;
   for (const cm of customModules) {
     const ppw = cm.pointsPerWin || 0;
-    const sets = cm.sets || [];
-    if (cm.mode === 'teams') {
-      const teams = cm.teams || [];
-      for (const s of sets) {
-        if (!s.winner) continue;
-        const t = teams.find(x => x.id === s.winner);
-        if (t && Array.isArray(t.members) && t.members.includes(userId)) total += ppw;
-      }
-    } else {
-      for (const s of sets) {
-        if (s.winner === userId) total += ppw;
-      }
+    total += customGameWins(userId, cm.mode, cm.sets, cm.teams) * ppw;
+    for (const g of cm.games || []) {
+      total += customGameWins(userId, g.mode || cm.mode, g.sets, g.teams) * ppw;
     }
   }
   return total;
 };
 
-const computeTotalPoints = (userId, s, ev, flunky, customModules) =>
-  computeDrinkPoints(s, ev) + computeFlunkyPoints(userId, flunky) + computeCustomPoints(userId, customModules);
+const jeopardyRoundScores = (round) => {
+  const map = {};
+  for (const q of round?.questions || []) {
+    if (q.winnerUserId) map[q.winnerUserId] = (map[q.winnerUserId] || 0) + (q.level || 0);
+  }
+  return map;
+};
+
+const computeJeopardyPoints = (userId, jeopardy) => {
+  if (!jeopardy) return 0;
+  const positionPts = Array.isArray(jeopardy.pointsPerPosition) ? jeopardy.pointsPerPosition : [];
+  let total = 0;
+  for (const r of jeopardy.rounds || []) {
+    if (!r.finishedAt) continue;
+    const scores = jeopardyRoundScores(r);
+    const ranking = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+    const idx = ranking.findIndex(([uid]) => uid === userId);
+    if (idx >= 0 && idx < positionPts.length) total += positionPts[idx] || 0;
+  }
+  return total;
+};
+
+const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy) =>
+  computeDrinkPoints(s, ev)
+  + computeFlunkyPoints(userId, flunky)
+  + computeCustomPoints(userId, customModules)
+  + computeJeopardyPoints(userId, jeopardy);
 
 // ============================================================
 // Root
@@ -89,6 +122,9 @@ export default function App() {
   const [flunky, setFlunky] = useState(null);
   const flunkyRef = useRef(null);
   useEffect(() => { flunkyRef.current = flunky; }, [flunky]);
+  const [jeopardy, setJeopardy] = useState(null);
+  const jeopardyRef = useRef(null);
+  useEffect(() => { jeopardyRef.current = jeopardy; }, [jeopardy]);
   const [customModules, setCustomModules] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
@@ -141,18 +177,20 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setCustomModules([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setCustomModules([]);
       return;
     }
     try {
-      const [ev, members, stats, fl, cms] = await Promise.all([
+      const [ev, members, stats, fl, je, cms] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
         getFlunky(currentEventId),
+        getJeopardy(currentEventId),
         listCustomModules(currentEventId),
       ]);
-      setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats); setFlunky(fl); setCustomModules(cms);
+      setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats);
+      setFlunky(fl); setJeopardy(je); setCustomModules(cms);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -230,6 +268,15 @@ export default function App() {
       setFlunky(prev => {
         const next = prev ? { ...prev, ...rec } : rec;
         flunkyRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    if (collection === 'jeopardy') {
+      setJeopardy(prev => {
+        const next = prev ? { ...prev, ...rec } : rec;
+        jeopardyRef.current = next;
         return next;
       });
       return;
@@ -386,6 +433,41 @@ export default function App() {
     catch (e) { console.warn('flunky update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
+  const onJeopardyPatch = async (patch) => {
+    let cur = jeopardyRef.current;
+    if (!cur) {
+      // Lazy seed for events created before the migration backfill ran
+      cur = await ensureJeopardy(currentEventId);
+      jeopardyRef.current = cur; setJeopardy(cur);
+    }
+    const nextJ = { ...cur, ...patch };
+    jeopardyRef.current = nextJ; setJeopardy(nextJ);
+    try { await updateJeopardy(cur.id, patch); }
+    catch (e) { console.warn('jeopardy update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
+  const onJeopardyGenerate = async (categories) => {
+    try {
+      const board = await generateJeopardyBoard(currentEventId, categories);
+      const round = {
+        id: String(Date.now()),
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        categories,
+        questions: (board.questions || []).map(q => ({
+          category: q.category, level: Number(q.level) || 1,
+          q: String(q.q || ''), a: String(q.a || ''),
+          winnerUserId: null, revealed: false,
+        })),
+      };
+      const rounds = [...(jeopardyRef.current?.rounds || []), round];
+      await onJeopardyPatch({ rounds, categories });
+      showToast('Neue Runde mit frischen Fragen 🎤');
+    } catch (e) {
+      showToast(`Frage-Gen Fehler: ${e?.message?.slice?.(0, 80) || e}`);
+    }
+  };
+
   // ---- Custom modules ----
   const onCustomCreate = async (data) => {
     try {
@@ -511,6 +593,7 @@ export default function App() {
             me={me} admin={admin} event={currentEvent}
             members={eventMembers} statsMap={statsMap} setStatsMap={setStatsMap}
             flunky={flunky} onFlunkyPatch={onFlunkyPatch}
+            jeopardy={jeopardy} onJeopardyPatch={onJeopardyPatch} onJeopardyGenerate={onJeopardyGenerate}
             customModules={customModules}
             onCustomCreate={onCustomCreate}
             onCustomPatch={onCustomPatch}
@@ -524,7 +607,7 @@ export default function App() {
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} customModules={customModules} myId={me.id} onShowUserDetail={setDetailUserId} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} myId={me.id} onShowUserDetail={setDetailUserId} />
         )}
         {view === 'profile' && (
           <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
@@ -578,6 +661,7 @@ export default function App() {
           stats={statsMap[detailUserId]}
           event={currentEvent}
           flunky={flunky}
+          jeopardy={jeopardy}
           customModules={customModules}
           isMe={detailUserId === me.id}
           onClose={() => setDetailUserId(null)}
@@ -1006,6 +1090,7 @@ function WaitingScreen({ event, onLeave }) {
 
 function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
+  jeopardy, onJeopardyPatch, onJeopardyGenerate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
@@ -1045,13 +1130,20 @@ function HomeView({
       </div>
 
       {moduleTab === 'overview' && (
-        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} customModules={customModules} onShowUserDetail={onShowUserDetail} />
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} onShowUserDetail={onShowUserDetail} />
       )}
       {moduleTab === 'flunky' && flunky && (
         <FlunkyView
           me={me} flunky={flunky} members={members} admin={admin} active={event.active}
           onPatch={onFlunkyPatch}
           onOpenSettings={() => setModuleSettingsOpen('flunky')}
+        />
+      )}
+      {moduleTab === 'jeopardy' && (
+        <JeopardyView
+          me={me} jeopardy={jeopardy} members={members} admin={admin} active={event.active}
+          onPatch={onJeopardyPatch}
+          onOpenSettings={() => setModuleSettingsOpen('jeopardy')}
         />
       )}
       {activeCustom && (
@@ -1070,6 +1162,14 @@ function HomeView({
       {moduleSettingsOpen === 'flunky' && admin && flunky && (
         <ModuleSettingsDrawer title="🎳 Flunkyball — Live Settings" onClose={() => setModuleSettingsOpen(null)}>
           <FlunkyLiveSettings flunky={flunky} onPatch={onFlunkyPatch} />
+        </ModuleSettingsDrawer>
+      )}
+      {moduleSettingsOpen === 'jeopardy' && admin && (
+        <ModuleSettingsDrawer title="🎤 Jeopardy — Live Settings" onClose={() => setModuleSettingsOpen(null)}>
+          <JeopardyLiveSettings
+            jeopardy={jeopardy} members={members}
+            onPatch={onJeopardyPatch} onGenerate={onJeopardyGenerate}
+          />
         </ModuleSettingsDrawer>
       )}
       {moduleSettingsOpen?.startsWith?.('cm-') && admin && (() => {
@@ -1171,16 +1271,16 @@ function DrinkPill({ emoji, label, count, disabled, onInc, onDec }) {
 // Overview (leaderboard / standings)
 // ============================================================
 
-function OverviewView({ me, event, members, statsMap, flunky, customModules, onShowUserDetail }) {
+function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, onShowUserDetail }) {
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
       const s = statsMap[u.id] || { beer: 0, mische: 0 };
-      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky, customModules) };
+      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy) };
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points),
-    [members, statsMap, event, flunky, customModules]);
+    [members, statsMap, event, flunky, customModules, jeopardy]);
 
   const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
   const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
@@ -1452,6 +1552,332 @@ function NewGameComposer({ members, usersById, onCancel, onStart }) {
 }
 
 // ============================================================
+// Jeopardy module
+// ============================================================
+
+function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
+  const [openQuestion, setOpenQuestion] = useState(null); // { ri, qi }
+
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const rounds = jeopardy?.rounds || [];
+  const currentRoundIdx = rounds.length === 0 ? -1 : rounds.length - 1;
+  const currentRound = currentRoundIdx >= 0 ? rounds[currentRoundIdx] : null;
+  const participants = (jeopardy?.participants || []).map(uid => usersById[uid]).filter(Boolean);
+  const positionPts = jeopardy?.pointsPerPosition || [];
+
+  const categories = currentRound?.categories || jeopardy?.categories || [];
+
+  const scoresByUser = useMemo(() => currentRound ? jeopardyRoundScores(currentRound) : {}, [currentRound]);
+  const ranking = useMemo(() => Object.entries(scoresByUser).sort((a, b) => b[1] - a[1]), [scoresByUser]);
+
+  const myRoundScore = scoresByUser[me.id] || 0;
+  const totalEventPts = computeJeopardyPoints(me.id, jeopardy);
+
+  if (!jeopardy) {
+    return (
+      <>
+        <ModuleHeader title="🎤 Jeopardy" admin={admin} onOpenSettings={onOpenSettings} />
+        <div className="ww-empty">Host muss erst eine Runde starten (Zahnrad oben rechts).</div>
+      </>
+    );
+  }
+
+  const setQuestionWinner = (ri, qi, winnerUserId) => {
+    if (!admin || !active) return;
+    const next = rounds.map((r, i) => {
+      if (i !== ri) return r;
+      const qs = r.questions.map((q, j) => j === qi ? { ...q, winnerUserId, revealed: true } : q);
+      return { ...r, questions: qs };
+    });
+    onPatch({ rounds: next });
+  };
+
+  const finishRound = (ri) => {
+    if (!admin) return;
+    if (!confirm('Runde beenden? Punkte werden ans Stand-Leaderboard übergeben.')) return;
+    const next = rounds.map((r, i) => i === ri ? { ...r, finishedAt: new Date().toISOString() } : r);
+    onPatch({ rounds: next });
+    setOpenQuestion(null);
+  };
+
+  // Build a 2D grid: category × level (1..5)
+  const grid = {};
+  for (const c of categories) grid[c] = {};
+  for (let qi = 0; qi < (currentRound?.questions?.length || 0); qi++) {
+    const q = currentRound.questions[qi];
+    if (!grid[q.category]) grid[q.category] = {};
+    grid[q.category][q.level] = { ...q, _qi: qi };
+  }
+  const levels = [1, 2, 3, 4, 5];
+
+  return (
+    <>
+      <ModuleHeader title="🎤 Jeopardy" admin={admin} onOpenSettings={onOpenSettings} />
+
+      <div className="ww-stats-row">
+        <StatPill label="Runde" value={`${rounds.length || 0}`} />
+        <StatPill label="Aktuelle Pkt" value={myRoundScore} />
+        <StatPill label="Event-Pkt" value={totalEventPts} accent />
+      </div>
+
+      {!currentRound && (
+        <div className="ww-empty">Keine Runde gestartet — Host öffnet Settings und tappt "Neue Runde".</div>
+      )}
+
+      {currentRound && categories.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head">
+            <Trophy size={16} />
+            <h3>RUNDE {currentRoundIdx + 1}{currentRound.finishedAt ? ' · BEENDET' : ''}</h3>
+          </div>
+
+          <div className="ww-jeo-board" style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(60px, 1fr))` }}>
+            {categories.map(c => (
+              <div key={`h-${c}`} className="ww-jeo-cat-header" title={c}>{c}</div>
+            ))}
+            {levels.map(lvl => categories.map(c => {
+              const q = grid[c]?.[lvl];
+              if (!q) return <div key={`${c}-${lvl}`} className="ww-jeo-cell empty">—</div>;
+              const winner = q.winnerUserId ? usersById[q.winnerUserId] : null;
+              const cls = q.winnerUserId ? 'won' : (q.revealed ? 'revealed' : '');
+              return (
+                <button
+                  key={`${c}-${lvl}`}
+                  className={`ww-jeo-cell ${cls}`}
+                  onClick={() => setOpenQuestion({ ri: currentRoundIdx, qi: q._qi })}
+                  disabled={!!currentRound.finishedAt && !winner}
+                  title={`${c} · Level ${lvl}`}
+                >
+                  {winner ? (
+                    <span className="ww-jeo-winner">{winner.emoji || '🍺'} · {lvl}</span>
+                  ) : (
+                    <span className="ww-jeo-level">{lvl}</span>
+                  )}
+                </button>
+              );
+            }))}
+          </div>
+
+          {participants.length > 0 && (
+            <div className="ww-section" style={{ marginTop: 12 }}>
+              <div className="ww-section-head"><h3>STAND RUNDE</h3></div>
+              <div className="ww-board">
+                {participants
+                  .map(u => ({ u, pts: scoresByUser[u.id] || 0 }))
+                  .sort((a, b) => b.pts - a.pts)
+                  .map(({ u, pts }, i) => (
+                    <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
+                      <div className="ww-board-rank">{rankBadge(i)}</div>
+                      <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
+                      <div className="ww-board-name">{u.displayName || u.email}</div>
+                      <div className="ww-board-pts">{pts}<span>pkt</span></div>
+                    </div>
+                  ))}
+              </div>
+              <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+                Event-Punkte bei Rundenende: {positionPts.map((p, i) => `${i + 1}. → ${p}`).join(' · ')}
+              </div>
+            </div>
+          )}
+
+          {admin && active && !currentRound.finishedAt && (
+            <button className="ww-big-cta green" onClick={() => finishRound(currentRoundIdx)} style={{ marginTop: 10 }}>
+              <Flag size={20} /><span>RUNDE BEENDEN & PUNKTE VERTEILEN</span>
+            </button>
+          )}
+        </section>
+      )}
+
+      {rounds.filter(r => r.finishedAt).length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><h3>VERGANGENE RUNDEN</h3></div>
+          <div className="ww-board">
+            {rounds.map((r, ri) => {
+              if (!r.finishedAt) return null;
+              const sc = jeopardyRoundScores(r);
+              const rk = Object.entries(sc).sort((a, b) => b[1] - a[1]);
+              const myPlace = rk.findIndex(([uid]) => uid === me.id);
+              const myEventPts = myPlace >= 0 && myPlace < positionPts.length ? (positionPts[myPlace] || 0) : 0;
+              return (
+                <div key={r.id} className="ww-board-row">
+                  <div className="ww-board-rank">R{ri + 1}</div>
+                  <div className="ww-board-name">
+                    {rk.slice(0, 3).map(([uid, p]) => {
+                      const u = usersById[uid]; if (!u) return null;
+                      return <span key={uid} style={{ marginRight: 8 }}>{u.emoji || '🍺'} {p}</span>;
+                    })}
+                  </div>
+                  <div className="ww-board-pts">+{myEventPts}<span>pkt</span></div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {openQuestion && (() => {
+        const r = rounds[openQuestion.ri];
+        const q = r?.questions?.[openQuestion.qi];
+        if (!q) return null;
+        const winner = q.winnerUserId ? usersById[q.winnerUserId] : null;
+        return (
+          <ModuleSettingsDrawer
+            title={`${q.category} · Level ${q.level} (${q.level} Pkt)`}
+            onClose={() => setOpenQuestion(null)}
+          >
+            <div className="ww-jeo-question">{q.q}</div>
+            {(q.revealed || winner) ? (
+              <div className="ww-jeo-answer">💡 {q.a}</div>
+            ) : (
+              admin && (
+                <button className="ww-mini-btn" onClick={() => {
+                  const next = rounds.map((rr, i) => i === openQuestion.ri ? {
+                    ...rr,
+                    questions: rr.questions.map((qq, j) => j === openQuestion.qi ? { ...qq, revealed: true } : qq),
+                  } : rr);
+                  onPatch({ rounds: next });
+                }}>Antwort zeigen</button>
+              )
+            )}
+            {admin && active && !r.finishedAt && (
+              <>
+                <label className="ww-label" style={{ marginTop: 14 }}>SIEGER</label>
+                <div className="ww-flunky-assign">
+                  {participants.map(u => (
+                    <button
+                      key={u.id}
+                      className={`ww-flunky-assign-row ${q.winnerUserId === u.id ? 'sel' : ''}`}
+                      onClick={() => { setQuestionWinner(openQuestion.ri, openQuestion.qi, u.id); setOpenQuestion(null); }}
+                      style={{ background: q.winnerUserId === u.id ? 'rgba(245,165,36,0.15)' : '', border: 'none', textAlign: 'left' }}
+                    >
+                      <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                      <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                      {q.winnerUserId === u.id && <Check size={14} />}
+                    </button>
+                  ))}
+                </div>
+                <button className="ww-mini-btn red" style={{ marginTop: 10 }}
+                  onClick={() => { setQuestionWinner(openQuestion.ri, openQuestion.qi, null); setOpenQuestion(null); }}>
+                  Niemand · Punkte annullieren
+                </button>
+              </>
+            )}
+            {winner && !admin && (
+              <div className="ww-muted" style={{ marginTop: 12 }}>Gewonnen von {winner.emoji} {winner.displayName || winner.email}</div>
+            )}
+          </ModuleSettingsDrawer>
+        );
+      })()}
+    </>
+  );
+}
+
+function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
+  const [cats, setCats] = useState(jeopardy?.categories?.length ? jeopardy.categories : ['', '', '', '', '']);
+  const [pts, setPts] = useState((jeopardy?.pointsPerPosition || [5, 3, 2, 1]).join(','));
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (jeopardy?.categories?.length) setCats(jeopardy.categories);
+  }, [jeopardy?.id]);
+
+  const participants = jeopardy?.participants || [];
+  const memberIds = members.map(m => m.expand?.user?.id).filter(Boolean);
+
+  const updateCat = (i, v) => {
+    const next = [...cats]; while (next.length < 5) next.push('');
+    next[i] = v;
+    setCats(next);
+  };
+
+  const saveCats = () => {
+    const filtered = cats.map(c => (c || '').trim()).filter(Boolean);
+    onPatch({ categories: filtered });
+  };
+
+  const savePts = () => {
+    const arr = pts.split(/[,\s]+/).map(x => Number(x)).filter(n => Number.isFinite(n) && n >= 0);
+    onPatch({ pointsPerPosition: arr });
+  };
+
+  const startRound = async () => {
+    const filtered = cats.map(c => (c || '').trim()).filter(Boolean);
+    if (filtered.length < 1) { alert('Mindestens eine Kategorie'); return; }
+    setBusy(true);
+    try { await onGenerate(filtered); } finally { setBusy(false); }
+  };
+
+  const toggleParticipant = (uid) => {
+    const has = participants.includes(uid);
+    onPatch({ participants: has ? participants.filter(x => x !== uid) : [...participants, uid] });
+  };
+  const allParticipants = () => onPatch({ participants: memberIds });
+  const clearParticipants = () => onPatch({ participants: [] });
+
+  const clearRounds = () => {
+    if (!confirm('Alle Runden + Fragen löschen?')) return;
+    onPatch({ rounds: [] });
+  };
+
+  return (
+    <div>
+      <label className="ww-label">KATEGORIEN (5)</label>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <input
+          key={i} className="ww-input"
+          style={{ marginTop: i === 0 ? 0 : 6 }}
+          placeholder={`Kategorie ${i + 1}`}
+          value={cats[i] || ''}
+          onChange={(e) => updateCat(i, e.target.value)}
+          onBlur={saveCats}
+          maxLength={40}
+        />
+      ))}
+
+      <label className="ww-label">PUNKTE PRO PLATZ (komma-getrennt, 1. bis n.)</label>
+      <input className="ww-input" value={pts} onChange={e => setPts(e.target.value)} onBlur={savePts} placeholder="5,3,2,1" />
+
+      <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
+        <button className="ww-mini-btn" onClick={allParticipants}>Alle dabei</button>
+        <button className="ww-mini-btn red" onClick={clearParticipants}>↺ Leer</button>
+      </div>
+      <label className="ww-label" style={{ marginTop: 10 }}>TEILNEHMER</label>
+      <div className="ww-flunky-assign">
+        {members.map(m => {
+          const u = m.expand?.user; if (!u) return null;
+          const on = participants.includes(u.id);
+          return (
+            <div key={u.id} className="ww-flunky-assign-row">
+              <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+              <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+              <button className={`ww-mini-btn ${on ? 'active' : ''}`} onClick={() => toggleParticipant(u.id)}>
+                {on ? <><Check size={11} /> dabei</> : 'mitspielen'}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <button className="ww-big-cta green" onClick={startRound} disabled={busy} style={{ marginTop: 14 }}>
+        <Play size={20} /><span>{busy ? 'GENERIERE FRAGEN…' : 'NEUE RUNDE STARTEN'}</span>
+      </button>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Anthropic generiert 5 Fragen pro Kategorie. Dauert ca. 5–15 Sek.
+      </p>
+
+      <button className="ww-danger-btn red" onClick={clearRounds} style={{ marginTop: 14 }}>
+        <Trash2 size={14} /> Alle Runden löschen
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
 // Custom-module view + settings (generic competition)
 // ============================================================
 
@@ -1504,6 +1930,24 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
 
   const ready = entrants.length >= 2;
 
+  const archivedGames = mod.games || [];
+  const archivedCount = archivedGames.length;
+  const currentGameDone = setsArr.filter(s => s.winner).length === totalSets;
+
+  const startNewGame = () => {
+    const hasState = (mod.sets || []).length > 0 || (mod.teams || []).length > 0 || (mod.participants || []).length > 0;
+    if (hasState && !confirm('Aktuelles Spiel archivieren und neues starten? Teams und Sets werden zurückgesetzt.')) return;
+    const games = hasState ? [...archivedGames, {
+      id: String(Date.now()),
+      mode: mod.mode,
+      teams: mod.teams || [],
+      participants: mod.participants || [],
+      sets: mod.sets || [],
+      endedAt: new Date().toISOString(),
+    }] : archivedGames;
+    onPatch({ games, sets: [], teams: [], participants: [] });
+  };
+
   return (
     <>
       <ModuleHeader title={`${mod.icon || '🎯'} ${mod.name}`} admin={admin} onOpenSettings={onOpenSettings} />
@@ -1513,6 +1957,12 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
         <StatPill label={mod.mode === 'teams' ? 'Mein Team' : 'Meine Siege'} value={myWins} />
         <StatPill label="Pkt" value={myPts} accent />
       </div>
+
+      {admin && active && (currentGameDone || archivedCount > 0) && (
+        <button className="ww-mini-btn" onClick={startNewGame} style={{ marginBottom: 10 }}>
+          <Play size={11} /> Neues Spiel starten (Teams neu)
+        </button>
+      )}
 
       {!ready && (
         <div className="ww-empty">
@@ -1597,6 +2047,36 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
             </div>
           </section>
         </>
+      )}
+
+      {archivedCount > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><Trophy size={16} /><h3>VERGANGENE SPIELE ({archivedCount})</h3></div>
+          <div className="ww-game-list">
+            {[...archivedGames].reverse().map((g, idx) => {
+              const gWinsByEntrant = {};
+              for (const s of g.sets || []) if (s.winner) gWinsByEntrant[s.winner] = (gWinsByEntrant[s.winner] || 0) + 1;
+              const gEntrants = (g.mode || mod.mode) === 'teams'
+                ? (g.teams || [])
+                : (g.participants || []).map(uid => {
+                    const u = usersById[uid];
+                    return { id: uid, name: u?.displayName || u?.email || '?' };
+                  });
+              const ranking = gEntrants.map(e => ({ ...e, w: gWinsByEntrant[e.id] || 0 })).sort((a, b) => b.w - a.w);
+              return (
+                <div key={g.id} className="ww-game-card">
+                  <div className="ww-game-head">
+                    <span className="ww-game-tag">SPIEL {archivedCount - idx}</span>
+                    <span className="ww-game-result">{ranking[0]?.w > 0 ? `🏆 ${ranking[0].name.slice(0, 14)} (${ranking[0].w})` : '—'}</span>
+                  </div>
+                  <div className="ww-flunky-roster" style={{ fontSize: 11 }}>
+                    {ranking.map(e => <span key={e.id}>{e.name}: {e.w}</span>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       )}
     </>
   );
@@ -1871,7 +2351,7 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, customModules, myId, onShowUserDetail }) {
+function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, myId, onShowUserDetail }) {
   return (
     <div className="ww-crew">
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({members.length})</h3></div>
@@ -1879,7 +2359,7 @@ function CrewView({ members, statsMap, event, flunky, customModules, myId, onSho
         {members.map(m => {
           const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
-          const points = computeTotalPoints(u.id, s, event, flunky, customModules);
+          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy);
           return (
             <div key={u.id} className={`ww-crew-card ${u.id === myId ? 'me' : ''}`}>
               <button className="ww-crew-head clickable" onClick={() => onShowUserDetail?.(u.id)}>
@@ -1906,7 +2386,7 @@ function CrewView({ members, statsMap, event, flunky, customModules, myId, onSho
 // User detail drawer (point breakdown)
 // ============================================================
 
-function UserDetailDrawer({ user, stats, event, flunky, customModules, isMe, onClose }) {
+function UserDetailDrawer({ user, stats, event, flunky, jeopardy, customModules, isMe, onClose }) {
   if (!user) return null;
   const s = stats || { beer: 0, mische: 0 };
   const beerPts = (s.beer || 0) * (event.pointsPerBeer ?? 1);
@@ -1940,7 +2420,23 @@ function UserDetailDrawer({ user, stats, event, flunky, customModules, isMe, onC
 
   const customPts = customBreakdown.reduce((s, x) => s + x.pts, 0);
 
-  const total = drinkPts + flunkyPts + customPts;
+  // Jeopardy: per-round position + cumulative points
+  const jeopardyBreakdown = [];
+  if (jeopardy) {
+    const positionPts = Array.isArray(jeopardy.pointsPerPosition) ? jeopardy.pointsPerPosition : [];
+    (jeopardy.rounds || []).forEach((r, ri) => {
+      if (!r.finishedAt) return;
+      const scores = jeopardyRoundScores(r);
+      const ranking = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+      const idx = ranking.findIndex(([uid]) => uid === user.id);
+      if (idx < 0) return;
+      const pts = (idx < positionPts.length ? positionPts[idx] : 0) || 0;
+      jeopardyBreakdown.push({ roundNo: ri + 1, place: idx + 1, roundScore: scores[user.id] || 0, pts });
+    });
+  }
+  const jeopardyPts = jeopardyBreakdown.reduce((s, x) => s + x.pts, 0);
+
+  const total = drinkPts + flunkyPts + customPts + jeopardyPts;
 
   return (
     <ModuleSettingsDrawer
@@ -1982,6 +2478,16 @@ function UserDetailDrawer({ user, stats, event, flunky, customModules, isMe, onC
               <DetailRow key={cm.id} label={`${cm.icon || '🎯'} ${cm.name} (${wins}× × ${cm.pointsPerWin || 0} pkt)`} pts={pts} />
             ))}
             <DetailRow label="Summe" pts={customPts} bold />
+          </div>
+        )}
+
+        {jeopardyBreakdown.length > 0 && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🎤 JEOPARDY</div>
+            {jeopardyBreakdown.map(({ roundNo, place, roundScore, pts }) => (
+              <DetailRow key={roundNo} label={`Runde ${roundNo} · Platz ${place} (${roundScore} Frage-Pkt)`} pts={pts} />
+            ))}
+            <DetailRow label="Summe" pts={jeopardyPts} bold />
           </div>
         )}
 

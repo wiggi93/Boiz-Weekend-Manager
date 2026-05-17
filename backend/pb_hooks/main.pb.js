@@ -64,6 +64,18 @@ onRecordAfterCreateSuccess((e) => {
   } catch (err) {
     console.log("flunky seed:", err);
   }
+  try {
+    const jCol = e.app.findCollectionByNameOrId("jeopardy");
+    const j = new Record(jCol);
+    j.set("event", e.record.id);
+    j.set("categories", []);
+    j.set("pointsPerPosition", [5, 3, 2, 1]);
+    j.set("participants", []);
+    j.set("rounds", []);
+    e.app.save(j);
+  } catch (err) {
+    console.log("jeopardy seed:", err);
+  }
   e.next();
 }, "events");
 
