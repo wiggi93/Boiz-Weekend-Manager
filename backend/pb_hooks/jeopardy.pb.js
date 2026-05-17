@@ -28,8 +28,15 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
     return e.forbiddenError("event host privileges required", null);
   }
 
+  // Auth preference: OAuth token (counts against Claude.ai Pro/Max
+  // subscription) wins over API key (pay-per-use credits). Either one
+  // works; setting both lets the maintainer flip back to API by clearing
+  // the OAuth env var without touching the API-key one.
+  const oauthToken = $os.getenv("CLAUDE_OAUTH_TOKEN");
   const apiKey = $os.getenv("ANTHROPIC_API_KEY");
-  if (!apiKey) return e.internalServerError("ANTHROPIC_API_KEY not configured on the server", null);
+  if (!oauthToken && !apiKey) {
+    return e.internalServerError("neither CLAUDE_OAUTH_TOKEN nor ANTHROPIC_API_KEY configured on the server", null);
+  }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
   const prompt = `Du erstellst ein deutsches Jeopardy-Spielbrett für einen Spieleabend unter Freunden.
@@ -52,16 +59,25 @@ Gib AUSSCHLIESSLICH gültiges JSON zurück (kein Markdown, keine Erklärung, kei
 
 Insgesamt ${cats.length * 5} Einträge.`;
 
+  const headers = oauthToken
+    ? {
+        "Authorization": "Bearer " + oauthToken,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20",
+        "content-type": "application/json",
+      }
+    : {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      };
+
   let res;
   try {
     res = $http.send({
       url: "https://api.anthropic.com/v1/messages",
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
+      headers: headers,
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
         max_tokens: 8000,
