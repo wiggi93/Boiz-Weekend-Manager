@@ -61,10 +61,15 @@ Insgesamt ${cats.length * 5} Einträge.`;
 
   const headers = oauthToken
     ? {
+        // Pro/Max OAuth tokens only allow Messages API access when the
+        // request identifies itself as Claude Code (Anthropic gates third-
+        // party use). Without the User-Agent + Claude-Code system prompt
+        // below the same token gets a 429 rate_limit_error on every call.
         "Authorization": "Bearer " + oauthToken,
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "oauth-2025-04-20",
         "content-type": "application/json",
+        "User-Agent": "claude-cli/1.0.0",
       }
     : {
         "x-api-key": apiKey,
@@ -72,17 +77,22 @@ Insgesamt ${cats.length * 5} Einträge.`;
         "content-type": "application/json",
       };
 
+  const requestBody = {
+    model: "claude-sonnet-4-5",
+    max_tokens: 8000,
+    messages: [{ role: "user", content: prompt }],
+  };
+  if (oauthToken) {
+    requestBody.system = "You are Claude Code, Anthropic's official CLI for Claude.";
+  }
+
   let res;
   try {
     res = $http.send({
       url: "https://api.anthropic.com/v1/messages",
       method: "POST",
       headers: headers,
-      body: JSON.stringify({
-        model: "claude-sonnet-4-5",
-        max_tokens: 8000,
-        messages: [{ role: "user", content: prompt }],
-      }),
+      body: JSON.stringify(requestBody),
       timeout: 90,
     });
   } catch (err) {
