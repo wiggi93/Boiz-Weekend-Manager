@@ -1715,12 +1715,15 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   // markRight does NOT clear triedUsers — those users tried wrong and keep
   // their −half penalty in the round scoring.
   const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null }, true);
-  // FALSCH: log the dran-person as tried, clear current; step 1 reappears
-  // with that user excluded from the next-dran picker list.
+  // FALSCH in hostPlays mode closes the question immediately — by the time
+  // someone clicks Richtig/Falsch the non-dran participants already saw the
+  // correct answer on their screen, so a second-try "Wer versucht jetzt?"
+  // becomes "say what you just read". The dran-person's −half penalty
+  // sticks via triedUsers; queue advances.
   const markWrong = (ri, qi) => {
     const q = rounds[ri]?.questions?.[qi]; if (!q) return;
     const tried = Array.from(new Set([...(q.triedUsers || []), q.currentlyAnswering].filter(Boolean)));
-    resolveQuestion(ri, qi, { currentlyAnswering: null, triedUsers: tried }, false);
+    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried }, true);
   };
   // closeQuestion ("Niemand") also preserves triedUsers so penalties for
   // everyone who tried still apply.
