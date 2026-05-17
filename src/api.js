@@ -152,6 +152,47 @@ export async function updateFlunky(id, patch) {
   return pb.collection('flunky').update(id, patch);
 }
 
+// ---- Jeopardy ----
+export async function getJeopardy(eventId) {
+  try {
+    return await pb.collection('jeopardy').getFirstListItem(`event="${eventId}"`);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateJeopardy(id, patch) {
+  return pb.collection('jeopardy').update(id, patch);
+}
+
+export async function ensureJeopardy(eventId) {
+  const existing = await getJeopardy(eventId);
+  if (existing) return existing;
+  return pb.collection('jeopardy').create({
+    event: eventId,
+    categories: [],
+    pointsPerPosition: [5, 3, 2, 1],
+    participants: [],
+    rounds: [],
+  });
+}
+
+export async function generateJeopardyBoard(eventId, categories) {
+  const res = await fetch(`${PB_URL}/api/jeopardy/generate`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: pb.authStore.token,
+    },
+    body: JSON.stringify({ eventId, categories }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`generate failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
 // ---- Custom modules ----
 export async function listCustomModules(eventId) {
   return pb.collection('custom_modules').getFullList({
@@ -185,6 +226,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('stats').subscribe('*', wrap('stats', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('event_members').subscribe('*', wrap('event_members', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('flunky').subscribe('*', wrap('flunky', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('jeopardy').subscribe('*', wrap('jeopardy', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('custom_modules').subscribe('*', wrap('custom_modules', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('users').subscribe('*', wrap('users'))),
   ]);
