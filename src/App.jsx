@@ -1684,14 +1684,21 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     onPatch({ rounds: next });
   };
 
-  const openTileShared = (ri, qi) => {
+  const openTileShared = (ri, qi, dranUserId) => {
     if (!active) return;
-    resolveQuestion(ri, qi, { opened: true, currentlyAnswering: null }, false);
+    // The picker (whoever tapped the tile) auto-becomes the first dran.
+    resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [] }, false);
   };
   const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId }, false);
-  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null }, true);
-  const markWrong = (ri, qi) => resolveQuestion(ri, qi, { currentlyAnswering: null }, false); // back to "wer ist dran?"
-  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null }, true);
+  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null, triedUsers: [] }, true);
+  // FALSCH: log the dran-person as tried, clear current; step 1 reappears
+  // with that user excluded from the next-dran picker list.
+  const markWrong = (ri, qi) => {
+    const q = rounds[ri]?.questions?.[qi]; if (!q) return;
+    const tried = Array.from(new Set([...(q.triedUsers || []), q.currentlyAnswering].filter(Boolean)));
+    resolveQuestion(ri, qi, { currentlyAnswering: null, triedUsers: tried }, false);
+  };
+  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: [] }, true);
 
   // Current picker derivation
   const pickerOrder = currentRound?.pickerOrder || [];
@@ -1763,10 +1770,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                     if (currentRound.finishedAt && !winner) return;
                     if (hostPlays) {
                       // Turn-based: only the current picker (or host as failsafe
-                      // if there's no picker queue yet) can open a tile.
+                      // if there's no picker queue yet) can open a tile. The
+                      // picker auto-becomes the first answerer.
                       if (q.opened || winner || !active) return;
                       const allowed = iAmPicker || (admin && !currentPickerId);
-                      if (allowed) openTileShared(currentRoundIdx, q._qi);
+                      if (!allowed) return;
+                      const dran = iAmPicker ? me.id : currentPickerId;
+                      openTileShared(currentRoundIdx, q._qi, dran);
                     } else {
                       setOpenQuestion({ ri: currentRoundIdx, qi: q._qi });
                     }
@@ -1862,7 +1872,10 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
 
         // -------- HOST-PLAYS branch (shared, turn-based) --------
         if (hostPlays) {
-          // Step 1: nobody picked yet → host picks who's dran
+          const tried = q.triedUsers || [];
+          const remaining = participants.filter(p => !tried.includes(p.id));
+          // Step 1: only appears AFTER a wrong answer — picker auto-becomes the
+          // first dran on tile-tap. Filters out users who already tried.
           if (!q.currentlyAnswering) {
             return (
               <ModuleSettingsDrawer
@@ -1872,29 +1885,37 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 <div className="ww-jeo-question">{q.q}</div>
                 {admin ? (
                   <>
-                    <label className="ww-label" style={{ marginTop: 14 }}>WER ANTWORTET?</label>
-                    <div className="ww-flunky-assign">
-                      {participants.map(u => (
-                        <button
-                          key={u.id}
-                          className="ww-flunky-assign-row"
-                          onClick={() => setDran(activeOpen.ri, activeOpen.qi, u.id)}
-                          style={{ border: 'none', textAlign: 'left', cursor: 'pointer' }}
-                        >
-                          <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
-                          <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
-                          <ChevronRight size={14} />
-                        </button>
-                      ))}
-                    </div>
+                    <label className="ww-label" style={{ marginTop: 12 }}>
+                      {tried.length > 0 ? 'WER VERSUCHT JETZT?' : 'WER ANTWORTET?'}
+                    </label>
+                    {remaining.length === 0 ? (
+                      <div className="ww-muted" style={{ fontSize: 13, padding: 8, textAlign: 'center' }}>
+                        Alle haben falsch geantwortet.
+                      </div>
+                    ) : (
+                      <div className="ww-flunky-assign">
+                        {remaining.map(u => (
+                          <button
+                            key={u.id}
+                            className="ww-flunky-assign-row"
+                            onClick={() => setDran(activeOpen.ri, activeOpen.qi, u.id)}
+                            style={{ border: 'none', textAlign: 'left', cursor: 'pointer' }}
+                          >
+                            <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                            <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                            <ChevronRight size={14} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <button className="ww-mini-btn red" style={{ marginTop: 10 }}
                       onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>
-                      Frage überspringen
+                      Niemand wusste es · Frage zu
                     </button>
                   </>
                 ) : (
                   <div className="ww-muted" style={{ fontSize: 12, margin: '8px 0' }}>
-                    Warte auf den Host — wer ist dran?
+                    Warte auf den Host — wer versucht es jetzt?
                   </div>
                 )}
               </ModuleSettingsDrawer>

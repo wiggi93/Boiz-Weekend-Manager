@@ -767,7 +767,8 @@
   max-width: 540px; margin: 0 auto;
   background: var(--bg-2); border-top: 1px solid var(--amber);
   border-radius: 16px 16px 0 0;
-  max-height: 85dvh;
+  height: 90dvh;
+  max-height: 90dvh;
   display: flex; flex-direction: column;
   z-index: 100;
   animation: slideup 0.25s ease-out;
@@ -782,6 +783,7 @@
 }
 .ww-drawer-body {
   flex: 1 1 auto;
+  min-height: 0; /* critical: lets flex child shrink so overflow-y engages */
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
