@@ -39,14 +39,19 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
-  const prompt = `Erstelle ein deutsches Jeopardy-Spielbrett für einen Spieleabend unter Freunden.
+  const prompt = `Erstelle ein deutsches Jeopardy-Spielbrett für einen anspruchsvollen Spieleabend unter Freunden, die gerne knobeln.
 
 Kategorien:
 ${catBlock}
 
-Pro Kategorie GENAU 5 Fragen mit aufsteigendem Schwierigkeitsgrad (Level 1 = sehr leicht / Allgemeinwissen, Level 5 = sehr schwer / Experten).
-Die Fragen sollen passend zur Kategorie sein, kurz (max. 25 Wörter), kreativ, eindeutig beantwortbar und für ein deutsches Publikum interessant. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt ..."), wo es passt — sonst normale Frage.
-Antworten kurz und faktisch.
+Pro Kategorie GENAU 5 Fragen mit aufsteigendem Schwierigkeitsgrad:
+- Level 1: solides Allgemeinwissen, sollte ein interessierter Erwachsener wissen (keine Trivia-Selbstläufer)
+- Level 2: mittelschwer, leicht spezialisiert
+- Level 3: anspruchsvoll, Detailwissen oder weniger bekannte Fakten
+- Level 4: schwer, deutlich spezialisiert / weniger geläufig
+- Level 5: sehr schwer / Experten / überraschende Details (sollte richtig nachdenken oder raten lassen)
+
+Vermeide offensichtliche Tagesschau-Fragen ("Hauptstadt von Deutschland"). Die Fragen sollen für ein erwachsenes deutsches Publikum interessant sein, kreativ formuliert, kurz (max. 25 Wörter) und eindeutig beantwortbar. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt …"), wo es passt — sonst normale Frage. Antworten kurz und faktisch.
 
 Antworte AUSSCHLIESSLICH mit reinem JSON. Kein Vortext, keine Erklärung, kein Codeblock, kein "Hier ist das Brett". Die Antwort MUSS mit { beginnen und mit } enden, exakt nach diesem Schema:
 

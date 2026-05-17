@@ -496,6 +496,8 @@ export default function App() {
       };
       const rounds = [...(jeopardyRef.current?.rounds || []), round];
       await onJeopardyPatch({ rounds, categories });
+      // Close the settings drawer so the host lands directly on the board.
+      setModuleSettingsOpen(null);
       showToast('Neue Runde mit frischen Fragen 🎤');
     } catch (e) {
       showToast(`Frage-Gen Fehler: ${e?.message?.slice?.(0, 80) || e}`);
