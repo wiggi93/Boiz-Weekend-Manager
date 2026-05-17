@@ -94,17 +94,27 @@ Insgesamt ${cats.length * 5} Einträge.`;
     return e.internalServerError("anthropic http error: " + err, null);
   }
 
+  // res.body comes back as a Go []byte (Uint8Array-like in JSVM). JSON.parse
+  // on it throws SyntaxError. Convert through the PB-provided toString helper
+  // (handles UTF-8 properly, unlike String.fromCharCode).
+  let bodyStr;
+  try {
+    bodyStr = typeof res.body === "string" ? res.body : toString(res.body);
+  } catch (err) {
+    return e.internalServerError("anthropic body decode failed: " + err, null);
+  }
+
   if (res.statusCode !== 200) {
-    return e.internalServerError("anthropic " + res.statusCode + ": " + res.body, null);
+    return e.internalServerError("anthropic " + res.statusCode + ": " + bodyStr.slice(0, 400), null);
   }
 
   let text;
   try {
-    const parsed = JSON.parse(res.body);
+    const parsed = JSON.parse(bodyStr);
     text = parsed.content && parsed.content[0] && parsed.content[0].text;
     if (!text) throw new Error("no content");
   } catch (err) {
-    return e.internalServerError("anthropic response unparseable: " + err, null);
+    return e.internalServerError("anthropic response unparseable: " + err + " | body[:300]=" + bodyStr.slice(0, 300), null);
   }
 
   // Extract the JSON object even if the model wrapped it in prose,
