@@ -1155,3 +1155,11 @@
   border-color: var(--amber);
   animation: pulse-opened 1.6s ease-in-out infinite;
 }
+
+.ww-jeo-cell.failed {
+  background: rgba(239,68,68,0.15);
+  border-color: var(--red);
+  color: var(--red);
+  font-size: 13px;
+}
+.ww-jeo-failed { font-size: 12px; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.05em; }

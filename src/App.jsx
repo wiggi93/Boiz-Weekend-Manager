@@ -78,10 +78,28 @@ const computeCustomPoints = (userId, customModules) => {
   return total;
 };
 
+// Levels are stored as 1..5 (matches the generator prompt). Points displayed
+// and scored are level × 100, so the board reads 100, 200, 300, 400, 500.
+const levelPoints = (level) => {
+  const n = Number(level) || 0;
+  return n >= 10 ? n : n * 100;
+};
+
 const jeopardyRoundScores = (round) => {
   const map = {};
   for (const q of round?.questions || []) {
-    if (q.winnerUserId) map[q.winnerUserId] = (map[q.winnerUserId] || 0) + (q.level || 0);
+    const pts = levelPoints(q.level);
+    if (q.winnerUserId) {
+      map[q.winnerUserId] = (map[q.winnerUserId] || 0) + pts;
+    }
+    // Every user who tried and didn't end up winning loses half the
+    // question's points. Penalty applies whether the question was
+    // eventually won by someone else or abandoned with "Niemand".
+    const penalty = Math.floor(pts / 2);
+    for (const u of q.triedUsers || []) {
+      if (!u || u === q.winnerUserId) continue;
+      map[u] = (map[u] || 0) - penalty;
+    }
   }
   return map;
 };
@@ -1671,6 +1689,8 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     onPatch({ rounds: next });
   };
 
+  // Resolved helpers preserve triedUsers so penalties stick after right/close.
+
   // --- hostPlays helpers ---
   // Patches one question. `advanceTurn=true` also rotates pickerIdx by 1 so
   // the next player gets to pick a tile.
@@ -1692,7 +1712,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [] }, false);
   };
   const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId }, false);
-  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null, triedUsers: [] }, true);
+  // markRight does NOT clear triedUsers — those users tried wrong and keep
+  // their −half penalty in the round scoring.
+  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null }, true);
   // FALSCH: log the dran-person as tried, clear current; step 1 reappears
   // with that user excluded from the next-dran picker list.
   const markWrong = (ri, qi) => {
@@ -1700,7 +1722,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     const tried = Array.from(new Set([...(q.triedUsers || []), q.currentlyAnswering].filter(Boolean)));
     resolveQuestion(ri, qi, { currentlyAnswering: null, triedUsers: tried }, false);
   };
-  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: [] }, true);
+  // closeQuestion ("Niemand") also preserves triedUsers so penalties for
+  // everyone who tried still apply.
+  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null }, true);
 
   // Current picker derivation
   const pickerOrder = currentRound?.pickerOrder || [];
@@ -1763,7 +1787,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               const q = grid[c]?.[lvl];
               if (!q) return <div key={`${c}-${lvl}`} className="ww-jeo-cell empty">—</div>;
               const winner = q.winnerUserId ? usersById[q.winnerUserId] : null;
-              const cls = q.winnerUserId ? 'won' : (q.revealed ? 'revealed' : '');
+              const triedWithoutWinner = !winner && Array.isArray(q.triedUsers) && q.triedUsers.length > 0 && !q.opened;
+              const pts = levelPoints(lvl);
+              const cls = q.winnerUserId
+                ? 'won'
+                : triedWithoutWinner
+                  ? 'failed'
+                  : (q.revealed ? 'revealed' : '');
               return (
                 <button
                   key={`${c}-${lvl}`}
@@ -1790,9 +1820,11 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                   title={`${c} · Level ${lvl}`}
                 >
                   {winner ? (
-                    <span className="ww-jeo-winner">{winner.emoji || '🍺'} · {lvl}</span>
+                    <span className="ww-jeo-winner">{winner.emoji || '🍺'} · {pts}</span>
+                  ) : triedWithoutWinner ? (
+                    <span className="ww-jeo-failed">💀 −{Math.floor(pts / 2)}</span>
                   ) : (
-                    <span className="ww-jeo-level">{lvl}</span>
+                    <span className="ww-jeo-level">{pts}</span>
                   )}
                 </button>
               );
@@ -1881,7 +1913,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
           if (!q.currentlyAnswering) {
             return (
               <ModuleSettingsDrawer
-                title={`${q.category} · Level ${q.level} (${q.level} Pkt)`}
+                title={`${q.category} · ${levelPoints(q.level)} Pkt`}
                 onClose={admin ? close : (() => {})}
               >
                 <div className="ww-jeo-question">{q.q}</div>
@@ -1927,7 +1959,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
           // Step 2: somebody is dran → show Q to all, A to all except dran
           return (
             <ModuleSettingsDrawer
-              title={`${q.category} · Level ${q.level} (${q.level} Pkt)`}
+              title={`${q.category} · ${levelPoints(q.level)} Pkt`}
               onClose={admin ? close : (() => {})}
             >
               <div className="ww-jeo-dran">
@@ -1967,7 +1999,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         const showAnswer = winner || q.revealed;
         return (
           <ModuleSettingsDrawer
-            title={`${q.category} · Level ${q.level} (${q.level} Pkt)`}
+            title={`${q.category} · ${levelPoints(q.level)} Pkt`}
             onClose={close}
           >
             <div className="ww-jeo-question">{q.q}</div>

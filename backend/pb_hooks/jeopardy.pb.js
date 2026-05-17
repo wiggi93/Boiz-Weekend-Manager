@@ -39,21 +39,21 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
-  const prompt = `Erstelle ein deutsches Jeopardy-Spielbrett für einen anspruchsvollen Spieleabend unter Freunden, die gerne knobeln.
+  const prompt = `Erstelle ein deutsches Jeopardy-Spielbrett für einen lockeren Spieleabend unter Freunden.
 
 Kategorien:
 ${catBlock}
 
 Pro Kategorie GENAU 5 Fragen mit aufsteigendem Schwierigkeitsgrad:
-- Level 1: solides Allgemeinwissen, sollte ein interessierter Erwachsener wissen (keine Trivia-Selbstläufer)
-- Level 2: mittelschwer, leicht spezialisiert
-- Level 3: anspruchsvoll, Detailwissen oder weniger bekannte Fakten
-- Level 4: schwer, deutlich spezialisiert / weniger geläufig
-- Level 5: sehr schwer / Experten / überraschende Details (sollte richtig nachdenken oder raten lassen)
+- Level 1 (100 Pkt): sehr leicht, klassisches Allgemeinwissen, fast jeder weiß es
+- Level 2 (200 Pkt): leicht, ein bisschen nachdenken
+- Level 3 (300 Pkt): mittel, gutes Allgemeinwissen reicht
+- Level 4 (400 Pkt): schon etwas spezifischer, leicht knifflig
+- Level 5 (500 Pkt): die schwerste der Kategorie — aber immer noch fair, nicht Experten-Niveau
 
-Vermeide offensichtliche Tagesschau-Fragen ("Hauptstadt von Deutschland"). Die Fragen sollen für ein erwachsenes deutsches Publikum interessant sein, kreativ formuliert, kurz (max. 25 Wörter) und eindeutig beantwortbar. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt …"), wo es passt — sonst normale Frage. Antworten kurz und faktisch.
+Die Fragen sollen unterhaltsam und für ein normales deutsches Publikum machbar sein. Kurz (max. 25 Wörter), eindeutig beantwortbar. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt …"), wo es passt. Antworten kurz und faktisch.
 
-Antworte AUSSCHLIESSLICH mit reinem JSON. Kein Vortext, keine Erklärung, kein Codeblock, kein "Hier ist das Brett". Die Antwort MUSS mit { beginnen und mit } enden, exakt nach diesem Schema:
+Antworte AUSSCHLIESSLICH mit reinem JSON. Kein Vortext, keine Erklärung, kein Codeblock, kein "Hier ist das Brett". Die Antwort MUSS mit { beginnen und mit } enden, exakt nach diesem Schema (level bleibt 1..5):
 
 {"questions":[{"category":"<Kategoriename wortgleich>","level":1,"q":"<Frage>","a":"<Antwort>"}]}
 
