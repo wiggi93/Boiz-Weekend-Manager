@@ -5,6 +5,7 @@ import {
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
   Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
+  ChevronRight,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
