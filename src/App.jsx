@@ -1776,14 +1776,23 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         const q = r?.questions?.[openQuestion.qi];
         if (!q) return null;
         const winner = q.winnerUserId ? usersById[q.winnerUserId] : null;
+        const hostPlays = !!jeopardy?.hostPlays;
+        // In host-plays mode the answer stays hidden for EVERYONE until a
+        // winner is picked, so the host can play along honestly. Once a
+        // winner is marked, the answer reveals to all for verification.
+        const showAnswer = winner || (q.revealed && !hostPlays);
         return (
           <ModuleSettingsDrawer
             title={`${q.category} · Level ${q.level} (${q.level} Pkt)`}
             onClose={() => setOpenQuestion(null)}
           >
             <div className="ww-jeo-question">{q.q}</div>
-            {(q.revealed || winner) ? (
+            {showAnswer ? (
               <div className="ww-jeo-answer">💡 {q.a}</div>
+            ) : hostPlays ? (
+              <div className="ww-muted" style={{ fontSize: 12, margin: '8px 0' }}>
+                🤫 Antwort versteckt bis ein Sieger gewählt wurde (Host spielt mit).
+              </div>
             ) : (
               admin && (
                 <button className="ww-mini-btn" onClick={() => {
@@ -1828,8 +1837,16 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   );
 }
 
+const DEFAULT_JEO_CATS = [
+  'Geographie',
+  'Zurück in die Schule',
+  'Reality TV Deutschland',
+  'Twitch & Youtube Deutschland',
+  'Songtexte 2000er',
+];
+
 function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
-  const [cats, setCats] = useState(jeopardy?.categories?.length ? jeopardy.categories : ['', '', '', '', '']);
+  const [cats, setCats] = useState(jeopardy?.categories?.length ? jeopardy.categories : DEFAULT_JEO_CATS);
   const [pts, setPts] = useState((jeopardy?.pointsPerPosition || [5, 3, 2, 1]).join(','));
   const [busy, setBusy] = useState(false);
 
@@ -1892,6 +1909,22 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
 
       <label className="ww-label">PUNKTE PRO PLATZ (komma-getrennt, 1. bis n.)</label>
       <input className="ww-input" value={pts} onChange={e => setPts(e.target.value)} onBlur={savePts} placeholder="5,3,2,1" />
+
+      <label className="ww-label" style={{ marginTop: 14 }}>HOST SPIELT MIT</label>
+      <button
+        type="button"
+        className={`ww-module-toggle ${jeopardy?.hostPlays ? 'on' : ''}`}
+        onClick={() => onPatch({ hostPlays: !jeopardy?.hostPlays })}
+        style={{ width: '100%' }}
+      >
+        <span className="ww-mod-icon">{jeopardy?.hostPlays ? '🤫' : '👀'}</span>
+        <span className="ww-mod-name">
+          {jeopardy?.hostPlays
+            ? 'AN — Antwort erst nach Sieger-Pick sichtbar'
+            : 'AUS — Host sieht Antwort sofort'}
+        </span>
+        {jeopardy?.hostPlays ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
 
       <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
         <button className="ww-mini-btn" onClick={allParticipants}>Alle dabei</button>
