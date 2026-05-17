@@ -68,10 +68,17 @@ onRecordAfterCreateSuccess((e) => {
     const jCol = e.app.findCollectionByNameOrId("jeopardy");
     const j = new Record(jCol);
     j.set("event", e.record.id);
-    j.set("categories", []);
+    j.set("categories", [
+      "Geographie",
+      "Zurück in die Schule",
+      "Reality TV Deutschland",
+      "Twitch & Youtube Deutschland",
+      "Songtexte 2000er",
+    ]);
     j.set("pointsPerPosition", [5, 3, 2, 1]);
     j.set("participants", []);
     j.set("rounds", []);
+    j.set("hostPlays", false);
     e.app.save(j);
   } catch (err) {
     console.log("jeopardy seed:", err);
