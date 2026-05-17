@@ -477,11 +477,16 @@ export default function App() {
   const onJeopardyGenerate = async (categories) => {
     try {
       const board = await generateJeopardyBoard(currentEventId, categories);
+      // Random pick order for this round so players take turns tapping tiles
+      const parts = [...(jeopardyRef.current?.participants || [])];
+      const shuffled = parts.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
       const round = {
         id: String(Date.now()),
         startedAt: new Date().toISOString(),
         finishedAt: null,
         categories,
+        pickerOrder: shuffled,
+        pickerIdx: 0,
         questions: (board.questions || []).map(q => ({
           category: q.category, level: Number(q.level) || 1,
           q: String(q.q || ''), a: String(q.a || ''),
@@ -1664,23 +1669,35 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   };
 
   // --- hostPlays helpers ---
-  const patchQuestion = (ri, qi, patch) => {
+  // Patches one question. `advanceTurn=true` also rotates pickerIdx by 1 so
+  // the next player gets to pick a tile.
+  const resolveQuestion = (ri, qi, qPatch, advanceTurn) => {
     const next = rounds.map((r, i) => {
       if (i !== ri) return r;
-      const qs = r.questions.map((q, j) => j === qi ? { ...q, ...patch } : q);
-      return { ...r, questions: qs };
+      const qs = r.questions.map((q, j) => j === qi ? { ...q, ...qPatch } : q);
+      let pickerIdx = r.pickerIdx || 0;
+      const len = (r.pickerOrder || []).length;
+      if (advanceTurn && len > 0) pickerIdx = (pickerIdx + 1) % len;
+      return { ...r, questions: qs, pickerIdx };
     });
     onPatch({ rounds: next });
   };
 
   const openTileShared = (ri, qi) => {
-    if (!admin || !active) return;
-    patchQuestion(ri, qi, { opened: true, currentlyAnswering: null });
+    if (!active) return;
+    resolveQuestion(ri, qi, { opened: true, currentlyAnswering: null }, false);
   };
-  const setDran = (ri, qi, userId) => patchQuestion(ri, qi, { currentlyAnswering: userId });
-  const markRight = (ri, qi, who) => patchQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null });
-  const markWrong = (ri, qi) => patchQuestion(ri, qi, { currentlyAnswering: null }); // back to "wer ist dran?"
-  const closeQuestion = (ri, qi) => patchQuestion(ri, qi, { opened: false, currentlyAnswering: null });
+  const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId }, false);
+  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null }, true);
+  const markWrong = (ri, qi) => resolveQuestion(ri, qi, { currentlyAnswering: null }, false); // back to "wer ist dran?"
+  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null }, true);
+
+  // Current picker derivation
+  const pickerOrder = currentRound?.pickerOrder || [];
+  const pickerIdx = currentRound?.pickerIdx || 0;
+  const currentPickerId = pickerOrder.length > 0 ? pickerOrder[pickerIdx % pickerOrder.length] : null;
+  const currentPicker = currentPickerId ? usersById[currentPickerId] : null;
+  const iAmPicker = currentPickerId === me.id;
 
   const finishRound = (ri) => {
     if (!admin) return;
@@ -1721,6 +1738,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             <h3>RUNDE {currentRoundIdx + 1}{currentRound.finishedAt ? ' · BEENDET' : ''}</h3>
           </div>
 
+          {hostPlays && !currentRound.finishedAt && currentPicker && (
+            <div className={`ww-jeo-picker ${iAmPicker ? 'mine' : ''}`}>
+              🎯 An der Reihe: <b>{currentPicker.emoji || '🍺'} {currentPicker.displayName || currentPicker.email}</b>
+              {iAmPicker && <span style={{ marginLeft: 8 }}>— du bist dran, wähle ein Tile</span>}
+            </div>
+          )}
+
           <div className="ww-jeo-board" style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(60px, 1fr))` }}>
             {categories.map(c => (
               <div key={`h-${c}`} className="ww-jeo-cat-header" title={c}>{c}</div>
@@ -1737,13 +1761,19 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                   onClick={() => {
                     if (currentRound.finishedAt && !winner) return;
                     if (hostPlays) {
-                      // Shared modal: tile-open writes data so all clients react via realtime
-                      if (admin && active && !q.opened && !winner) openTileShared(currentRoundIdx, q._qi);
+                      // Turn-based: only the current picker (or host as failsafe
+                      // if there's no picker queue yet) can open a tile.
+                      if (q.opened || winner || !active) return;
+                      const allowed = iAmPicker || (admin && !currentPickerId);
+                      if (allowed) openTileShared(currentRoundIdx, q._qi);
                     } else {
                       setOpenQuestion({ ri: currentRoundIdx, qi: q._qi });
                     }
                   }}
-                  disabled={(!!currentRound.finishedAt && !winner) || (hostPlays && !admin && !q.opened)}
+                  disabled={
+                    (!!currentRound.finishedAt && !winner) ||
+                    (hostPlays && !winner && !q.opened && !(iAmPicker || (admin && !currentPickerId)))
+                  }
                   title={`${c} · Level ${lvl}`}
                 >
                   {winner ? (

@@ -1137,3 +1137,15 @@
   margin-bottom: 10px;
   text-align: center;
 }
+
+.ww-jeo-picker {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px;
+  font-size: 13px; text-align: center;
+  margin: 8px 0 12px;
+}
+.ww-jeo-picker.mine {
+  background: rgba(245,165,36,0.12);
+  border-color: var(--amber);
+  animation: pulse-opened 1.6s ease-in-out infinite;
+}
