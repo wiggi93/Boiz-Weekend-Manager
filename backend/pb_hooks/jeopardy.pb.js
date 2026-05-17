@@ -39,23 +39,18 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
-  const prompt = `Du erstellst ein deutsches Jeopardy-Spielbrett für einen Spieleabend unter Freunden.
+  const prompt = `Erstelle ein deutsches Jeopardy-Spielbrett für einen Spieleabend unter Freunden.
 
 Kategorien:
 ${catBlock}
 
-Erstelle pro Kategorie GENAU 5 Fragen mit aufsteigendem Schwierigkeitsgrad (Level 1 = sehr leicht / Allgemeinwissen, Level 5 = sehr schwer / Experten).
-Die Fragen sollen passend zur Kategorie, kurz (max. 25 Wörter), kreativ, eindeutig beantwortbar und für ein deutsches Publikum interessant sein. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt ..."), wo es passt — sonst normale Frage.
-
+Pro Kategorie GENAU 5 Fragen mit aufsteigendem Schwierigkeitsgrad (Level 1 = sehr leicht / Allgemeinwissen, Level 5 = sehr schwer / Experten).
+Die Fragen sollen passend zur Kategorie sein, kurz (max. 25 Wörter), kreativ, eindeutig beantwortbar und für ein deutsches Publikum interessant. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt ..."), wo es passt — sonst normale Frage.
 Antworten kurz und faktisch.
 
-Gib AUSSCHLIESSLICH gültiges JSON zurück (kein Markdown, keine Erklärung, kein Codeblock), exakt im folgenden Schema:
+Antworte AUSSCHLIESSLICH mit reinem JSON. Kein Vortext, keine Erklärung, kein Codeblock, kein "Hier ist das Brett". Die Antwort MUSS mit { beginnen und mit } enden, exakt nach diesem Schema:
 
-{
-  "questions": [
-    { "category": "<Kategoriename wortgleich>", "level": 1, "q": "<Frage>", "a": "<Antwort>" }
-  ]
-}
+{"questions":[{"category":"<Kategoriename wortgleich>","level":1,"q":"<Frage>","a":"<Antwort>"}]}
 
 Insgesamt ${cats.length * 5} Einträge.`;
 
@@ -112,12 +107,24 @@ Insgesamt ${cats.length * 5} Einträge.`;
     return e.internalServerError("anthropic response unparseable: " + err, null);
   }
 
-  // Strip optional markdown fences just in case
-  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  // Extract the JSON object even if the model wrapped it in prose,
+  // markdown fences, or both. Try strict-parse first, then a balanced-
+  // brace extraction if that fails.
+  const tryParse = (s) => { try { return JSON.parse(s); } catch (_) { return null; } };
+  const stripped = text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
-  let board;
-  try { board = JSON.parse(cleaned); }
-  catch (err) { return e.internalServerError("model returned non-JSON: " + cleaned.slice(0, 300), null); }
+  let board = tryParse(stripped);
+  if (!board) {
+    // Find the outermost {...} block
+    const first = stripped.indexOf("{");
+    const last = stripped.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      board = tryParse(stripped.slice(first, last + 1));
+    }
+  }
+  if (!board) {
+    return e.internalServerError("model returned non-JSON: " + stripped.slice(0, 400), null);
+  }
 
   if (!board || !Array.isArray(board.questions)) {
     return e.internalServerError("response missing questions[]", null);
