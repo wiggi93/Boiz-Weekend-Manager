@@ -92,70 +92,87 @@ NUR JSON. Kein Vortext, kein Codeblock. Beginnt mit { endet mit }. level-Feld is
 
 Insgesamt ${cats.length * 5} Einträge.`;
 
-  const headers = oauthToken
-    ? {
-        // Pro/Max OAuth tokens only allow Messages API access when the
-        // request identifies itself as Claude Code (Anthropic gates third-
-        // party use). Without the User-Agent + Claude-Code system prompt
-        // below the same token gets a 429 rate_limit_error on every call.
-        "Authorization": "Bearer " + oauthToken,
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "oauth-2025-04-20",
-        "content-type": "application/json",
-        "User-Agent": "claude-cli/1.0.0",
-      }
-    : {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      };
-
-  const requestBody = {
-    model: "claude-sonnet-4-5",
-    max_tokens: 24000,
-    // Extended thinking: lets the model deliberate (draft, fact-check, rewrite)
-    // before emitting JSON. Budget covers the calibration work for ~25 trivia
-    // questions; the visible answer still has room within max_tokens.
-    thinking: {
-      type: "enabled",
-      budget_tokens: 8000,
+  // Build per-auth request configuration. We try OAuth (Pro subscription)
+  // first; if it 429s we automatically retry with the API key when one is
+  // available, so a Pro rate-limit doesn't block the round.
+  const buildOAuthReq = () => ({
+    headers: {
+      // Pro/Max OAuth tokens only allow Messages API access when the
+      // request identifies itself as Claude Code (Anthropic gates third-
+      // party use). Without the User-Agent + Claude-Code system prompt
+      // the same token gets a 429 rate_limit_error on every call.
+      "Authorization": "Bearer " + oauthToken,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "oauth-2025-04-20",
+      "content-type": "application/json",
+      "User-Agent": "claude-cli/1.0.0",
     },
-    messages: [{ role: "user", content: prompt }],
-    // temperature must be 1 when thinking is enabled
-    temperature: 1,
+    body: {
+      model: "claude-sonnet-4-5",
+      max_tokens: 16000,
+      thinking: { type: "enabled", budget_tokens: 5000 },
+      temperature: 1,
+      system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration.",
+      messages: [{ role: "user", content: prompt }],
+    },
+  });
+
+  const buildApiKeyReq = () => ({
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: {
+      model: "claude-sonnet-4-5",
+      max_tokens: 16000,
+      thinking: { type: "enabled", budget_tokens: 5000 },
+      temperature: 1,
+      messages: [{ role: "user", content: prompt }],
+    },
+  });
+
+  const send = (req) => {
+    try {
+      return $http.send({
+        url: "https://api.anthropic.com/v1/messages",
+        method: "POST",
+        headers: req.headers,
+        body: JSON.stringify(req.body),
+        timeout: 240,
+      });
+    } catch (err) {
+      return { statusCode: 0, body: "", _err: err };
+    }
   };
-  if (oauthToken) {
-    // Claude Code identity required for OAuth tokens; we extend it with a
-    // mini-instruction so the model is primed for careful trivia work.
-    requestBody.system = "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration.";
+
+  const attempts = [];
+  if (oauthToken) attempts.push({ name: "oauth", req: buildOAuthReq() });
+  if (apiKey)     attempts.push({ name: "apikey", req: buildApiKeyReq() });
+
+  let res, bodyStr, usedAuth;
+  for (const a of attempts) {
+    res = send(a.req);
+    if (res._err) {
+      // network-level failure — try next auth if any
+      continue;
+    }
+    try { bodyStr = typeof res.body === "string" ? res.body : toString(res.body); }
+    catch (_) { bodyStr = ""; }
+    usedAuth = a.name;
+    // Auto-fall-through on 429 if we still have another auth to try
+    if (res.statusCode === 429 && a !== attempts[attempts.length - 1]) {
+      console.log("[jeopardy] " + a.name + " 429 — falling back to next auth");
+      continue;
+    }
+    break;
   }
 
-  let res;
-  try {
-    res = $http.send({
-      url: "https://api.anthropic.com/v1/messages",
-      method: "POST",
-      headers: headers,
-      body: JSON.stringify(requestBody),
-      // Extended thinking + 25 questions can take a while.
-      timeout: 240,
-    });
-  } catch (err) {
-    return e.internalServerError("anthropic http error: " + err, null);
+  if (!res || res._err) {
+    return e.internalServerError("anthropic http error: " + (res?._err || "no auth configured"), null);
   }
-
-  // res.body comes back as a Go []byte (Uint8Array-like in JSVM). JSON.parse
-  // on it throws SyntaxError. Convert through the PB-provided toString helper
-  // (handles UTF-8 properly, unlike String.fromCharCode).
-  let bodyStr;
-  try {
-    bodyStr = typeof res.body === "string" ? res.body : toString(res.body);
-  } catch (err) {
-    return e.internalServerError("anthropic body decode failed: " + err, null);
-  }
-
   if (res.statusCode !== 200) {
-    return e.internalServerError("anthropic " + res.statusCode + ": " + bodyStr.slice(0, 400), null);
+    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "): " + bodyStr.slice(0, 400), null);
   }
 
   let text;
