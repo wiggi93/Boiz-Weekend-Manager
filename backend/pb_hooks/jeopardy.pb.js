@@ -39,25 +39,55 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
-  const prompt = `Erstelle ein deutsches Jeopardy-Spielbrett für einen lockeren Spieleabend unter Freunden.
+  const prompt = `Du erstellst ein deutsches Jeopardy-Brett für einen Spieleabend.
 
 Kategorien:
 ${catBlock}
 
-Pro Kategorie GENAU 5 Fragen mit aufsteigendem Schwierigkeitsgrad:
-- Level 1 (100 Pkt): sehr leicht, klassisches Allgemeinwissen, fast jeder weiß es
-- Level 2 (200 Pkt): leicht, ein bisschen nachdenken
-- Level 3 (300 Pkt): mittel, gutes Allgemeinwissen reicht
-- Level 4 (400 Pkt): schon etwas spezifischer, leicht knifflig
-- Level 5 (500 Pkt): die schwerste der Kategorie — aber immer noch fair, nicht Experten-Niveau
+== KORREKTHEIT (oberste Priorität) ==
+Jeder Fakt MUSS überprüfbar korrekt sein. Wenn du dir bei einem Fakt nicht 100% sicher bist (z.B. exaktes Jahr, exakter Songtext, Name einer Person), wähle ein anderes Thema oder formuliere weniger spezifisch. Lieber eine sichere als eine "interessantere" aber falsche Frage. Bei Songtexten wortwörtlich zitieren — wenn du den genauen Wortlaut nicht sicher kennst, nutz eine andere Zeile oder einen anderen Song. Bei TV-Shows: keine erfundenen Staffeln, Kandidaten oder Drama-Momente.
 
-Die Fragen sollen unterhaltsam und für ein normales deutsches Publikum machbar sein. Kurz (max. 25 Wörter), eindeutig beantwortbar. Frage-Stil im klassischen Jeopardy-Look ("Diese Hauptstadt …"), wo es passt. Antworten kurz und faktisch.
+== SCHWIERIGKEITS-ANKER (sehr wichtig — staffel sie wirklich!) ==
 
-Antworte AUSSCHLIESSLICH mit reinem JSON. Kein Vortext, keine Erklärung, kein Codeblock, kein "Hier ist das Brett". Die Antwort MUSS mit { beginnen und mit } enden, exakt nach diesem Schema (level bleibt 1..5):
+Level 1 (100 Pkt) — "Pub-Quiz easy":
+  Etwa 80% der Teilnehmer wissen es. Mainstream-Allgemeinwissen.
+  Geographie-Beispiel: "Diese Stadt an der Spree ist Deutschlands Hauptstadt" → Berlin
+  Reality-TV-Beispiel: "Diese Sendung sucht jährlich auf Mallorca die große Liebe" → Bachelor in Paradise (oder Love Island)
+  Songtext-2000er-Beispiel: "Diese Robbie-Williams-Hit-Zeile geht 'I sit and wait, does an _ have a key?'" → Angel ('angel')
+
+Level 2 (200 Pkt) — "kurz nachdenken":
+  Etwa 60% wissen es.
+  Geographie: "Dieser höchste Berg im Schwarzwald ist 1493m hoch" → Feldberg
+  Schule: "Diese chemische Formel beschreibt Kochsalz" → NaCl
+
+Level 3 (300 Pkt) — "gebildet, kein Spezialist":
+  Etwa 40% wissen es. Schon spezifischer.
+  Geographie: "In diesem deutschen Bundesland liegt die kleinste Landeshauptstadt Mainz" → Rheinland-Pfalz
+  Twitch/YT-Beispiel: "Dieser Twitch-Streamer ist mit Mois und Trymacs Teil der 'Bratzn'" → Rumathra
+
+Level 4 (400 Pkt) — "schon knifflig":
+  Etwa 20%, deutlich spezifischer. Hier muss man nachdenken oder gut raten.
+  Schule: "Diese mathematische Konstante ist als Eulersche Zahl bekannt und beträgt etwa 2,718" → e
+  Songtext-2000er: "In diesem Tokio-Hotel-Song von 2005 fragt Bill: '_, in deiner Schule lernen sie nur Mist'" → Schrei
+
+Level 5 (500 Pkt) — "richtig schwer, aber lösbar":
+  Etwa 10%, Detailwissen. Aber NICHT obskur — sollte einem aufmerksamen Fan/Lerner einfallen.
+  Geographie: "Dieser nördlichste Punkt Deutschlands liegt auf der Insel Sylt" → Listland (oder Kliffende)
+  Reality-TV: "In dieser Staffel von 'Are You The One' war Aleks Petrović auf der Suche nach seinem Match" → Staffel 1 (2020)
+
+== AUFGABE ==
+1. Pro Kategorie GENAU 5 Fragen — eine je Level 1..5.
+2. Jeder Level-Sprung MUSS deutlich spürbar sein. Wenn deine Level-5-Frage sich wie Level 3 anfühlt → spezifischer machen.
+3. Fragen kurz (max 25 Wörter), klar formuliert, eindeutig beantwortbar.
+4. Antworten kurz, faktisch, korrekt.
+5. Stil: klassisches Jeopardy ("Diese Hauptstadt …" / "Dieser Schauspieler …"), wo's passt.
+
+== AUSGABE ==
+NUR JSON. Kein Vortext, kein Codeblock. Beginnt mit { endet mit }. level-Feld ist 1..5 (NICHT 100..500). Schema:
 
 {"questions":[{"category":"<Kategoriename wortgleich>","level":1,"q":"<Frage>","a":"<Antwort>"}]}
 
-Insgesamt ${cats.length * 5} Einträge.`;
+Insgesamt ${cats.length * 5} Einträge — überprüfe vor der Ausgabe, dass jede Schwierigkeitsstufe wirklich höher ist als die vorherige und jeder Fakt korrekt ist.`;
 
   const headers = oauthToken
     ? {
@@ -79,11 +109,13 @@ Insgesamt ${cats.length * 5} Einträge.`;
 
   const requestBody = {
     model: "claude-sonnet-4-5",
-    max_tokens: 8000,
+    max_tokens: 16000,
     messages: [{ role: "user", content: prompt }],
   };
   if (oauthToken) {
-    requestBody.system = "You are Claude Code, Anthropic's official CLI for Claude.";
+    // Claude Code identity required for OAuth tokens; we extend it with a
+    // mini-instruction so the model is primed for careful trivia work.
+    requestBody.system = "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration.";
   }
 
   let res;
@@ -93,7 +125,7 @@ Insgesamt ${cats.length * 5} Einträge.`;
       method: "POST",
       headers: headers,
       body: JSON.stringify(requestBody),
-      timeout: 90,
+      timeout: 120,
     });
   } catch (err) {
     return e.internalServerError("anthropic http error: " + err, null);
