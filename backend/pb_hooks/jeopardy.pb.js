@@ -82,12 +82,15 @@ Level 5 (500 Pkt) — "richtig schwer, aber lösbar":
 4. Antworten kurz, faktisch, korrekt.
 5. Stil: klassisches Jeopardy ("Diese Hauptstadt …" / "Dieser Schauspieler …"), wo's passt.
 
+== ARBEITSWEISE ==
+Im Thinking-Schritt: erst alle 25 Fragen im Entwurf, dann ehrlich kritisch durchgehen — ist das wirklich Level 5 oder gefühlt Level 2? Stimmt der Fakt 100%? Songtext exakt zitiert? Wenn unsicher: durch eine andere Frage ersetzen. Erst dann die endgültige JSON-Ausgabe.
+
 == AUSGABE ==
 NUR JSON. Kein Vortext, kein Codeblock. Beginnt mit { endet mit }. level-Feld ist 1..5 (NICHT 100..500). Schema:
 
 {"questions":[{"category":"<Kategoriename wortgleich>","level":1,"q":"<Frage>","a":"<Antwort>"}]}
 
-Insgesamt ${cats.length * 5} Einträge — überprüfe vor der Ausgabe, dass jede Schwierigkeitsstufe wirklich höher ist als die vorherige und jeder Fakt korrekt ist.`;
+Insgesamt ${cats.length * 5} Einträge.`;
 
   const headers = oauthToken
     ? {
@@ -109,8 +112,17 @@ Insgesamt ${cats.length * 5} Einträge — überprüfe vor der Ausgabe, dass jed
 
   const requestBody = {
     model: "claude-sonnet-4-5",
-    max_tokens: 16000,
+    max_tokens: 24000,
+    // Extended thinking: lets the model deliberate (draft, fact-check, rewrite)
+    // before emitting JSON. Budget covers the calibration work for ~25 trivia
+    // questions; the visible answer still has room within max_tokens.
+    thinking: {
+      type: "enabled",
+      budget_tokens: 8000,
+    },
     messages: [{ role: "user", content: prompt }],
+    // temperature must be 1 when thinking is enabled
+    temperature: 1,
   };
   if (oauthToken) {
     // Claude Code identity required for OAuth tokens; we extend it with a
@@ -125,7 +137,8 @@ Insgesamt ${cats.length * 5} Einträge — überprüfe vor der Ausgabe, dass jed
       method: "POST",
       headers: headers,
       body: JSON.stringify(requestBody),
-      timeout: 120,
+      // Extended thinking + 25 questions can take a while.
+      timeout: 240,
     });
   } catch (err) {
     return e.internalServerError("anthropic http error: " + err, null);
@@ -148,8 +161,13 @@ Insgesamt ${cats.length * 5} Einträge — überprüfe vor der Ausgabe, dass jed
   let text;
   try {
     const parsed = JSON.parse(bodyStr);
-    text = parsed.content && parsed.content[0] && parsed.content[0].text;
-    if (!text) throw new Error("no content");
+    // With extended thinking enabled, content is [thinking..., text...]. We
+    // want the first block whose type is "text"; fall back to first block.
+    if (Array.isArray(parsed.content)) {
+      const textBlock = parsed.content.find(b => b && b.type === "text") || parsed.content[0];
+      text = textBlock && textBlock.text;
+    }
+    if (!text) throw new Error("no text block in content");
   } catch (err) {
     return e.internalServerError("anthropic response unparseable: " + err + " | body[:300]=" + bodyStr.slice(0, 300), null);
   }
