@@ -108,10 +108,13 @@ Insgesamt ${cats.length * 5} Einträge.`;
       "User-Agent": "claude-cli/1.0.0",
     },
     body: {
+      // NOTE: Pro/Max OAuth tokens do NOT permit extended thinking. With
+      // `thinking` set, Anthropic returns 429 rate_limit_error (no quota
+      // headers, no clear "feature gated" message). So OAuth requests run
+      // without it; the API-key path below still uses thinking for higher
+      // quality output.
       model: "claude-sonnet-4-5",
-      max_tokens: 16000,
-      thinking: { type: "enabled", budget_tokens: 5000 },
-      temperature: 1,
+      max_tokens: 8000,
       system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration.",
       messages: [{ role: "user", content: prompt }],
     },
