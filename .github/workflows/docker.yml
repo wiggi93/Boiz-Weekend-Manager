@@ -59,14 +59,19 @@ jobs:
     if: ${{ vars.WATCHTOWER_URL != '' }}
     steps:
       - name: Update backend
+        # The Cloudflare→Traefik→Watchtower hop occasionally 5xx's; retry up
+        # to 5 times with 10s spacing so a single transient hiccup doesn't
+        # fail the whole deploy.
         run: |
-          curl -fsS --max-time 30 \
+          curl -fsS --max-time 60 \
+            --retry 5 --retry-delay 10 --retry-all-errors \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
             "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-backend"
       - name: Wait for backend
         run: sleep 8
       - name: Update frontend
         run: |
-          curl -fsS --max-time 30 \
+          curl -fsS --max-time 60 \
+            --retry 5 --retry-delay 10 --retry-all-errors \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
             "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-manager"
