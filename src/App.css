@@ -1163,3 +1163,90 @@
   font-size: 13px;
 }
 .ww-jeo-failed { font-size: 12px; font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.05em; }
+
+/* ============ Kitty Split ============ */
+.ww-kitty-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 0 8px;
+}
+.ww-kitty-total { display: flex; flex-direction: column; }
+.ww-kitty-total-label {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  letter-spacing: 0.15em; color: var(--muted);
+}
+.ww-kitty-total-val {
+  font-family: 'Bebas Neue', sans-serif; font-size: 28px;
+  color: var(--amber); line-height: 1;
+}
+.ww-kitty-empty {
+  text-align: center; padding: 32px 16px; color: var(--muted);
+  font-size: 13px; display: flex; flex-direction: column; gap: 8px; align-items: center;
+}
+.ww-kitty-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.ww-kitty-expense {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 12px;
+  position: relative;
+}
+.ww-kitty-exp-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 8px; margin-bottom: 4px;
+}
+.ww-kitty-exp-desc { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; }
+.ww-kitty-exp-amount {
+  font-family: 'IBM Plex Mono', monospace; font-size: 15px;
+  color: var(--amber); white-space: nowrap; flex-shrink: 0;
+}
+.ww-kitty-exp-meta {
+  font-size: 12px; color: var(--muted);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.ww-kitty-exp-parts { font-size: 11px; }
+.ww-kitty-myshare { color: var(--text); }
+.ww-kitty-del {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; color: var(--muted-2);
+  cursor: pointer; padding: 4px; border-radius: 4px;
+  display: flex; align-items: center;
+}
+.ww-kitty-del:hover { color: var(--red); }
+
+.ww-kitty-settlement {
+  margin-top: 4px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px;
+}
+.ww-kitty-tx {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.ww-kitty-tx:last-child { border-bottom: none; }
+.ww-kitty-tx-from { flex: 1; }
+.ww-kitty-tx-arrow { color: var(--muted); }
+.ww-kitty-tx-to { flex: 1; }
+.ww-kitty-tx-amt {
+  font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+  color: var(--amber); white-space: nowrap;
+}
+
+.ww-kitty-pickers {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+}
+.ww-kitty-picker {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 3px; padding: 8px 10px; border-radius: 6px;
+  background: var(--card); border: 1px solid var(--border);
+  cursor: pointer; font-size: 20px; color: var(--text);
+  transition: border-color 0.12s, background 0.12s;
+  min-width: 56px;
+}
+.ww-kitty-picker.sel {
+  border-color: var(--amber); background: rgba(245,165,36,0.12);
+}
+.ww-kitty-picker-name {
+  font-size: 10px; color: var(--muted); font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
