@@ -193,6 +193,25 @@ export async function generateJeopardyBoard(eventId, categories) {
   return res.json();
 }
 
+// ---- Kitty Split ----
+export async function getKitty(eventId) {
+  try {
+    return await pb.collection('kitty').getFirstListItem(`event="${eventId}"`);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateKitty(id, patch) {
+  return pb.collection('kitty').update(id, patch);
+}
+
+export async function ensureKitty(eventId) {
+  const existing = await getKitty(eventId);
+  if (existing) return existing;
+  return pb.collection('kitty').create({ event: eventId, expenses: [] });
+}
+
 // ---- Custom modules ----
 export async function listCustomModules(eventId) {
   return pb.collection('custom_modules').getFullList({
@@ -228,6 +247,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('flunky').subscribe('*', wrap('flunky', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('jeopardy').subscribe('*', wrap('jeopardy', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('custom_modules').subscribe('*', wrap('custom_modules', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('kitty').subscribe('*', wrap('kitty', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('users').subscribe('*', wrap('users'))),
   ]);
   return () => unsubs.forEach(fn => { try { fn(); } catch (_) {} });

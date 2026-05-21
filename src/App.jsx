@@ -17,6 +17,7 @@ import {
   getFlunky, updateFlunky,
   getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard,
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
+  getKitty, updateKitty, ensureKitty,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
 import { MODULES, moduleById } from './modules.js';
@@ -144,6 +145,9 @@ export default function App() {
   const [jeopardy, setJeopardy] = useState(null);
   const jeopardyRef = useRef(null);
   useEffect(() => { jeopardyRef.current = jeopardy; }, [jeopardy]);
+  const [kitty, setKitty] = useState(null);
+  const kittyRef = useRef(null);
+  useEffect(() => { kittyRef.current = kitty; }, [kitty]);
   const [customModules, setCustomModules] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
@@ -197,20 +201,21 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setCustomModules([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setCustomModules([]);
       return;
     }
     try {
-      const [ev, members, stats, fl, je, cms] = await Promise.all([
+      const [ev, members, stats, fl, je, kt, cms] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
         getFlunky(currentEventId),
         getJeopardy(currentEventId),
+        getKitty(currentEventId),
         listCustomModules(currentEventId),
       ]);
       setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats);
-      setFlunky(fl); setJeopardy(je); setCustomModules(cms);
+      setFlunky(fl); setJeopardy(je); setKitty(kt); setCustomModules(cms);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -297,6 +302,15 @@ export default function App() {
       setJeopardy(prev => {
         const next = prev ? { ...prev, ...rec } : rec;
         jeopardyRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    if (collection === 'kitty') {
+      setKitty(prev => {
+        const next = prev ? { ...prev, ...rec } : rec;
+        kittyRef.current = next;
         return next;
       });
       return;
@@ -522,6 +536,18 @@ export default function App() {
     }
   };
 
+  const onKittyPatch = async (patch) => {
+    let cur = kittyRef.current;
+    if (!cur) {
+      cur = await ensureKitty(currentEventId);
+      kittyRef.current = cur; setKitty(cur);
+    }
+    const nextK = { ...cur, ...patch };
+    kittyRef.current = nextK; setKitty(nextK);
+    try { await updateKitty(cur.id, patch); }
+    catch (e) { console.warn('kitty update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
   // ---- Custom modules ----
   const onCustomCreate = async (data) => {
     try {
@@ -653,6 +679,7 @@ export default function App() {
             members={eventMembers} statsMap={statsMap} setStatsMap={setStatsMap}
             flunky={flunky} onFlunkyPatch={onFlunkyPatch}
             jeopardy={jeopardy} onJeopardyPatch={onJeopardyPatch} onJeopardyGenerate={onJeopardyGenerate}
+            kitty={kitty} onKittyPatch={onKittyPatch}
             customModules={customModules}
             onCustomCreate={onCustomCreate}
             onCustomPatch={onCustomPatch}
@@ -1153,6 +1180,7 @@ function WaitingScreen({ event, onLeave }) {
 function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
   jeopardy, onJeopardyPatch, onJeopardyGenerate,
+  kitty, onKittyPatch,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
@@ -1206,6 +1234,12 @@ function HomeView({
           me={me} jeopardy={jeopardy} members={members} admin={admin} active={event.active}
           onPatch={onJeopardyPatch}
           onOpenSettings={() => setModuleSettingsOpen('jeopardy')}
+        />
+      )}
+      {moduleTab === 'kitty' && (
+        <KittyView
+          me={me} kitty={kitty} members={members} admin={admin}
+          onPatch={onKittyPatch}
         />
       )}
       {activeCustom && (
@@ -2172,6 +2206,224 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
       <button className="ww-danger-btn red" onClick={clearRounds} style={{ marginTop: 14 }}>
         <Trash2 size={14} /> Alle Runden löschen
       </button>
+    </div>
+  );
+}
+
+// ============================================================
+// Kitty Split (Kassensturz)
+// ============================================================
+
+function kittySettlement(expenses, users) {
+  const balances = {};
+  for (const u of users) balances[u.id] = 0;
+  for (const exp of expenses) {
+    const parts = (exp.participants || []).filter(pid => users.some(u => u.id === pid));
+    if (parts.length === 0) continue;
+    const share = exp.amount / parts.length;
+    for (const pid of parts) {
+      if (pid === exp.paidBy) continue;
+      balances[pid] = (balances[pid] || 0) - share;
+      if (balances[exp.paidBy] !== undefined) {
+        balances[exp.paidBy] += share;
+      }
+    }
+  }
+  const debtors  = Object.entries(balances).filter(([, b]) => b < -0.005).map(([id, b]) => ({ id, b })).sort((a, c) => a.b - c.b);
+  const creditors = Object.entries(balances).filter(([, b]) => b > 0.005).map(([id, b]) => ({ id, b })).sort((a, c) => c.b - a.b);
+  const txs = [];
+  let i = 0, j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const amt = Math.min(-debtors[i].b, creditors[j].b);
+    txs.push({ from: debtors[i].id, to: creditors[j].id, amount: amt });
+    debtors[i].b += amt;
+    creditors[j].b -= amt;
+    if (Math.abs(debtors[i].b) < 0.005) i++;
+    if (Math.abs(creditors[j].b) < 0.005) j++;
+  }
+  return txs;
+}
+
+function KittyView({ me, kitty, members, admin, onPatch }) {
+  const users = members.map(m => m.expand?.user).filter(Boolean);
+  const expenses = kitty?.expenses || [];
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [desc, setDesc] = useState('');
+  const [amount, setAmount] = useState('');
+  const [paidBy, setPaidBy] = useState(me.id);
+  const [participants, setParticipants] = useState(() => users.map(u => u.id));
+
+  const openAdd = () => {
+    setDesc(''); setAmount(''); setPaidBy(me.id);
+    setParticipants(users.map(u => u.id));
+    setShowAdd(true);
+  };
+
+  const toggleParticipant = (uid) => {
+    setParticipants(prev =>
+      prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
+    );
+  };
+
+  const addExpense = () => {
+    const amt = parseFloat(amount.replace(',', '.'));
+    if (!desc.trim() || isNaN(amt) || amt <= 0 || participants.length === 0) return;
+    const expense = {
+      id: String(Date.now()),
+      desc: desc.trim(),
+      amount: Math.round(amt * 100) / 100,
+      paidBy,
+      participants: [...participants],
+      createdBy: me.id,
+      createdAt: new Date().toISOString(),
+    };
+    onPatch({ expenses: [...expenses, expense] });
+    setShowAdd(false);
+  };
+
+  const deleteExpense = (id) => {
+    if (!confirm('Ausgabe löschen?')) return;
+    onPatch({ expenses: expenses.filter(e => e.id !== id) });
+  };
+
+  const totalAmount = expenses.reduce((s, e) => s + (e.amount || 0), 0);
+  const settlement = kittySettlement(expenses, users);
+
+  const userById = (id) => users.find(u => u.id === id);
+  const fmt = (n) => n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="ww-mod-panel">
+      <div className="ww-kitty-header">
+        <div className="ww-kitty-total">
+          <span className="ww-kitty-total-label">GESAMT</span>
+          <span className="ww-kitty-total-val">{fmt(totalAmount)} €</span>
+        </div>
+        <button className="ww-icon-btn" onClick={openAdd} aria-label="Ausgabe hinzufügen">
+          <Plus size={18} />
+        </button>
+      </div>
+
+      {expenses.length === 0 && (
+        <div className="ww-kitty-empty">
+          <div style={{ fontSize: 32 }}>💰</div>
+          <div>Noch keine Ausgaben — tippe + um eine einzutragen.</div>
+        </div>
+      )}
+
+      <div className="ww-kitty-list">
+        {[...expenses].reverse().map(exp => {
+          const payer = userById(exp.paidBy);
+          const canDelete = admin || exp.createdBy === me.id || exp.paidBy === me.id;
+          const parts = (exp.participants || []).map(pid => userById(pid)).filter(Boolean);
+          const myShare = exp.participants?.includes(me.id)
+            ? exp.amount / (exp.participants?.length || 1)
+            : 0;
+          return (
+            <div key={exp.id} className="ww-kitty-expense">
+              <div className="ww-kitty-exp-top">
+                <span className="ww-kitty-exp-desc">{exp.desc}</span>
+                <span className="ww-kitty-exp-amount">{fmt(exp.amount)} €</span>
+              </div>
+              <div className="ww-kitty-exp-meta">
+                <span>{payer?.emoji || '🍺'} {payer?.displayName || '?'} hat bezahlt</span>
+                <span className="ww-kitty-exp-parts">
+                  {parts.map(u => u.emoji || '🍺').join('')} ÷{parts.length}
+                  {myShare > 0.005 && <span className="ww-kitty-myshare"> · mein Anteil: {fmt(myShare)} €</span>}
+                </span>
+              </div>
+              {canDelete && (
+                <button className="ww-kitty-del" onClick={() => deleteExpense(exp.id)} aria-label="Löschen">
+                  <Trash2 size={13} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {expenses.length > 0 && (
+        <div className="ww-kitty-settlement">
+          <div className="ww-section-head"><h3>ABRECHNUNG</h3></div>
+          {settlement.length === 0 ? (
+            <div className="ww-muted" style={{ textAlign: 'center', padding: '12px 0' }}>Alles ausgeglichen ✓</div>
+          ) : (
+            settlement.map((tx, i) => {
+              const from = userById(tx.from);
+              const to = userById(tx.to);
+              return (
+                <div key={i} className="ww-kitty-tx">
+                  <span className="ww-kitty-tx-from">{from?.emoji || '🍺'} {from?.displayName || '?'}</span>
+                  <span className="ww-kitty-tx-arrow">→</span>
+                  <span className="ww-kitty-tx-to">{to?.emoji || '🍺'} {to?.displayName || '?'}</span>
+                  <span className="ww-kitty-tx-amt">{fmt(tx.amount)} €</span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {showAdd && (
+        <ModuleSettingsDrawer title="💰 Ausgabe eintragen" onClose={() => setShowAdd(false)}>
+          <label className="ww-label">BESCHREIBUNG</label>
+          <input
+            className="ww-input"
+            placeholder="z.B. Pizza, Getränke, Eintritt…"
+            value={desc}
+            onChange={e => setDesc(e.target.value)}
+            autoFocus
+          />
+          <label className="ww-label">BETRAG (€)</label>
+          <input
+            className="ww-input"
+            type="text"
+            inputMode="decimal"
+            placeholder="0,00"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+          />
+          <label className="ww-label">BEZAHLT VON</label>
+          <div className="ww-kitty-pickers">
+            {users.map(u => (
+              <button
+                key={u.id}
+                className={`ww-kitty-picker ${paidBy === u.id ? 'sel' : ''}`}
+                onClick={() => setPaidBy(u.id)}
+              >
+                <span>{u.emoji || '🍺'}</span>
+                <span className="ww-kitty-picker-name">{u.displayName || u.email?.split('@')[0]}</span>
+              </button>
+            ))}
+          </div>
+          <label className="ww-label">BETEILIGT</label>
+          <div className="ww-kitty-pickers">
+            {users.map(u => (
+              <button
+                key={u.id}
+                className={`ww-kitty-picker ${participants.includes(u.id) ? 'sel' : ''}`}
+                onClick={() => toggleParticipant(u.id)}
+              >
+                <span>{u.emoji || '🍺'}</span>
+                <span className="ww-kitty-picker-name">{u.displayName || u.email?.split('@')[0]}</span>
+              </button>
+            ))}
+          </div>
+          {participants.length > 0 && amount && !isNaN(parseFloat(amount.replace(',', '.'))) && (
+            <div className="ww-muted" style={{ fontSize: 12, margin: '6px 0 10px', textAlign: 'center' }}>
+              = {fmt(parseFloat(amount.replace(',', '.')) / participants.length)} € pro Person
+            </div>
+          )}
+          <button
+            className={`ww-big-cta ${desc.trim() && amount && participants.length > 0 ? '' : 'disabled'}`}
+            onClick={addExpense}
+            disabled={!desc.trim() || !amount || participants.length === 0}
+          >
+            <Plus size={20} /><span>EINTRAGEN</span>
+          </button>
+        </ModuleSettingsDrawer>
+      )}
     </div>
   );
 }

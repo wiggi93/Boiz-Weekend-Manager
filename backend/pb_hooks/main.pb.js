@@ -83,6 +83,15 @@ onRecordAfterCreateSuccess((e) => {
   } catch (err) {
     console.log("jeopardy seed:", err);
   }
+  try {
+    const kCol = e.app.findCollectionByNameOrId("kitty");
+    const k = new Record(kCol);
+    k.set("event", e.record.id);
+    k.set("expenses", []);
+    e.app.save(k);
+  } catch (err) {
+    console.log("kitty seed:", err);
+  }
   e.next();
 }, "events");
 

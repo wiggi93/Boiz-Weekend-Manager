@@ -5,6 +5,7 @@ export const MODULES = [
   { id: 'drinks',   name: 'Bier-Counter',   icon: '🍺', available: true  },
   { id: 'flunky',   name: 'Flunkyball',     icon: '🎳', available: true  },
   { id: 'jeopardy', name: 'Jeopardy',       icon: '🎤', available: true  },
+  { id: 'kitty',    name: 'Kassensturz',    icon: '💰', available: true  },
   { id: 'gokart',   name: 'Go-Kart',        icon: '🏎️', available: false },
   { id: 'padel',    name: 'Padel-Tennis',   icon: '🎾', available: false },
 ];
