@@ -27,9 +27,13 @@ document.addEventListener('dblclick', (e) => e.preventDefault());
 // then periodically fetch the live `index.html` (with a `?_v=` cachebuster
 // that the SW is configured to bypass via NetworkOnly), parse out the bundle
 // filename, and surface the banner if it differs.
+// Match by src pattern, NOT by type attribute — Cloudflare Rocket Loader
+// rewrites `type="module"` into a placeholder string before our JS sees it,
+// so a `script[type="module"]` selector finds nothing in production. The
+// src stays intact, so we look there instead.
 const currentBundle = (() => {
   try {
-    const scripts = Array.from(document.querySelectorAll('script[type="module"]'));
+    const scripts = Array.from(document.querySelectorAll('script[src*="/assets/index-"]'));
     for (const s of scripts) {
       const m = s.src.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
       if (m) return m[1];
