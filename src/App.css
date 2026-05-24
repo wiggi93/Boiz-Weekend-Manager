@@ -773,20 +773,26 @@
   animation: fadein 0.2s ease-out;
 }
 .ww-drawer {
-  position: fixed; left: 0; right: 0; bottom: 0;
+  /* Anchor from the top (with a safe-area-respecting offset) all the way
+     to the viewport bottom. Using `top` instead of `height: 90dvh` so
+     the drawer never extends above the visible area on iPhones where
+     the dynamic-island/status-bar pushes the safe area down significantly. */
+  position: fixed;
+  left: 0; right: 0;
+  bottom: 0;
+  top: max(48px, calc(env(safe-area-inset-top, 0px) + 16px));
   max-width: 540px; margin: 0 auto;
   background: var(--bg-2); border-top: 1px solid var(--amber);
   border-radius: 16px 16px 0 0;
-  height: 90dvh;
   z-index: 100;
   animation: slideup 0.25s ease-out;
+  display: flex; flex-direction: column;
   overscroll-behavior: contain;
+  box-sizing: border-box;
 }
 .ww-drawer-head {
-  /* Absolute pinning at the top of the drawer — no flex magic, no
-     iOS quirks. Fixed height we can rely on for the body offset. */
-  position: absolute; top: 0; left: 0; right: 0;
-  height: 56px;
+  /* Fixed-height flex item — no grow, no shrink. Reliable on iOS. */
+  flex: 0 0 60px;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 20px;
   border-bottom: 1px solid var(--border);
@@ -794,13 +800,15 @@
   border-radius: 16px 16px 0 0;
   box-sizing: border-box;
 }
+.ww-drawer-head h3 {
+  margin: 0; font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 0.1em;
+}
 .ww-drawer-body {
-  /* Fills the drawer below the head. Explicit top/bottom edges +
-     overflow-y means iOS reliably scrolls instead of falling back to
-     bubbling-up scroll on the page underneath. */
-  position: absolute;
-  top: 56px;
-  left: 0; right: 0; bottom: 0;
+  /* flex: 1 1 auto + min-height: 0 is the canonical iOS-safe pattern
+     for overflow-y inside a flex column. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -822,13 +830,6 @@
   cursor: pointer; padding: 4px 8px 4px 0; margin: 0 0 10px;
 }
 .ww-drawer-back:hover { color: var(--text); }
-.ww-drawer-head {
-  display: flex; align-items: center; justify-content: space-between;
-}
-.ww-drawer-head h3 {
-  margin: 0; font-family: 'Bebas Neue', sans-serif;
-  font-size: 18px; letter-spacing: 0.1em;
-}
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideup { from { transform: translateY(100%); } to { transform: translateY(0); } }
 
