@@ -773,15 +773,18 @@
   animation: fadein 0.2s ease-out;
 }
 .ww-drawer {
-  /* Anchor from the top (with a safe-area-respecting offset) all the way
-     to the viewport bottom. Using `top` instead of `height: 90dvh` so
-     the drawer never extends above the visible area on iPhones where
-     the dynamic-island/status-bar pushes the safe area down significantly. */
+  /* Anchor at the bottom, height calculated from viewport with hard
+     clamps. Using vh (not dvh) because dvh on iOS standalone is
+     unreliable — sometimes computes including the area under the
+     status bar. The max-height keeps the top edge inside the visible
+     viewport on all iPhone models. */
   position: fixed;
   left: 0; right: 0;
   bottom: 0;
-  top: max(48px, calc(env(safe-area-inset-top, 0px) + 16px));
   max-width: 540px; margin: 0 auto;
+  height: 85vh;
+  max-height: calc(100vh - max(60px, env(safe-area-inset-top, 0px) + 16px));
+  min-height: 400px;
   background: var(--bg-2); border-top: 1px solid var(--amber);
   border-radius: 16px 16px 0 0;
   z-index: 100;
