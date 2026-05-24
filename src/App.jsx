@@ -685,6 +685,7 @@ export default function App() {
             onCustomPatch={onCustomPatch}
             onCustomDelete={onCustomDelete}
             modules={modules}
+            onToggleModule={onToggleModule}
             moduleTab={moduleTab} setModuleTab={setModuleTab}
             moduleSettingsOpen={moduleSettingsOpen} setModuleSettingsOpen={setModuleSettingsOpen}
             onSaveEvent={onSaveEvent}
@@ -1182,7 +1183,7 @@ function HomeView({
   jeopardy, onJeopardyPatch, onJeopardyGenerate,
   kitty, onKittyPatch,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
-  modules, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
+  modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
@@ -1195,6 +1196,14 @@ function HomeView({
     ? customModules.find(c => `cm-${c.id}` === moduleTab)
     : null;
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [modulesOpen, setModulesOpen] = useState(false);
+
+  // Scroll the main container back to top whenever the active tab changes
+  // — otherwise content can render "behind" the sticky header strip.
+  useEffect(() => {
+    const main = document.querySelector('.ww-main');
+    if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [moduleTab]);
 
   return (
     <div className="ww-home">
@@ -1227,6 +1236,16 @@ function HomeView({
             </button>
           ))}
         </div>
+        {admin && (
+          <button
+            className="ww-mod-tab ww-tools-btn"
+            onClick={() => setModulesOpen(true)}
+            aria-label="Module verwalten"
+            title="Module verwalten"
+          >
+            <span className="ww-mod-tab-icon">＋</span>
+          </button>
+        )}
         {toolTabs.length > 0 && (
           <button
             className={`ww-mod-tab ww-tools-btn ${toolTabs.some(t => t.id === moduleTab) ? 'active' : ''}`}
@@ -1275,7 +1294,7 @@ function HomeView({
 
       {toolsOpen && (
         <ModuleSettingsDrawer title="🛠 Tools" onClose={() => setToolsOpen(false)}>
-          <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
+          <p className="ww-muted" style={{ fontSize: 12 }}>
             Helpers fürs Event — fließen nicht ins Leaderboard.
           </p>
           <div className="ww-tools-list">
@@ -1290,6 +1309,68 @@ function HomeView({
                 <ChevronRight size={16} />
               </button>
             ))}
+          </div>
+        </ModuleSettingsDrawer>
+      )}
+
+      {modulesOpen && admin && (
+        <ModuleSettingsDrawer title="＋ Module verwalten" onClose={() => setModulesOpen(false)}>
+          <p className="ww-muted" style={{ fontSize: 12 }}>
+            An/aus für alle. Tabs verschwinden bei den Spielern, wenn du ein Modul deaktivierst.
+          </p>
+          <label className="ww-label" style={{ marginTop: 10 }}>VERFÜGBAR</label>
+          <div className="ww-module-toggles">
+            {MODULES.map(m => {
+              const on = (modules || []).includes(m.id);
+              return (
+                <button key={m.id}
+                  className={`ww-module-toggle ${on ? 'on' : ''} ${m.available ? '' : 'disabled'}`}
+                  onClick={() => m.available && onToggleModule(m.id)}
+                  disabled={!m.available}>
+                  <span className="ww-mod-icon">{m.icon}</span>
+                  <span className="ww-mod-name">{m.name}</span>
+                  {m.kind === 'tool' && (
+                    <span className="ww-host-badge" style={{ marginLeft: 0 }}>TOOL</span>
+                  )}
+                  {m.available
+                    ? (on ? <Eye size={14} /> : <EyeOff size={14} />)
+                    : <span className="ww-mod-soon">SOON</span>}
+                </button>
+              );
+            })}
+          </div>
+
+          <label className="ww-label" style={{ marginTop: 18 }}>CUSTOM MODULE</label>
+          <div className="ww-module-toggles">
+            {(customModules || []).map(cm => (
+              <div key={cm.id} className="ww-module-toggle on">
+                <span className="ww-mod-icon">{cm.icon || '🎯'}</span>
+                <span className="ww-mod-name">{cm.name}</span>
+                <span className="ww-muted" style={{ fontSize: 10, letterSpacing: '0.1em', marginRight: 4 }}>
+                  {(cm.mode || 'teams').toUpperCase()}
+                </span>
+                <button className="ww-mini-btn red" onClick={() => onCustomDelete(cm.id)} title="Modul löschen">
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            <button
+              className="ww-module-toggle"
+              onClick={async () => {
+                const name = prompt('Name des Moduls?', 'Cornhole');
+                if (!name || !name.trim()) return;
+                const modeInput = (prompt('Modus? "teams" oder "solo"', 'teams') || 'teams').toLowerCase();
+                const mode = modeInput === 'solo' ? 'solo' : 'teams';
+                await onCustomCreate({
+                  name: name.trim(), icon: '🎯', mode,
+                  teamCount: 2, pointsPerWin: 3, totalSets: 3,
+                  teams: [], participants: [], sets: [],
+                });
+              }}
+            >
+              <span className="ww-mod-icon"><Plus size={20} /></span>
+              <span className="ww-mod-name">NEUES CUSTOM MODUL</span>
+            </button>
           </div>
         </ModuleSettingsDrawer>
       )}
@@ -3335,54 +3416,9 @@ function EventSettingsView({ event, me, members, customModules, onCustomCreate, 
         <Check size={20} /><span>SPEICHERN</span>
       </button>
 
-      <label className="ww-label" style={{ marginTop: 14 }}>MODULE — LIVE TOGGLE</label>
-      <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>Tabs verschwinden bei den Spielern, wenn du ein Modul deaktivierst.</p>
-      <div className="ww-module-toggles">
-        {MODULES.map(m => {
-          const on = (event.modules || []).includes(m.id);
-          return (
-            <button key={m.id}
-              className={`ww-module-toggle ${on ? 'on' : ''} ${m.available ? '' : 'disabled'}`}
-              onClick={() => m.available && onToggleModule(m.id)}
-              disabled={!m.available}>
-              <span className="ww-mod-icon">{m.icon}</span>
-              <span className="ww-mod-name">{m.name}</span>
-              {m.available
-                ? (on ? <Eye size={14} /> : <EyeOff size={14} />)
-                : <span className="ww-mod-soon">SOON</span>}
-            </button>
-          );
-        })}
-        {(customModules || []).map(cm => (
-          <div key={cm.id} className="ww-module-toggle on">
-            <span className="ww-mod-icon">{cm.icon || '🎯'}</span>
-            <span className="ww-mod-name">{cm.name}</span>
-            <span className="ww-muted" style={{ fontSize: 10, letterSpacing: '0.1em', marginRight: 4 }}>
-              {(cm.mode || 'teams').toUpperCase()}
-            </span>
-            <button className="ww-mini-btn red" onClick={() => onCustomDelete(cm.id)} title="Modul löschen">
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-        <button
-          className="ww-module-toggle"
-          onClick={async () => {
-            const name = prompt('Name des Moduls?', 'Cornhole');
-            if (!name || !name.trim()) return;
-            const modeInput = (prompt('Modus? "teams" oder "solo"', 'teams') || 'teams').toLowerCase();
-            const mode = modeInput === 'solo' ? 'solo' : 'teams';
-            await onCustomCreate({
-              name: name.trim(), icon: '🎯', mode,
-              teamCount: 2, pointsPerWin: 3, totalSets: 3,
-              teams: [], participants: [], sets: [],
-            });
-          }}
-        >
-          <span className="ww-mod-icon"><Plus size={20} /></span>
-          <span className="ww-mod-name">CUSTOM MODUL HINZUFÜGEN</span>
-        </button>
-      </div>
+      <p className="ww-muted" style={{ fontSize: 12, marginTop: 14 }}>
+        📦 <b>Module verwalten</b> findest du jetzt direkt im Home-Tab — der ＋-Button rechts neben den Modulleiste.
+      </p>
 
       <div className="ww-section">
         <div className="ww-section-head"><Users size={16} /><h3>MITGLIEDER ({members.length})</h3></div>
