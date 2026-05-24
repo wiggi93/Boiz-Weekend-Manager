@@ -1194,6 +1194,7 @@ function HomeView({
   const activeCustom = moduleTab?.startsWith?.('cm-')
     ? customModules.find(c => `cm-${c.id}` === moduleTab)
     : null;
+  const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
     <div className="ww-home">
@@ -1218,9 +1219,6 @@ function HomeView({
           <span className="ww-mod-tab-icon">📊</span>
           <span className="ww-mod-tab-name">Stand</span>
         </button>
-        {(gameTabs.length > 0 || customTabs.length > 0) && (
-          <span className="ww-mod-tabs-label">🏆 SPIELE</span>
-        )}
         {[...gameTabs, ...customTabs].map(t => (
           <button key={t.id} className={`ww-mod-tab ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
             <span className="ww-mod-tab-icon">{t.icon}</span>
@@ -1228,14 +1226,15 @@ function HomeView({
           </button>
         ))}
         {toolTabs.length > 0 && (
-          <span className="ww-mod-tabs-label">🛠 TOOLS</span>
-        )}
-        {toolTabs.map(t => (
-          <button key={t.id} className={`ww-mod-tab tool ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
-            <span className="ww-mod-tab-icon">{t.icon}</span>
-            <span className="ww-mod-tab-name">{t.name}</span>
+          <button
+            className={`ww-mod-tab ww-tools-btn ${toolTabs.some(t => t.id === moduleTab) ? 'active' : ''}`}
+            onClick={() => setToolsOpen(true)}
+            aria-label="Tools"
+            title="Tools"
+          >
+            <span className="ww-mod-tab-icon">🛠</span>
           </button>
-        ))}
+        )}
       </div>
 
       {moduleTab === 'overview' && (
@@ -1270,6 +1269,27 @@ function HomeView({
           onPatch={(patch) => onCustomPatch(activeCustom.id, patch)}
           onOpenSettings={() => setModuleSettingsOpen(moduleTab)}
         />
+      )}
+
+      {toolsOpen && (
+        <ModuleSettingsDrawer title="🛠 Tools" onClose={() => setToolsOpen(false)}>
+          <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
+            Helpers fürs Event — fließen nicht ins Leaderboard.
+          </p>
+          <div className="ww-tools-list">
+            {toolTabs.map(t => (
+              <button
+                key={t.id}
+                className={`ww-tools-item ${moduleTab === t.id ? 'active' : ''}`}
+                onClick={() => { setModuleTab(t.id); setToolsOpen(false); }}
+              >
+                <span className="ww-tools-item-icon">{t.icon}</span>
+                <span className="ww-tools-item-name">{t.name}</span>
+                <ChevronRight size={16} />
+              </button>
+            ))}
+          </div>
+        </ModuleSettingsDrawer>
       )}
 
       {moduleSettingsOpen === 'drinks' && admin && (

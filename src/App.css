@@ -1303,3 +1303,42 @@
 .ww-mod-tab.tool.active {
   border-style: solid;
 }
+
+/* ============ Tools button + drawer list ============ */
+.ww-tools-btn {
+  flex: 0 0 auto;
+  border-style: dashed;
+  color: var(--muted);
+  padding: 8px 12px;
+}
+.ww-tools-btn .ww-mod-tab-icon { font-size: 16px; }
+.ww-tools-btn.active {
+  border-style: solid;
+  background: rgba(245,165,36,0.12);
+  color: var(--amber);
+}
+
+.ww-tools-list {
+  display: flex; flex-direction: column;
+  gap: 8px; margin-top: 12px;
+}
+.ww-tools-item {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px 16px;
+  color: var(--text); cursor: pointer; text-align: left;
+  font-family: inherit;
+  transition: transform 0.08s, border-color 0.08s, background 0.08s;
+  -webkit-tap-highlight-color: transparent;
+}
+.ww-tools-item:hover, .ww-tools-item.active {
+  border-color: var(--amber);
+  background: rgba(245,165,36,0.06);
+}
+.ww-tools-item:active { transform: scale(0.99); }
+.ww-tools-item-icon { font-size: 24px; line-height: 1; }
+.ww-tools-item-name {
+  flex: 1;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 0.06em;
+}
