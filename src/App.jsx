@@ -20,7 +20,7 @@ import {
   getKitty, updateKitty, ensureKitty,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
-import { MODULES, moduleById } from './modules.js';
+import { MODULES, moduleById, isToolModule } from './modules.js';
 import './App.css';
 
 const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘'];
@@ -1186,9 +1186,10 @@ function HomeView({
   onSaveEvent, onShowUserDetail, myOptRef,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
-  const enabledTabModules = MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
+  const enabledMods = MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
+  const gameTabs = enabledMods.filter(m => m.kind !== 'tool');
+  const toolTabs = enabledMods.filter(m => m.kind === 'tool');
   const customTabs = (customModules || []).map(cm => ({ id: `cm-${cm.id}`, name: cm.name || 'Modul', icon: cm.icon || '🎯', cm }));
-  const tabs = [{ id: 'overview', name: 'Stand', icon: '📊' }, ...enabledTabModules, ...customTabs];
   const drinksOn = modules.includes('drinks');
   const activeCustom = moduleTab?.startsWith?.('cm-')
     ? customModules.find(c => `cm-${c.id}` === moduleTab)
@@ -1201,6 +1202,8 @@ function HomeView({
         <h1 className="ww-display ww-title-big">{event.name}</h1>
       </div>
 
+      <EventCodeCard event={event} />
+
       {drinksOn && (
         <DrinksBar
           me={me} event={event} statsMap={statsMap} setStatsMap={setStatsMap}
@@ -1211,8 +1214,24 @@ function HomeView({
       )}
 
       <div className="ww-mod-tabs">
-        {tabs.map(t => (
+        <button className={`ww-mod-tab ${moduleTab === 'overview' ? 'active' : ''}`} onClick={() => setModuleTab('overview')}>
+          <span className="ww-mod-tab-icon">📊</span>
+          <span className="ww-mod-tab-name">Stand</span>
+        </button>
+        {(gameTabs.length > 0 || customTabs.length > 0) && (
+          <span className="ww-mod-tabs-label">🏆 SPIELE</span>
+        )}
+        {[...gameTabs, ...customTabs].map(t => (
           <button key={t.id} className={`ww-mod-tab ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
+            <span className="ww-mod-tab-icon">{t.icon}</span>
+            <span className="ww-mod-tab-name">{t.name}</span>
+          </button>
+        ))}
+        {toolTabs.length > 0 && (
+          <span className="ww-mod-tabs-label">🛠 TOOLS</span>
+        )}
+        {toolTabs.map(t => (
+          <button key={t.id} className={`ww-mod-tab tool ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
             <span className="ww-mod-tab-icon">{t.icon}</span>
             <span className="ww-mod-tab-name">{t.name}</span>
           </button>
@@ -1241,6 +1260,9 @@ function HomeView({
           me={me} kitty={kitty} members={members} admin={admin}
           onPatch={onKittyPatch}
         />
+      )}
+      {moduleTab === 'team_split' && (
+        <TeamSplitView event={event} members={members} admin={admin} onSaveEvent={onSaveEvent} />
       )}
       {activeCustom && (
         <CustomModuleView
@@ -1289,6 +1311,130 @@ function HomeView({
         );
       })()}
     </div>
+  );
+}
+
+// ============================================================
+// Event code card (prominent share for hosts at top of Home)
+// ============================================================
+
+function EventCodeCard({ event }) {
+  const [flash, setFlash] = useState(null);
+  const code = event?.code || '';
+  if (!code) return null;
+  const shareUrl = `${location.origin}/?code=${encodeURIComponent(code)}`;
+  const handle = async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: event.name,
+          text: `Join "${event.name}" mit Code ${code}`,
+          url: shareUrl,
+        });
+        setFlash('Geteilt ✓');
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(code);
+        setFlash('Code kopiert ✓');
+      }
+    } catch (_) { /* user dismissed share sheet — silently ignore */ }
+    if (flash !== null) return;
+    setTimeout(() => setFlash(null), 1500);
+  };
+  return (
+    <button className="ww-event-code-card" onClick={handle}>
+      <div className="ww-event-code-card-left">
+        <div className="ww-event-code-card-label">JOIN-CODE</div>
+        <div className="ww-event-code-card-val">{code}</div>
+      </div>
+      <div className="ww-event-code-card-cta">
+        {flash || (navigator.share ? '📤 Teilen' : '📋 Kopieren')}
+      </div>
+    </button>
+  );
+}
+
+// ============================================================
+// Team Split tool — random crew into N teams (kein Scoring)
+// ============================================================
+
+function TeamSplitView({ event, members, admin, onSaveEvent }) {
+  const tools = event.tools || {};
+  const saved = tools.team_split || { n: 2, teams: [] };
+  const [n, setN] = useState(saved.n || 2);
+
+  useEffect(() => { setN(saved.n || 2); }, [event.id]);
+
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const shuffle = () => {
+    if (!admin) return;
+    const ids = members.map(m => m.expand?.user?.id).filter(Boolean);
+    const shuffled = ids.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+    const N = Math.max(2, Math.min(10, Number(n) || 2));
+    const teams = Array.from({ length: N }, () => []);
+    shuffled.forEach((id, i) => teams[i % N].push(id));
+    onSaveEvent({ tools: { ...tools, team_split: { n: N, teams } } });
+  };
+
+  const clear = () => {
+    if (!admin) return;
+    onSaveEvent({ tools: { ...tools, team_split: { n: Number(n) || 2, teams: [] } } });
+  };
+
+  return (
+    <>
+      <ModuleHeader title="🎲 Team Aufteilung" admin={false} onOpenSettings={() => {}} />
+      <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
+        Tool: zufällige Aufteilung der Crew in Teams. Kein Scoring, fließt nicht ins Leaderboard.
+      </p>
+
+      {admin && (
+        <>
+          <label className="ww-label">ANZAHL TEAMS</label>
+          <div className="ww-grid2" style={{ gridTemplateColumns: '1fr auto auto' }}>
+            <input className="ww-input" type="number" min={2} max={10} value={n}
+              onChange={e => setN(e.target.value)} style={{ margin: 0 }} />
+            <button className="ww-mini-btn" onClick={shuffle}>🎲 Würfeln</button>
+            <button className="ww-mini-btn red" onClick={clear}>↺ Reset</button>
+          </div>
+        </>
+      )}
+
+      {(!saved.teams || saved.teams.length === 0) ? (
+        <div className="ww-empty" style={{ marginTop: 14 }}>
+          {admin ? 'Tippe "🎲 Würfeln" um die Teams zu erstellen.' : 'Warte auf den Host — Teams werden gleich gewürfelt.'}
+        </div>
+      ) : (
+        <div className="ww-entrant-grid" style={{ marginTop: 14 }}>
+          {saved.teams.map((teamIds, i) => {
+            const color = ENTRANT_PALETTE[i % ENTRANT_PALETTE.length];
+            return (
+              <div key={i} className="ww-entrant-card" style={{ borderColor: color }}>
+                <div className="ww-entrant-head">
+                  <span className="ww-entrant-name" style={{ color }}>TEAM {String.fromCharCode(65 + i)}</span>
+                  <span className="ww-entrant-score">{teamIds.length}</span>
+                </div>
+                <div className="ww-flunky-roster">
+                  {teamIds.map(uid => {
+                    const u = usersById[uid];
+                    if (!u) return null;
+                    return (
+                      <span key={uid} className="ww-flunky-player">
+                        {u.emoji || '🍺'} {u.displayName || u.email}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 

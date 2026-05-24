@@ -1250,3 +1250,56 @@
   letter-spacing: 0.05em; text-transform: uppercase;
   max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* ============ Event code card (host share prompt) ============ */
+.ww-event-code-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+  background: rgba(245,165,36,0.08);
+  border: 1px solid var(--amber);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 0 0 14px;
+  color: var(--text);
+  cursor: pointer;
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  transition: transform 0.08s, background 0.08s;
+  -webkit-tap-highlight-color: transparent;
+}
+.ww-event-code-card:hover { background: rgba(245,165,36,0.14); }
+.ww-event-code-card:active { transform: scale(0.99); }
+.ww-event-code-card-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.2em; color: var(--muted);
+}
+.ww-event-code-card-val {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 26px; line-height: 1; letter-spacing: 0.1em; color: var(--amber);
+}
+.ww-event-code-card-cta {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; letter-spacing: 0.15em;
+  background: var(--amber); color: #0a0a0b;
+  padding: 8px 12px; border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* ============ Tab-strip group labels (Spiele / Tools) ============ */
+.ww-mod-tabs-label {
+  flex: 0 0 auto;
+  display: inline-flex; align-items: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.2em;
+  color: var(--muted-2);
+  padding: 0 6px 0 10px;
+  white-space: nowrap;
+  user-select: none;
+}
+.ww-mod-tab.tool {
+  border-style: dashed;
+}
+.ww-mod-tab.tool.active {
+  border-style: solid;
+}
