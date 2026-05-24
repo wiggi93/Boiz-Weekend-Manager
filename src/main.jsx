@@ -57,13 +57,27 @@ const showBanner = () => {
     'display:flex', 'align-items:center', 'gap:8px',
   ].join(';');
   banner.textContent = '✨ Neue Version — tippen zum Laden';
-  banner.addEventListener('click', () => {
-    // Try SW-driven update first (cleaner, no flash); fall back to a hard
-    // reload if no SW update path is available.
-    try { updateSW(true); } catch (_) { location.reload(); }
-    // Fail-safe: if the SW activation doesn't trigger a reload within 1s,
-    // force one. Covers iOS cases where controllerchange doesn't fire.
-    setTimeout(() => location.reload(), 1200);
+  banner.addEventListener('click', async () => {
+    // Visual feedback so the user doesn't tap twice during the cache wipe.
+    banner.textContent = '⏳ Lädt neue Version…';
+    banner.style.pointerEvents = 'none';
+    // Nuke everything cached and let the next load fetch fresh.
+    // (updateSW alone wasn't reliable: if the SW had no "waiting" worker
+    // it was a no-op, and the reload then served the same old cache,
+    // causing an endless banner loop.)
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r => r.unregister().catch(() => {})));
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        await Promise.all(keys.map(k => caches.delete(k).catch(() => {})));
+      }
+    } catch (_) {}
+    // Cachebuster on the URL also forces the HTTP layer + any CDN edge to
+    // serve a fresh document.
+    location.replace('/?_r=' + Date.now());
   });
   document.body.appendChild(banner);
 
