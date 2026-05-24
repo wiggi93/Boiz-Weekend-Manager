@@ -786,23 +786,30 @@
 }
 .ww-drawer-head {
   flex: 0 0 auto;
-  padding: 14px 20px 10px;
+  padding: 16px 20px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
   border-radius: 16px 16px 0 0;
 }
 .ww-drawer-body {
-  flex: 1 1 auto;
-  min-height: 0; /* critical: lets flex child shrink so overflow-y engages */
+  /* flex-basis: 0 (via shorthand `flex: 1`) makes this child willing to
+     shrink to zero before considering content height. Combined with
+     min-height: 0, this is the canonical iOS-safe pattern for overflow-y
+     inside a flex column. */
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  touch-action: pan-y;
-  padding: 14px 20px max(20px, env(safe-area-inset-bottom));
+  padding: 16px 20px max(24px, env(safe-area-inset-bottom));
   scrollbar-width: none;
 }
 .ww-drawer-body::-webkit-scrollbar { display: none; }
+/* Kill the first element's collapsed-margin so the visual top of the
+   drawer body sits where the padding says it does (no "cut off" feel). */
+.ww-drawer-body > *:first-child { margin-top: 0; }
+.ww-drawer-body > p:first-child { padding-top: 0; }
 .ww-drawer-head {
   display: flex; align-items: center; justify-content: space-between;
 }
