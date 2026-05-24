@@ -1196,6 +1196,7 @@ function HomeView({
     ? customModules.find(c => `cm-${c.id}` === moduleTab)
     : null;
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolView, setToolView] = useState(null); // tool id when one is open inside the drawer
   const [modulesOpen, setModulesOpen] = useState(false);
 
   // Scroll the main container back to top whenever the active tab changes
@@ -1275,15 +1276,8 @@ function HomeView({
           onOpenSettings={() => setModuleSettingsOpen('jeopardy')}
         />
       )}
-      {moduleTab === 'kitty' && (
-        <KittyView
-          me={me} kitty={kitty} members={members} admin={admin}
-          onPatch={onKittyPatch}
-        />
-      )}
-      {moduleTab === 'team_split' && (
-        <TeamSplitView event={event} members={members} admin={admin} onSaveEvent={onSaveEvent} />
-      )}
+      {/* Tools (team_split, kitty) render inside the side-drawer instead
+          of as their own tab views — see the toolsOpen drawer below. */}
       {activeCustom && (
         <CustomModuleView
           me={me} mod={activeCustom} members={members} admin={admin} active={event.active}
@@ -1292,26 +1286,49 @@ function HomeView({
         />
       )}
 
-      {toolsOpen && (
-        <ModuleSettingsDrawer title="🛠 Tools" onClose={() => setToolsOpen(false)}>
-          <p className="ww-muted" style={{ fontSize: 12 }}>
-            Helpers fürs Event — fließen nicht ins Leaderboard.
-          </p>
-          <div className="ww-tools-list">
-            {toolTabs.map(t => (
-              <button
-                key={t.id}
-                className={`ww-tools-item ${moduleTab === t.id ? 'active' : ''}`}
-                onClick={() => { setModuleTab(t.id); setToolsOpen(false); }}
-              >
-                <span className="ww-tools-item-icon">{t.icon}</span>
-                <span className="ww-tools-item-name">{t.name}</span>
-                <ChevronRight size={16} />
-              </button>
-            ))}
-          </div>
-        </ModuleSettingsDrawer>
-      )}
+      {toolsOpen && (() => {
+        const tool = toolView ? moduleById(toolView) : null;
+        const close = () => { setToolsOpen(false); setToolView(null); };
+        return (
+          <ModuleSettingsDrawer
+            title={tool ? `${tool.icon} ${tool.name}` : '🛠 Tools'}
+            onClose={close}
+          >
+            {!tool ? (
+              <>
+                <p className="ww-muted" style={{ fontSize: 12 }}>
+                  Helpers fürs Event — fließen nicht ins Leaderboard.
+                </p>
+                <div className="ww-tools-list">
+                  {toolTabs.map(t => (
+                    <button
+                      key={t.id}
+                      className="ww-tools-item"
+                      onClick={() => setToolView(t.id)}
+                    >
+                      <span className="ww-tools-item-icon">{t.icon}</span>
+                      <span className="ww-tools-item-name">{t.name}</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <button className="ww-drawer-back" onClick={() => setToolView(null)}>
+                  <ArrowLeft size={14} /> Tools
+                </button>
+                {toolView === 'team_split' && (
+                  <TeamSplitView event={event} members={members} admin={admin} onSaveEvent={onSaveEvent} />
+                )}
+                {toolView === 'kitty' && (
+                  <KittyView me={me} kitty={kitty} members={members} admin={admin} onPatch={onKittyPatch} />
+                )}
+              </>
+            )}
+          </ModuleSettingsDrawer>
+        );
+      })()}
 
       {modulesOpen && admin && (
         <ModuleSettingsDrawer title="＋ Module verwalten" onClose={() => setModulesOpen(false)}>
@@ -1490,8 +1507,7 @@ function TeamSplitView({ event, members, admin, onSaveEvent }) {
 
   return (
     <>
-      <ModuleHeader title="🎲 Team Aufteilung" admin={false} onOpenSettings={() => {}} />
-      <p className="ww-muted" style={{ fontSize: 12, marginTop: -4 }}>
+      <p className="ww-muted" style={{ fontSize: 12 }}>
         Tool: zufällige Aufteilung der Crew in Teams. Kein Scoring, fließt nicht ins Leaderboard.
       </p>
 

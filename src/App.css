@@ -778,31 +778,35 @@
   background: var(--bg-2); border-top: 1px solid var(--amber);
   border-radius: 16px 16px 0 0;
   height: 90dvh;
-  max-height: 90dvh;
-  display: flex; flex-direction: column;
   z-index: 100;
   animation: slideup 0.25s ease-out;
   overscroll-behavior: contain;
 }
 .ww-drawer-head {
-  flex: 0 0 auto;
-  padding: 16px 20px 12px;
+  /* Absolute pinning at the top of the drawer — no flex magic, no
+     iOS quirks. Fixed height we can rely on for the body offset. */
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-2);
   border-radius: 16px 16px 0 0;
+  box-sizing: border-box;
 }
 .ww-drawer-body {
-  /* flex-basis: 0 (via shorthand `flex: 1`) makes this child willing to
-     shrink to zero before considering content height. Combined with
-     min-height: 0, this is the canonical iOS-safe pattern for overflow-y
-     inside a flex column. */
-  flex: 1 1 0;
-  min-height: 0;
+  /* Fills the drawer below the head. Explicit top/bottom edges +
+     overflow-y means iOS reliably scrolls instead of falling back to
+     bubbling-up scroll on the page underneath. */
+  position: absolute;
+  top: 56px;
+  left: 0; right: 0; bottom: 0;
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 16px 20px max(24px, env(safe-area-inset-bottom));
+  padding: 18px 20px max(28px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
   scrollbar-width: none;
 }
 .ww-drawer-body::-webkit-scrollbar { display: none; }
@@ -810,6 +814,14 @@
    drawer body sits where the padding says it does (no "cut off" feel). */
 .ww-drawer-body > *:first-child { margin-top: 0; }
 .ww-drawer-body > p:first-child { padding-top: 0; }
+.ww-drawer-back {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px; letter-spacing: 0.1em;
+  cursor: pointer; padding: 4px 8px 4px 0; margin: 0 0 10px;
+}
+.ww-drawer-back:hover { color: var(--text); }
 .ww-drawer-head {
   display: flex; align-items: center; justify-content: space-between;
 }
