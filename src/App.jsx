@@ -1214,17 +1214,19 @@ function HomeView({
         />
       )}
 
-      <div className="ww-mod-tabs">
-        <button className={`ww-mod-tab ${moduleTab === 'overview' ? 'active' : ''}`} onClick={() => setModuleTab('overview')}>
-          <span className="ww-mod-tab-icon">📊</span>
-          <span className="ww-mod-tab-name">Stand</span>
-        </button>
-        {[...gameTabs, ...customTabs].map(t => (
-          <button key={t.id} className={`ww-mod-tab ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
-            <span className="ww-mod-tab-icon">{t.icon}</span>
-            <span className="ww-mod-tab-name">{t.name}</span>
+      <div className="ww-mod-tabs" style={drinksOn ? { top: 60 } : undefined}>
+        <div className="ww-mod-tabs-scroll">
+          <button className={`ww-mod-tab ${moduleTab === 'overview' ? 'active' : ''}`} onClick={() => setModuleTab('overview')}>
+            <span className="ww-mod-tab-icon">📊</span>
+            <span className="ww-mod-tab-name">Stand</span>
           </button>
-        ))}
+          {[...gameTabs, ...customTabs].map(t => (
+            <button key={t.id} className={`ww-mod-tab ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
+              <span className="ww-mod-tab-icon">{t.icon}</span>
+              <span className="ww-mod-tab-name">{t.name}</span>
+            </button>
+          ))}
+        </div>
         {toolTabs.length > 0 && (
           <button
             className={`ww-mod-tab ww-tools-btn ${toolTabs.some(t => t.id === moduleTab) ? 'active' : ''}`}

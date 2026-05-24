@@ -224,7 +224,9 @@
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  padding: 20px 20px calc(90px + env(safe-area-inset-bottom));
+  /* Extra bottom padding so the last content row clears the bottom nav
+     (≈70px) + safe-area inset, with a little breathing room. */
+  padding: 16px 20px calc(110px + env(safe-area-inset-bottom));
   scrollbar-width: none;
 }
 .ww-main::-webkit-scrollbar { display: none; }
@@ -695,14 +697,22 @@
 
 /* ============ Module tabs (horizontal scroll) ============ */
 .ww-mod-tabs {
-  display: flex; gap: 4px;
-  overflow-x: auto; scrollbar-width: none;
-  margin: 10px -20px 16px;
-  padding: 0 20px 4px;
+  display: flex; align-items: stretch; gap: 6px;
+  margin: 10px -20px 14px;
+  padding: 4px 20px 8px;
   position: sticky; top: 0; z-index: 10;
-  background: linear-gradient(180deg, var(--bg) 70%, transparent);
+  background: var(--bg);
+  box-shadow: 0 6px 8px -8px rgba(0,0,0,0.6);
 }
-.ww-mod-tabs::-webkit-scrollbar { display: none; }
+.ww-mod-tabs-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex; gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.ww-mod-tabs-scroll::-webkit-scrollbar { display: none; }
 .ww-mod-tab {
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 6px;
@@ -858,8 +868,9 @@
   display: flex; gap: 8px; align-items: center;
   background: var(--card); border: 1px solid var(--border);
   border-radius: 999px; padding: 6px;
-  margin: 0 0 14px;
+  margin: 0 0 12px;
   position: sticky; top: 0; z-index: 12;
+  box-shadow: 0 6px 10px -8px rgba(0,0,0,0.5);
 }
 .ww-drinks-bar.paused { opacity: 0.55; }
 
