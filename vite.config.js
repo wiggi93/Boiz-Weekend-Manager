@@ -48,6 +48,12 @@ export default defineConfig({
             handler: 'NetworkOnly',
           },
           {
+            // Version-probe requests bypass the SW so we can compare the
+            // live HTML's bundle hash to the loaded one.
+            urlPattern: ({ url, sameOrigin }) => sameOrigin && url.searchParams.has('_v'),
+            handler: 'NetworkOnly',
+          },
+          {
             urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/assets/'),
             handler: 'CacheFirst',
             options: {

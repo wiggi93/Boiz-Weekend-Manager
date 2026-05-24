@@ -19,17 +19,25 @@ document.addEventListener('touchend', (e) => {
 }, { passive: false });
 document.addEventListener('dblclick', (e) => e.preventDefault());
 
-// New-version detection. Workbox is configured in 'prompt' mode, so a new
-// SW lands in "waiting" instead of silently swapping. The flow:
-//   1. checkForUpdate() runs on app start, on every foreground / focus,
-//      and on an interval. It calls registration.update() to ask the SW
-//      to look for a new version on the network.
-//   2. If registration.waiting is populated → there's a new SW ready.
-//      Either onNeedRefresh fires (vite-plugin-pwa) or we surface the
-//      banner ourselves. Belt-and-braces because the lifecycle event
-//      doesn't always fire reliably on iOS PWAs that backgrounded.
-//   3. Tap banner → updateSW(true) → skipWaiting → controllerchange
-//      → page reload with new bundle.
+// Update detection.
+// iOS PWAs are notoriously unreliable about firing service-worker lifecycle
+// events while the app sleeps and re-foregrounds, so the SW-based check was
+// missing updates for the user. Switch to a direct HTML comparison: snapshot
+// the bundle filename of the currently-loaded script (e.g. `index-AbC123.js`),
+// then periodically fetch the live `index.html` (with a `?_v=` cachebuster
+// that the SW is configured to bypass via NetworkOnly), parse out the bundle
+// filename, and surface the banner if it differs.
+const currentBundle = (() => {
+  try {
+    const scripts = Array.from(document.querySelectorAll('script[type="module"]'));
+    for (const s of scripts) {
+      const m = s.src.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
+      if (m) return m[1];
+    }
+  } catch (_) {}
+  return null;
+})();
+
 let bannerShown = false;
 const showBanner = () => {
   if (bannerShown || document.getElementById('ww-update-banner')) return;
@@ -45,14 +53,21 @@ const showBanner = () => {
     'display:flex', 'align-items:center', 'gap:8px',
   ].join(';');
   banner.textContent = '✨ Neue Version — tippen zum Laden';
-  banner.addEventListener('click', () => updateSW(true));
+  banner.addEventListener('click', () => {
+    // Try SW-driven update first (cleaner, no flash); fall back to a hard
+    // reload if no SW update path is available.
+    try { updateSW(true); } catch (_) { location.reload(); }
+    // Fail-safe: if the SW activation doesn't trigger a reload within 1s,
+    // force one. Covers iOS cases where controllerchange doesn't fire.
+    setTimeout(() => location.reload(), 1200);
+  });
   document.body.appendChild(banner);
 
   // If the user tabs/apps away after seeing the banner, apply silently.
   const onHidden = () => {
     if (document.visibilityState === 'hidden') {
       document.removeEventListener('visibilitychange', onHidden);
-      updateSW(true);
+      try { updateSW(true); } catch (_) {}
     }
   };
   document.addEventListener('visibilitychange', onHidden);
@@ -63,27 +78,48 @@ const updateSW = registerSW({
   onNeedRefresh: showBanner,
 });
 
-const checkForUpdate = async () => {
+// Direct HTML-based version probe. Works regardless of SW lifecycle quirks.
+const checkForUpdateHtml = async () => {
+  if (!currentBundle) return;
+  try {
+    const res = await fetch('/?_v=' + Date.now(), {
+      cache: 'no-store',
+      headers: { 'cache-control': 'no-cache' },
+    });
+    if (!res.ok) return;
+    const html = await res.text();
+    const m = html.match(/\/assets\/(index-[A-Za-z0-9_-]+\.js)/);
+    if (m && m[1] && m[1] !== currentBundle) {
+      // Live HTML references a different bundle → there's a deploy we missed.
+      // Also kick the SW so its cache gets refreshed in parallel.
+      navigator.serviceWorker?.getRegistration().then(r => r?.update()).catch(() => {});
+      showBanner();
+    }
+  } catch (_) { /* offline / transient */ }
+};
+
+// Belt-and-braces: also ask the SW to look for updates. Catches the rare
+// case where the HTML is unchanged but the SW itself has new content.
+const checkForUpdateSw = async () => {
   if (!('serviceWorker' in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.getRegistration();
     if (!reg) return;
     await reg.update();
-    // If onNeedRefresh didn't fire for whatever reason, fall back to
-    // showing the banner manually when we can see a waiting worker.
     if (reg.waiting) showBanner();
-  } catch (_) { /* offline / transient */ }
+  } catch (_) {}
 };
 
-// Initial check + on every foreground transition + on focus + interval.
-// iOS PWAs pause JS in the background, so the foreground event is the
-// most reliable signal we have.
-setTimeout(checkForUpdate, 4000);
+const checkForUpdate = () => { checkForUpdateHtml(); checkForUpdateSw(); };
+
+// Initial check shortly after boot + on every foreground transition + focus + interval.
+// Foreground is the most reliable iOS trigger because JS only runs then.
+setTimeout(checkForUpdate, 3000);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') checkForUpdate();
 });
 window.addEventListener('focus', checkForUpdate);
-setInterval(checkForUpdate, 2 * 60 * 1000); // every 2 min while open
+setInterval(checkForUpdate, 60 * 1000); // every minute while the app is open
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
