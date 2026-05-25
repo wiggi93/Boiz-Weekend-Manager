@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Beer, Wine, Trophy, Users, Settings, Plus, Minus, Check, X,
   RotateCcw, Home, User as UserIcon, Utensils,
@@ -3127,17 +3128,23 @@ function CustomModuleSettings({ mod, members, onPatch, onDelete }) {
 // ============================================================
 
 function ModuleSettingsDrawer({ title, onClose, children }) {
-  return (
+  // Portal to <body> so the drawer escapes any ancestor positioning
+  // context (.ww-app's flex/overflow:hidden was clipping fixed children
+  // on iOS Safari). With the portal it's a direct child of <body>,
+  // position: fixed works as expected, and we can fill the viewport
+  // safely.
+  return createPortal(
     <>
       <div className="ww-drawer-backdrop" onClick={onClose} />
-      <div className="ww-drawer">
+      <div className="ww-drawer" role="dialog" aria-modal="true">
         <div className="ww-drawer-head">
           <h3>{title}</h3>
           <button className="ww-icon-btn" onClick={onClose} aria-label="Schließen"><X size={16} /></button>
         </div>
         <div className="ww-drawer-body">{children}</div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }
 
