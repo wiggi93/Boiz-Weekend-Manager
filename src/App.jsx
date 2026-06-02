@@ -19,9 +19,11 @@ import {
   getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard,
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
   getKitty, updateKitty, ensureKitty,
+  getSchnelleFragen, updateSchnelleFragen, ensureSchnelleFragen,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
-import { MODULES, moduleById, isToolModule } from './modules.js';
+import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
+import { SCHNELLE_FRAGEN } from './schnelleFragenBank.js';
 import './App.css';
 
 // ---- Confirm singleton (no prop drilling) ----
@@ -160,6 +162,9 @@ export default function App() {
   const [kitty, setKitty] = useState(null);
   const kittyRef = useRef(null);
   useEffect(() => { kittyRef.current = kitty; }, [kitty]);
+  const [schnelleFragen, setSchnelleFragen] = useState(null);
+  const schnelleFragenRef = useRef(null);
+  useEffect(() => { schnelleFragenRef.current = schnelleFragen; }, [schnelleFragen]);
   const [customModules, setCustomModules] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
@@ -186,15 +191,20 @@ export default function App() {
     setTimeout(() => setToast(t => (t && Date.now() - t.id >= 2600) ? null : t), 3000);
   };
 
-  const showEventNotification = useCallback(async (eventName) => {
+  const showEventNotification = useCallback(async (eventName, kind) => {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const icon = `${window.location.origin}${import.meta.env.BASE_URL}pwa-192x192.png`;
-    const opts = { body: `${eventName} ist jetzt aktiv — es geht los! 🎉`, icon, badge: icon, tag: 'event-start', renotify: true };
+    const isStart = kind === 'start';
+    const title = isStart ? 'Event gestartet! 🍻' : 'Event pausiert ⏸';
+    const body = isStart
+      ? `${eventName} ist jetzt aktiv — es geht los! 🎉`
+      : `${eventName} wurde pausiert. Stand wird festgehalten.`;
+    const opts = { body, icon, badge: icon, tag: `event-${kind}`, renotify: true };
     try {
       const sw = await navigator.serviceWorker?.ready;
-      if (sw?.showNotification) { sw.showNotification('Event gestartet! 🍻', opts); return; }
+      if (sw?.showNotification) { sw.showNotification(title, opts); return; }
     } catch { /* no sw */ }
-    try { new Notification('Event gestartet! 🍻', opts); } catch { /* permission or unsupported */ }
+    try { new Notification(title, opts); } catch { /* permission or unsupported */ }
   }, []);
 
   useEffect(() => pb.authStore.onChange(() => setMe(pb.authStore.record)), []);
@@ -229,21 +239,22 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setCustomModules([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]);
       return;
     }
     try {
-      const [ev, members, stats, fl, je, kt, cms] = await Promise.all([
+      const [ev, members, stats, fl, je, kt, sf, cms] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
         getFlunky(currentEventId),
         getJeopardy(currentEventId),
         getKitty(currentEventId),
+        getSchnelleFragen(currentEventId),
         listCustomModules(currentEventId),
       ]);
       setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats);
-      setFlunky(fl); setJeopardy(je); setKitty(kt); setCustomModules(cms);
+      setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -299,7 +310,9 @@ export default function App() {
         eventRef.current = next;
         return next;
       });
-      if (!wasActive && rec.active) showEventNotification(rec.name || eventRef.current?.name || 'Event');
+      const evName = rec.name || eventRef.current?.name || 'Event';
+      if (!wasActive && rec.active) showEventNotification(evName, 'start');
+      else if (wasActive && !rec.active) showEventNotification(evName, 'pause');
       return;
     }
 
@@ -341,6 +354,15 @@ export default function App() {
       setKitty(prev => {
         const next = prev ? { ...prev, ...rec } : rec;
         kittyRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    if (collection === 'schnelle_fragen') {
+      setSchnelleFragen(prev => {
+        const next = prev ? { ...prev, ...rec } : rec;
+        schnelleFragenRef.current = next;
         return next;
       });
       return;
@@ -578,6 +600,18 @@ export default function App() {
     catch (e) { console.warn('kitty update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
+  const onSchnellePatch = async (patch) => {
+    let cur = schnelleFragenRef.current;
+    if (!cur) {
+      cur = await ensureSchnelleFragen(currentEventId);
+      schnelleFragenRef.current = cur; setSchnelleFragen(cur);
+    }
+    const nextS = { ...cur, ...patch };
+    schnelleFragenRef.current = nextS; setSchnelleFragen(nextS);
+    try { await updateSchnelleFragen(cur.id, patch); }
+    catch (e) { console.warn('schnelle update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
   // ---- Custom modules ----
   const onCustomCreate = async (data) => {
     try {
@@ -713,6 +747,7 @@ export default function App() {
             flunky={flunky} onFlunkyPatch={onFlunkyPatch}
             jeopardy={jeopardy} onJeopardyPatch={onJeopardyPatch} onJeopardyGenerate={onJeopardyGenerate}
             kitty={kitty} onKittyPatch={onKittyPatch}
+            schnelleFragen={schnelleFragen} onSchnellePatch={onSchnellePatch}
             customModules={customModules}
             onCustomCreate={onCustomCreate}
             onCustomPatch={onCustomPatch}
@@ -1092,9 +1127,9 @@ function CreateEventForm({ onSubmit }) {
       <input className="ww-input" value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder="z.B. Boiz Sommer-Wochenende" />
       <label className="ww-label">DATUM</label>
       <input className="ww-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
-      <label className="ww-label">MODULE</label>
+      <label className="ww-label">SPIELE</label>
       <div className="ww-modules">
-        {MODULES.map(m => (
+        {GAME_MODULES.map(m => (
           <button key={m.id}
             className={`ww-mod-card ${modules.includes(m.id) ? 'sel' : ''} ${m.available ? '' : 'disabled'}`}
             onClick={() => m.available && toggle(m.id)} disabled={!m.available}>
@@ -1117,6 +1152,20 @@ function CreateEventForm({ onSubmit }) {
       </div>
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
         Custom-Module sind Competitions wie Cornhole, Tischtennis usw. Teams oder Solo-Modus, Punkte und Sätze einstellbar — die genaue Konfiguration machst du nach dem Erstellen im Event.
+      </p>
+
+      <label className="ww-label" style={{ marginTop: 12 }}>WERKZEUGE</label>
+      <div className="ww-modules">
+        {TOOL_MODULES.map(m => (
+          <div key={m.id} className="ww-mod-card ww-mod-card-tool sel" title="Immer verfügbar">
+            <div className="ww-mod-icon">{m.icon}</div>
+            <div className="ww-mod-name">{m.name}</div>
+            <div className="ww-mod-soon">TOOL</div>
+          </div>
+        ))}
+      </div>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Werkzeuge stehen in jedem Event automatisch zur Verfügung — kein An/Aus nötig.
       </p>
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
@@ -1238,14 +1287,15 @@ function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
   jeopardy, onJeopardyPatch, onJeopardyGenerate,
   kitty, onKittyPatch,
+  schnelleFragen, onSchnellePatch,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
-  const enabledMods = MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
-  const gameTabs = enabledMods.filter(m => m.kind !== 'tool');
-  const toolTabs = enabledMods.filter(m => m.kind === 'tool');
+  // Games are opt-in per event (modules array); tools are ALWAYS available.
+  const gameTabs = GAME_MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
+  const toolTabs = TOOL_MODULES;
   const customTabs = (customModules || []).map(cm => ({ id: `cm-${cm.id}`, name: cm.name || 'Modul', icon: cm.icon || '🎯', cm }));
   const drinksOn = modules.includes('drinks');
   const activeCustom = moduleTab?.startsWith?.('cm-')
@@ -1381,6 +1431,9 @@ function HomeView({
                 {toolView === 'kitty' && (
                   <KittyView me={me} kitty={kitty} members={members} admin={admin} onPatch={onKittyPatch} />
                 )}
+                {toolView === 'schnelle_fragen' && (
+                  <SchnelleFragenView state={schnelleFragen} onPatch={onSchnellePatch} />
+                )}
               </>
             )}
           </ModuleSettingsDrawer>
@@ -1390,11 +1443,11 @@ function HomeView({
       {modulesOpen && admin && (
         <ModuleSettingsDrawer title="＋ Module verwalten" onClose={() => setModulesOpen(false)}>
           <p className="ww-muted" style={{ fontSize: 12 }}>
-            An/aus für alle. Tabs verschwinden bei den Spielern, wenn du ein Modul deaktivierst.
+            An/aus für alle. Tabs verschwinden bei den Spielern, wenn du ein Spiel deaktivierst.
           </p>
-          <label className="ww-label" style={{ marginTop: 10 }}>VERFÜGBAR</label>
+          <label className="ww-label" style={{ marginTop: 10 }}>SPIELE</label>
           <div className="ww-module-toggles">
-            {MODULES.map(m => {
+            {GAME_MODULES.map(m => {
               const on = (modules || []).includes(m.id);
               return (
                 <button key={m.id}
@@ -1403,15 +1456,26 @@ function HomeView({
                   disabled={!m.available}>
                   <span className="ww-mod-icon">{m.icon}</span>
                   <span className="ww-mod-name">{m.name}</span>
-                  {m.kind === 'tool' && (
-                    <span className="ww-host-badge" style={{ marginLeft: 0 }}>TOOL</span>
-                  )}
                   {m.available
                     ? (on ? <Eye size={14} /> : <EyeOff size={14} />)
                     : <span className="ww-mod-soon">SOON</span>}
                 </button>
               );
             })}
+          </div>
+
+          <label className="ww-label" style={{ marginTop: 18 }}>WERKZEUGE — IMMER VERFÜGBAR</label>
+          <p className="ww-muted" style={{ fontSize: 11, marginTop: -2, marginBottom: 6 }}>
+            Helpers ohne Scoring. Stehen jedem Event automatisch zur Verfügung.
+          </p>
+          <div className="ww-module-toggles">
+            {TOOL_MODULES.map(m => (
+              <div key={m.id} className="ww-module-toggle on" style={{ cursor: 'default' }}>
+                <span className="ww-mod-icon">{m.icon}</span>
+                <span className="ww-mod-name">{m.name}</span>
+                <span className="ww-host-badge" style={{ marginLeft: 0 }}>TOOL</span>
+              </div>
+            ))}
           </div>
 
           <label className="ww-label" style={{ marginTop: 18 }}>CUSTOM MODULE</label>
@@ -2749,6 +2813,94 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
           </button>
         </ModuleSettingsDrawer>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// 5 Schnelle Fragen (Gemischtes Hack — Tool, non-competitive)
+// Every event member can navigate. Backend keeps `qIds` (shuffled
+// indices into the static SCHNELLE_FRAGEN bank) + `currentIdx` so all
+// participants see the exact same question simultaneously.
+// ============================================================
+
+// Mulberry32 — small deterministic PRNG used to seed-shuffle the
+// question bank so a fresh deck order is stable for everyone.
+function seededShuffle(arr, seed) {
+  const a = [...arr];
+  let s = seed >>> 0;
+  for (let i = a.length - 1; i > 0; i--) {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    const r = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    const j = Math.floor(r * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function SchnelleFragenView({ state, onPatch }) {
+  const qIds = Array.isArray(state?.qIds) && state.qIds.length ? state.qIds : null;
+  const currentIdx = Math.max(0, Number(state?.currentIdx) || 0);
+
+  const ensureDeck = () => {
+    if (qIds) return qIds;
+    const ids = SCHNELLE_FRAGEN.map((_, i) => i);
+    const seeded = seededShuffle(ids, Date.now() & 0xffffffff);
+    onPatch({ qIds: seeded, currentIdx: 0 });
+    return seeded;
+  };
+
+  const deck = qIds || SCHNELLE_FRAGEN.map((_, i) => i);
+  const safeIdx = Math.min(currentIdx, deck.length - 1);
+  const currentQ = SCHNELLE_FRAGEN[deck[safeIdx]] || SCHNELLE_FRAGEN[0];
+  const total = deck.length;
+
+  const goPrev = () => {
+    const d = ensureDeck();
+    const next = Math.max(0, safeIdx - 1);
+    onPatch({ qIds: d, currentIdx: next });
+  };
+  const goNext = () => {
+    const d = ensureDeck();
+    const next = (safeIdx + 1) % d.length;
+    onPatch({ qIds: d, currentIdx: next });
+  };
+  const reshuffle = async () => {
+    if (!await appConfirm('Neuen Fragen-Stapel mischen?', { title: 'Neu mischen?', destructive: false, okLabel: 'MISCHEN' })) return;
+    const ids = SCHNELLE_FRAGEN.map((_, i) => i);
+    const seeded = seededShuffle(ids, (Date.now() ^ 0x9e3779b9) & 0xffffffff);
+    onPatch({ qIds: seeded, currentIdx: 0 });
+  };
+
+  return (
+    <div className="ww-schnelle">
+      <p className="ww-muted" style={{ fontSize: 12, marginTop: 0 }}>
+        Inspired by „5 Schnelle Fragen" (Gemischtes Hack). Diskutiert die Frage — alle sehen das Gleiche. Jeder kann weiterklicken.
+      </p>
+
+      <div className="ww-schnelle-card">
+        <div className="ww-schnelle-counter">
+          <span className="ww-schnelle-counter-num">{safeIdx + 1}</span>
+          <span className="ww-schnelle-counter-total">/ {total}</span>
+        </div>
+        <div className="ww-schnelle-question">{currentQ}</div>
+      </div>
+
+      <div className="ww-schnelle-nav">
+        <button className="ww-schnelle-nav-btn" onClick={goPrev} disabled={safeIdx === 0} aria-label="Vorherige Frage">
+          <ArrowLeft size={20} />
+        </button>
+        <button className="ww-schnelle-nav-btn primary" onClick={goNext} aria-label="Nächste Frage">
+          <span>NÄCHSTE</span>
+          <ChevronRight size={20} />
+        </button>
+      </div>
+
+      <button className="ww-text-btn" onClick={reshuffle} style={{ marginTop: 16 }}>
+        <RotateCcw size={14} /> Stapel neu mischen
+      </button>
     </div>
   );
 }

@@ -39,58 +39,93 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
-  const prompt = `Du erstellst ein deutsches Jeopardy-Brett für einen Spieleabend.
+  const prompt = `Du erstellst ein deutsches Jeopardy-Brett für einen Spieleabend mit Freunden.
 
-Kategorien:
+Kategorien (genau ${cats.length} Stück):
 ${catBlock}
 
-== KORREKTHEIT (oberste Priorität) ==
-Jeder Fakt MUSS überprüfbar korrekt sein. Wenn du dir bei einem Fakt nicht 100% sicher bist (z.B. exaktes Jahr, exakter Songtext, Name einer Person), wähle ein anderes Thema oder formuliere weniger spezifisch. Lieber eine sichere als eine "interessantere" aber falsche Frage. Bei Songtexten wortwörtlich zitieren — wenn du den genauen Wortlaut nicht sicher kennst, nutz eine andere Zeile oder einen anderen Song. Bei TV-Shows: keine erfundenen Staffeln, Kandidaten oder Drama-Momente.
+================================================================
+== KORREKTHEIT — ABSOLUTE PRIORITÄT (höher als jede andere Regel)
+================================================================
+Jeder einzelne Fakt MUSS verifizierbar wahr sein. Wenn du dir bei einem Detail (Jahr, Name, Songtext, Episode, Spielmechanik, chemische Formel, geographisches Detail) nicht zu 100% sicher bist:
+  → ERSETZE die Frage mit einer, bei der du dir sicher bist.
+  → Formuliere ungenauer, statt zu raten.
 
-== SCHWIERIGKEITS-ANKER (sehr wichtig — staffel sie wirklich!) ==
+Konkrete Risiko-Bereiche (besonders streng prüfen):
+  • Songtexte: zitiere NUR Zeilen, deren genauen Wortlaut du sicher kennst. Lieber eine bekanntere, ältere Hookline als ein unsicheres Detail. Schreibe Texte exakt mit korrekten Apostrophen, Pausen-Wörtern ("Yeah", "Oh", "Baby") und Wortabständen.
+  • Reality-TV-Staffeln/Folgen: keine erfundene Staffelnummer. Wenn du eine konkrete Staffel nennst, prüf dass die Show in dem Jahr lief.
+  • Twitch/YouTube: keine erfundenen Drama-Momente, keine ausgedachten Sub-Counts.
+  • Geschichte/Daten: keine ausgedachten Jahreszahlen — wenn das Jahr unsicher ist, weglassen.
+  • Geographie: keine erfundenen Höhen-/Distanz-/Bevölkerungsangaben.
+  • Wissenschaft/Mathe: Formeln und Konstanten EXAKT.
 
-Level 1 (100 Pkt) — "Pub-Quiz easy":
-  Etwa 80% der Teilnehmer wissen es. Mainstream-Allgemeinwissen.
-  Geographie-Beispiel: "Diese Stadt an der Spree ist Deutschlands Hauptstadt" → Berlin
-  Reality-TV-Beispiel: "Diese Sendung sucht jährlich auf Mallorca die große Liebe" → Bachelor in Paradise (oder Love Island)
-  Songtext-2000er-Beispiel: "Diese Robbie-Williams-Hit-Zeile geht 'I sit and wait, does an _ have a key?'" → Angel ('angel')
+Eindeutigkeits-Test: Die Antwort muss eindeutig sein. "Dieser Song von 2010" → es muss CONTEXT geben, der nur EINEN Song zulässt. "Dieser Schauspieler aus Hollywood" → unzureichend.
 
-Level 2 (200 Pkt) — "kurz nachdenken":
-  Etwa 60% wissen es.
-  Geographie: "Dieser höchste Berg im Schwarzwald ist 1493m hoch" → Feldberg
-  Schule: "Diese chemische Formel beschreibt Kochsalz" → NaCl
+Selbsttest pro Frage: Wenn ein Spieler nach der Antwort "moment, ist das nicht eigentlich X?" sagen könnte und teilweise recht hätte → Frage umformulieren oder Antwort um Alternativen erweitern.
 
-Level 3 (300 Pkt) — "gebildet, kein Spezialist":
-  Etwa 40% wissen es. Schon spezifischer.
-  Geographie: "In diesem deutschen Bundesland liegt die kleinste Landeshauptstadt Mainz" → Rheinland-Pfalz
-  Twitch/YT-Beispiel: "Dieser Twitch-Streamer ist mit Mois und Trymacs Teil der 'Bratzn'" → Rumathra
+================================================================
+== SCHWIERIGKEITS-ANKER — Level 1..5
+================================================================
+Du MUSST die fünf Level innerhalb jeder Kategorie SPÜRBAR unterschiedlich machen. Wenn alle fünf "irgendwie gleich schwer" wirken: vergeigt.
 
-Level 4 (400 Pkt) — "schon knifflig":
-  Etwa 20%, deutlich spezifischer. Hier muss man nachdenken oder gut raten.
-  Schule: "Diese mathematische Konstante ist als Eulersche Zahl bekannt und beträgt etwa 2,718" → e
-  Songtext-2000er: "In diesem Tokio-Hotel-Song von 2005 fragt Bill: '_, in deiner Schule lernen sie nur Mist'" → Schrei
+Level 1 (= 100 Punkte) — "Pub-Quiz Mainstream":
+  ~80% einer durchschnittlichen Erwachsenen-Runde wissen es.
+  Geographie: "Diese Stadt an der Spree ist Deutschlands Hauptstadt." → Berlin
+  Reality-TV: "In dieser RTL-Sendung verteilt ein Single jede Folge Rosen." → Der Bachelor
 
-Level 5 (500 Pkt) — "richtig schwer, aber lösbar":
-  Etwa 10%, Detailwissen. Aber NICHT obskur — sollte einem aufmerksamen Fan/Lerner einfallen.
-  Geographie: "Dieser nördlichste Punkt Deutschlands liegt auf der Insel Sylt" → Listland (oder Kliffende)
-  Reality-TV: "In dieser Staffel von 'Are You The One' war Aleks Petrović auf der Suche nach seinem Match" → Staffel 1 (2020)
+Level 2 (= 200 Punkte) — "kurz nachdenken":
+  ~60% wissen es.
+  Geographie: "Dieser höchste Berg im Schwarzwald ist 1493m hoch." → Feldberg
+  Schule: "Diese chemische Formel beschreibt Kochsalz." → NaCl
 
-== AUFGABE ==
-1. Pro Kategorie GENAU 5 Fragen — eine je Level 1..5.
-2. Jeder Level-Sprung MUSS deutlich spürbar sein. Wenn deine Level-5-Frage sich wie Level 3 anfühlt → spezifischer machen.
-3. Fragen kurz (max 25 Wörter), klar formuliert, eindeutig beantwortbar.
-4. Antworten kurz, faktisch, korrekt.
-5. Stil: klassisches Jeopardy ("Diese Hauptstadt …" / "Dieser Schauspieler …"), wo's passt.
+Level 3 (= 300 Punkte) — "gebildet, kein Spezialist":
+  ~40% wissen es. Schon spezifisch.
+  Geographie: "Diese Landeshauptstadt von Rheinland-Pfalz liegt am Rhein." → Mainz
+  Twitch/YT: "Diese deutsche Streamerin ist seit 2018 bei Twitch und veranstaltet das 'GIRLPLANET'-Festival." → Shurjoka
 
-== ARBEITSWEISE ==
-Im Thinking-Schritt: erst alle 25 Fragen im Entwurf, dann ehrlich kritisch durchgehen — ist das wirklich Level 5 oder gefühlt Level 2? Stimmt der Fakt 100%? Songtext exakt zitiert? Wenn unsicher: durch eine andere Frage ersetzen. Erst dann die endgültige JSON-Ausgabe.
+Level 4 (= 400 Punkte) — "schon knifflig":
+  ~20% wissen es. Deutlich spezifischer als Level 3.
+  Schule: "Diese mathematische Konstante ist als Eulersche Zahl bekannt und beträgt ca. 2,718." → e
+  Songtext-2000er: "In Robbie Williams' 'Angel' (1997) heißt es: 'And through it all, she offers me ___.'" → protection
 
-== AUSGABE ==
-NUR JSON. Kein Vortext, kein Codeblock. Beginnt mit { endet mit }. level-Feld ist 1..5 (NICHT 100..500). Schema:
+Level 5 (= 500 Punkte) — "schwer aber FAIR":
+  ~10% wissen es. Detailwissen, ABER niemals obskur — Fakten, an die sich ein engagierter Fan/Lernender erinnern könnte.
+  Reality-TV: "In dieser Staffel von 'Are You The One? Reality Stars in Love' war Aleks Petrović Teilnehmer." → Staffel 1 (2020)
+
+NICHT machen auf Level 5: Trivial-Tier Detail-Fakten, die selbst Experten nicht wissen (z.B. "Wie hieß der dritte Hauself in Buch 7?").
+
+================================================================
+== KATEGORIE-FOKUS
+================================================================
+Halte dich strikt an die Kategorie. "Geographie" ≠ Hauptstadt-Quiz mit einer einzigen Star-Wars-Frage drin. Wenn die Kategorie "Songtexte 2000er" heißt: ALLE 5 Fragen sind Songtexte aus 2000–2009, nicht "Songs der 2000er" oder "Texte der 90er".
+
+================================================================
+== AUFGABE
+================================================================
+1. Pro Kategorie GENAU 5 Fragen — exakt eine je Level 1, 2, 3, 4, 5.
+2. Insgesamt also exakt ${cats.length * 5} Fragen.
+3. Fragen max 30 Wörter, eindeutig formuliert.
+4. Antwort kurz und präzise (max 10 Wörter).
+5. Bei Songtexten in der Frage selbst zitieren, Antwort = das fehlende Wort/die Antwort.
+6. Stil: klassische Jeopardy-Aussagen ("Diese Hauptstadt…", "Dieser Schauspieler…") wo's passt.
+
+================================================================
+== ARBEITSWEISE (im Thinking-Block)
+================================================================
+Schritt 1: Pro Kategorie 5 Themen-Kandidaten sammeln, einen pro Level.
+Schritt 2: Korrektheits-Check pro Frage: "Bin ich mir bei diesem Fakt zu 100% sicher?" — bei NEIN: ersetzen.
+Schritt 3: Level-Konsistenz-Check: Stimmt die geschätzte Lösungsquote? Würde eine Level-5-Frage von 50% der Leute gelöst → zu leicht.
+Schritt 4: Eindeutigkeits-Check: Gibt es nur EINE valide Antwort?
+Schritt 5: Erst dann JSON ausgeben.
+
+================================================================
+== AUSGABE
+================================================================
+NUR JSON. Kein Vortext, kein Codeblock, keine Erklärung. Beginnt mit { endet mit }. level-Feld ist 1..5 (NICHT 100..500). Kategorie-Name MUSS wortgleich mit der Eingabe sein. Schema:
 
 {"questions":[{"category":"<Kategoriename wortgleich>","level":1,"q":"<Frage>","a":"<Antwort>"}]}
 
-Insgesamt ${cats.length * 5} Einträge.`;
+Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 1..5, Kategorie 2 Level 1..5, ..., Kategorie ${cats.length} Level 1..5.`;
 
   // Build per-auth request configuration. We try OAuth (Pro subscription)
   // first; if it 429s we automatically retry with the API key when one is
@@ -113,9 +148,9 @@ Insgesamt ${cats.length * 5} Einträge.`;
       // headers, no clear "feature gated" message). So OAuth requests run
       // without it; the API-key path below still uses thinking for higher
       // quality output.
-      model: "claude-sonnet-4-5",
-      max_tokens: 8000,
-      system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration.",
+      model: "claude-opus-4-7",
+      max_tokens: 12000,
+      system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration. Verify every single fact before including it; replace any question whose facts you cannot fully verify.",
       messages: [{ role: "user", content: prompt }],
     },
   });
@@ -127,9 +162,13 @@ Insgesamt ${cats.length * 5} Einträge.`;
       "content-type": "application/json",
     },
     body: {
-      model: "claude-sonnet-4-5",
-      max_tokens: 16000,
-      thinking: { type: "enabled", budget_tokens: 5000 },
+      // Opus 4.7 with extended thinking — better factual recall and
+      // difficulty-level calibration than Sonnet 4.5 in our testing.
+      // Thinking budget bumped so the model has room for the
+      // self-validation pass demanded by the prompt.
+      model: "claude-opus-4-7",
+      max_tokens: 24000,
+      thinking: { type: "enabled", budget_tokens: 10000 },
       temperature: 1,
       messages: [{ role: "user", content: prompt }],
     },

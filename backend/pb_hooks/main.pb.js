@@ -92,6 +92,16 @@ onRecordAfterCreateSuccess((e) => {
   } catch (err) {
     console.log("kitty seed:", err);
   }
+  try {
+    const sfCol = e.app.findCollectionByNameOrId("schnelle_fragen");
+    const sf = new Record(sfCol);
+    sf.set("event", e.record.id);
+    sf.set("currentIdx", 0);
+    sf.set("qIds", []);
+    e.app.save(sf);
+  } catch (err) {
+    console.log("schnelle_fragen seed:", err);
+  }
   e.next();
 }, "events");
 

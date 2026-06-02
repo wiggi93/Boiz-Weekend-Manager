@@ -212,6 +212,25 @@ export async function ensureKitty(eventId) {
   return pb.collection('kitty').create({ event: eventId, expenses: [] });
 }
 
+// ---- Schnelle Fragen (5 Schnelle, Tool-Modul) ----
+export async function getSchnelleFragen(eventId) {
+  try {
+    return await pb.collection('schnelle_fragen').getFirstListItem(`event="${eventId}"`);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateSchnelleFragen(id, patch) {
+  return pb.collection('schnelle_fragen').update(id, patch);
+}
+
+export async function ensureSchnelleFragen(eventId) {
+  const existing = await getSchnelleFragen(eventId);
+  if (existing) return existing;
+  return pb.collection('schnelle_fragen').create({ event: eventId, currentIdx: 0, qIds: [] });
+}
+
 // ---- Custom modules ----
 export async function listCustomModules(eventId) {
   return pb.collection('custom_modules').getFullList({
@@ -248,6 +267,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('jeopardy').subscribe('*', wrap('jeopardy', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('custom_modules').subscribe('*', wrap('custom_modules', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('kitty').subscribe('*', wrap('kitty', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('schnelle_fragen').subscribe('*', wrap('schnelle_fragen', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('users').subscribe('*', wrap('users'))),
   ]);
   return () => unsubs.forEach(fn => { try { fn(); } catch (_) {} });
