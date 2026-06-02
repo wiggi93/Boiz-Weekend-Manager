@@ -1,5 +1,4 @@
 name: Claude
-
 on:
   issue_comment:
     types: [created]
@@ -9,7 +8,6 @@ on:
     types: [submitted]
   issues:
     types: [opened, assigned]
-
 jobs:
   # Default path: uses the OAuth token (counts against the Claude.ai Pro/Max
   # subscription). Triggered by @claude but NOT by @claude-api.
@@ -40,12 +38,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          allowed_tools: |
-            Bash(gh:*)
-            Bash(git:*)
-            Bash(npm:*)
-            Bash(curl:*)
-
+          claude_args: |
+            --model opus
+            --allowedTools "Bash(gh:*),Bash(git:*),Bash(npm:*),Bash(curl:*)"
   # Fallback path: uses the pay-per-use Anthropic API key (charged against
   # the $20 credit balance). Triggered explicitly by @claude-api.
   claude-api:
@@ -74,8 +69,6 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: '@claude-api'
-          allowed_tools: |
-            Bash(gh:*)
-            Bash(git:*)
-            Bash(npm:*)
-            Bash(curl:*)
+          claude_args: |
+            --model opus
+            --allowedTools "Bash(gh:*),Bash(git:*),Bash(npm:*),Bash(curl:*)"
