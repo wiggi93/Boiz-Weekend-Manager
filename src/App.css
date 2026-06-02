@@ -170,7 +170,7 @@
   outline: none; resize: vertical;
   transition: border-color 0.15s;
 }
-.ww-input:focus, .ww-textarea:focus { border-color: var(--amber); }
+.ww-input:focus, .ww-textarea:focus { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(245,165,36,0.12); }
 .ww-textarea { font-family: 'Manrope', sans-serif; }
 
 .ww-emoji-grid {
@@ -456,8 +456,14 @@
   letter-spacing: 0.15em; text-transform: uppercase;
   border-radius: 4px;
   transition: color 0.15s, background 0.15s;
+  position: relative;
 }
 .ww-nav-btn.active { color: var(--amber); background: rgba(245,165,36,0.08); }
+.ww-nav-btn.active::before {
+  content: '';
+  position: absolute; top: 0; left: 25%; right: 25%; height: 2px;
+  background: var(--amber); border-radius: 0 0 2px 2px;
+}
 .ww-nav-btn-danger:hover, .ww-nav-btn-danger:active { color: #ef4444; background: rgba(239,68,68,0.08); }
 .ww-auth--with-nav .ww-auth-scroll { padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
 
@@ -470,13 +476,61 @@
   padding: 12px 18px; border-radius: 4px;
   font-family: 'IBM Plex Mono', monospace; font-size: 13px;
   z-index: 200;
-  animation: toastIn 0.25s ease-out;
+  animation: toastLife 2.8s cubic-bezier(.17,.67,.27,.99) forwards;
   box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+  white-space: nowrap;
 }
-@keyframes toastIn {
-  from { opacity: 0; transform: translate(-50%, 12px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+@keyframes toastLife {
+  0%   { opacity: 0; transform: translate(-50%, 14px); }
+  10%  { opacity: 1; transform: translate(-50%, 0); }
+  75%  { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, 8px); }
 }
+
+/* ============ Confirm Dialog ============ */
+.ww-confirm-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.72);
+  z-index: 300; backdrop-filter: blur(5px);
+  animation: fadein 0.18s ease-out;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.ww-confirm {
+  background: var(--bg-2); border: 1px solid var(--border-2);
+  border-radius: 14px; padding: 24px 20px 20px;
+  max-width: 340px; width: 100%;
+  animation: scalein 0.18s ease-out;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+}
+.ww-confirm-title {
+  font-family: 'Bebas Neue', sans-serif; font-size: 22px;
+  letter-spacing: 0.06em; margin: 0 0 10px;
+}
+.ww-confirm-msg {
+  font-size: 14px; color: var(--muted); line-height: 1.55;
+  margin-bottom: 22px;
+}
+.ww-confirm-btns { display: flex; gap: 10px; }
+.ww-confirm-cancel {
+  flex: 1; background: var(--card-2); border: 1px solid var(--border);
+  color: var(--muted); padding: 14px 10px; border-radius: 8px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 0.1em;
+  cursor: pointer; transition: color 0.12s, border-color 0.12s;
+}
+.ww-confirm-cancel:hover { color: var(--text); border-color: var(--border-2); }
+.ww-confirm-ok {
+  flex: 1; background: var(--red); border: none;
+  color: white; padding: 14px 10px; border-radius: 8px;
+  font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 0.1em;
+  cursor: pointer; transition: background 0.12s;
+  box-shadow: 0 4px 0 0 var(--red-2);
+}
+.ww-confirm-ok:hover { background: var(--red-2); }
+.ww-confirm-ok:active { transform: translateY(2px); box-shadow: none; }
+.ww-confirm-ok.amber { background: var(--amber); color: #0a0a0b; box-shadow: 0 4px 0 0 var(--amber-2); }
+.ww-confirm-ok.amber:hover { background: var(--amber-2); }
+@keyframes scalein { from { transform: scale(0.90); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
 /* ============ Auth tabs / errors ============ */
 .ww-auth-tabs {
@@ -1376,3 +1430,30 @@
   font-family: 'Bebas Neue', sans-serif;
   font-size: 18px; letter-spacing: 0.06em;
 }
+
+/* ============ Kitty / module panel wrapper ============ */
+.ww-mod-panel { display: flex; flex-direction: column; }
+
+/* ============ Notification permission banner ============ */
+.ww-notif-banner {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 12px 16px; border-radius: 8px;
+  background: rgba(245,165,36,0.08); border: 1px solid rgba(245,165,36,0.3);
+  margin: 12px 0 0;
+}
+.ww-notif-banner-ok {
+  font-size: 12px; color: var(--muted);
+  display: flex; align-items: center; gap: 6px;
+}
+
+/* ============ Spinner ============ */
+.ww-spinner {
+  display: inline-block;
+  width: 16px; height: 16px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.55s linear infinite;
+  vertical-align: middle; flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

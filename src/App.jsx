@@ -6,7 +6,7 @@ import {
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
   Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
-  ChevronRight,
+  ChevronRight, Bell, BellOff,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
@@ -23,6 +23,17 @@ import {
 } from './api.js';
 import { MODULES, moduleById, isToolModule } from './modules.js';
 import './App.css';
+
+// ---- Confirm singleton (no prop drilling) ----
+// All components call appConfirm() directly; the root App wires up the setState.
+let _confirmSetState = null;
+function _initConfirm(fn) { _confirmSetState = fn; }
+function appConfirm(msg, opts = {}) {
+  if (!_confirmSetState) return Promise.resolve(false);
+  return new Promise(resolve => {
+    _confirmSetState({ msg, title: opts.title || 'Sicher?', destructive: opts.destructive !== false, okLabel: opts.okLabel, resolve });
+  });
+}
 
 const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘'];
 
@@ -164,11 +175,27 @@ export default function App() {
   const [authView, setAuthView] = useState('login');
   const [lobbyView, setLobbyView] = useState('list');
   const [toast, setToast] = useState(null);
+  const [confirmDlg, setConfirmDlg] = useState(null);
+
+  // Wire the confirm singleton to this component's state.
+  useEffect(() => { _initConfirm(setConfirmDlg); return () => _initConfirm(null); }, []);
 
   const showToast = (msg) => {
     setToast({ msg, id: Date.now() });
-    setTimeout(() => setToast(t => (t && Date.now() - t.id >= 1800) ? null : t), 2000);
+    // Clear after animation completes (2.8s) + small buffer
+    setTimeout(() => setToast(t => (t && Date.now() - t.id >= 2600) ? null : t), 3000);
   };
+
+  const showEventNotification = useCallback(async (eventName) => {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const icon = `${window.location.origin}${import.meta.env.BASE_URL}pwa-192x192.png`;
+    const opts = { body: `${eventName} ist jetzt aktiv — es geht los! 🎉`, icon, badge: icon, tag: 'event-start', renotify: true };
+    try {
+      const sw = await navigator.serviceWorker?.ready;
+      if (sw?.showNotification) { sw.showNotification('Event gestartet! 🍻', opts); return; }
+    } catch { /* no sw */ }
+    try { new Notification('Event gestartet! 🍻', opts); } catch { /* permission or unsupported */ }
+  }, []);
 
   useEffect(() => pb.authStore.onChange(() => setMe(pb.authStore.record)), []);
 
@@ -266,11 +293,13 @@ export default function App() {
 
     if (collection === 'events') {
       if (ev.action === 'delete') { setCurrentEventId(null); return; }
+      const wasActive = eventRef.current?.active;
       setCurrentEvent(prev => {
         const next = prev ? { ...prev, ...rec } : rec;
         eventRef.current = next;
         return next;
       });
+      if (!wasActive && rec.active) showEventNotification(rec.name || eventRef.current?.name || 'Event');
       return;
     }
 
@@ -342,7 +371,7 @@ export default function App() {
       ));
       return;
     }
-  }, []);
+  }, [showEventNotification]);
 
   useEffect(() => {
     if (!currentEventId) return;
@@ -438,7 +467,7 @@ export default function App() {
 
   const onResetCounters = async () => {
     if (!currentEvent) return;
-    if (!confirm('Alle Counter und Modul-Spiele dieses Events zurücksetzen?')) return;
+    if (!await appConfirm('Alle Counter und Modul-Spiele dieses Events zurücksetzen?', { title: 'Reset?', destructive: false, okLabel: 'RESET' })) return;
     try {
       await resetEventStats(currentEvent.id);
       // Optimistic stats wipe so the UI updates before realtime echo arrives.
@@ -472,7 +501,7 @@ export default function App() {
 
   const onLeaveEvent = async () => {
     if (!currentEvent || !me) return;
-    if (!confirm(`"${currentEvent.name}" verlassen?`)) return;
+    if (!await appConfirm(`"${currentEvent.name}" verlassen?`, { title: 'Event verlassen?' })) return;
     try {
       await leaveEvent(currentEvent.id);
       setCurrentEventId(null);
@@ -567,7 +596,7 @@ export default function App() {
   };
 
   const onCustomDelete = async (id) => {
-    if (!confirm('Modul wirklich löschen?')) return;
+    if (!await appConfirm('Modul wirklich löschen?', { title: 'Modul löschen?' })) return;
     try {
       await deleteCustomModule(id);
       setCustomModules(prev => prev.filter(c => c.id !== id));
@@ -584,6 +613,7 @@ export default function App() {
         <GrainOverlay />
         <AuthScreen view={authView} setView={setAuthView} onLogin={onLogin} onRegister={onRegister} />
         {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
       </div>
     );
   }
@@ -600,7 +630,7 @@ export default function App() {
           onSaveProfile={onSaveProfile}
           onRefreshAll={refreshAllEvents}
           onDeleteEvent={async (id) => {
-            if (!confirm('Event wirklich löschen?')) return;
+            if (!await appConfirm('Event wirklich löschen?', { title: 'Event löschen?' })) return;
             await deleteEvent(id); await refreshAllEvents(); showToast('Event gelöscht');
           }}
           onToggleActiveAdmin={async (id, next) => {
@@ -622,7 +652,7 @@ export default function App() {
             }
           }}
           onDeleteUser={async (id) => {
-            if (!confirm('User wirklich löschen? Gilt global, alle Events.')) return;
+            if (!await appConfirm('User wirklich löschen? Gilt global, alle Events.', { title: 'User löschen?' })) return;
             try {
               await deleteUser(id);
               showToast('User gelöscht');
@@ -634,6 +664,7 @@ export default function App() {
           }}
         />
         {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
       </div>
     );
   }
@@ -660,6 +691,7 @@ export default function App() {
           </ModuleSettingsDrawer>
         )}
         {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
       </div>
     );
   }
@@ -714,7 +746,7 @@ export default function App() {
                 onToggleModule={onToggleModule}
                 onResetCounters={onResetCounters}
                 onDeleteEvent={async () => {
-                  if (!confirm('Event endgültig löschen?')) return;
+                  if (!await appConfirm('Event endgültig löschen?', { title: 'Event löschen?' })) return;
                   await deleteEvent(currentEvent.id);
                   setCurrentEventId(null);
                   await refreshMemberships();
@@ -722,7 +754,7 @@ export default function App() {
                   setSettingsOpen(false);
                 }}
                 onKickMember={async (memberId) => {
-                  if (!confirm('User wirklich aus diesem Event entfernen?')) return;
+                  if (!await appConfirm('User wirklich aus diesem Event entfernen?', { title: 'Aus Event entfernen?' })) return;
                   try { await kickMember(memberId); showToast('Aus Event entfernt'); }
                   catch (e) { showToast('Konnte nicht entfernen 😬'); }
                 }}
@@ -759,6 +791,7 @@ export default function App() {
         />
       )}
       {toast && <Toast toast={toast} />}
+      {confirmDlg && <ConfirmDialog {...confirmDlg} />}
     </div>
   );
 }
@@ -820,7 +853,7 @@ function LoginForm({ onSubmit }) {
       <input className="ww-input" type="password" autoComplete="current-password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
-        <Check size={20} /><span>{busy ? '...' : 'EINLOGGEN'}</span>
+        {busy ? <span className="ww-spinner" /> : <Check size={20} />}<span>{busy ? 'EINLOGGEN…' : 'EINLOGGEN'}</span>
       </button>
     </div>
   );
@@ -874,7 +907,7 @@ function RegisterForm({ onSubmit }) {
       <textarea className="ww-textarea" placeholder="z.B. Laktose, keine Pilze..." value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
-        <UserPlus size={20} /><span>{busy ? '...' : 'SQUAD BEITRETEN'}</span>
+        {busy ? <span className="ww-spinner" /> : <UserPlus size={20} />}<span>{busy ? 'ERSTELLE…' : 'SQUAD BEITRETEN'}</span>
       </button>
     </div>
   );
@@ -1022,7 +1055,7 @@ function JoinForm({ onSubmit }) {
       />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${code.length === 6 && !busy ? '' : 'disabled'}`} onClick={submit} disabled={code.length !== 6 || busy}>
-        <Check size={20} /><span>{busy ? '...' : 'JOIN'}</span>
+        {busy ? <span className="ww-spinner" /> : <Check size={20} />}<span>{busy ? 'JOINEN…' : 'JOIN'}</span>
       </button>
     </div>
   );
@@ -1035,19 +1068,11 @@ function CreateEventForm({ onSubmit }) {
   const [customModulesDraft, setCustomModulesDraft] = useState([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [addModOpen, setAddModOpen] = useState(false);
   const valid = name.trim().length >= 2;
   const toggle = (id) => setModules(arr => arr.includes(id) ? arr.filter(x => x !== id) : [...arr, id]);
 
-  const addCustomDraft = () => {
-    const n = prompt('Name des Moduls?', 'Cornhole');
-    if (!n || !n.trim()) return;
-    const modeInput = (prompt('Modus? "teams" oder "solo"', 'teams') || 'teams').toLowerCase();
-    const mode = modeInput === 'solo' ? 'solo' : 'teams';
-    setCustomModulesDraft(arr => [...arr, {
-      name: n.trim(), icon: '🎯', mode,
-      teamCount: 2, pointsPerWin: 3, totalSets: 3,
-    }]);
-  };
+  const addCustomDraft = () => setAddModOpen(true);
   const removeCustomDraft = (i) => setCustomModulesDraft(arr => arr.filter((_, j) => j !== i));
 
   const submit = async () => {
@@ -1095,8 +1120,16 @@ function CreateEventForm({ onSubmit }) {
       </p>
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
-        <Plus size={20} /><span>{busy ? '...' : 'EVENT ERSTELLEN'}</span>
+        {busy ? <span className="ww-spinner" /> : <Plus size={20} />}<span>{busy ? 'ERSTELLE…' : 'EVENT ERSTELLEN'}</span>
       </button>
+      {addModOpen && (
+        <AddCustomModuleDrawer
+          onSubmit={({ name: n, mode, icon }) =>
+            setCustomModulesDraft(arr => [...arr, { name: n, icon, mode, teamCount: 2, pointsPerWin: 3, totalSets: 3 }])
+          }
+          onClose={() => setAddModOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1162,14 +1195,36 @@ function TopBar({ me, admin, eventName, active, settingsActive, onToggleSettings
 }
 
 function WaitingScreen({ event, onLeave }) {
+  const [notifPerm, setNotifPerm] = useState(() =>
+    'Notification' in window ? Notification.permission : 'unsupported'
+  );
+  const requestPermission = async () => {
+    const result = await Notification.requestPermission();
+    setNotifPerm(result);
+  };
   return (
     <div className="ww-waiting">
       <Hourglass size={64} className="ww-waiting-icon" />
       <h2 className="ww-display ww-title-big">Noch nicht gestartet</h2>
       <p className="ww-muted">
         Der Host hat <b>{event.name}</b> noch nicht aktiv gesetzt.<br />
-        Sobald es losgeht, ploppt's automatisch auf.
+        Sobald es losgeht, aktualisiert sich die App automatisch.
       </p>
+      {notifPerm === 'default' && (
+        <div className="ww-notif-banner">
+          <button className="ww-big-cta" style={{ marginTop: 0, maxWidth: 300 }} onClick={requestPermission}>
+            <Bell size={18} /><span>BENACHRICHTIGUNG ERLAUBEN</span>
+          </button>
+          <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center' }}>
+            Einmalige Erlaubnis — wir schicken nur wenn das Event startet.
+          </div>
+        </div>
+      )}
+      {notifPerm === 'granted' && (
+        <div className="ww-notif-banner-ok">
+          <Bell size={13} /><span>Benachrichtigung aktiv — du kriegst Bescheid wenn es losgeht.</span>
+        </div>
+      )}
       <button className="ww-text-btn" onClick={onLeave}><X size={14} /> Event verlassen</button>
     </div>
   );
@@ -1199,6 +1254,7 @@ function HomeView({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolView, setToolView] = useState(null); // tool id when one is open inside the drawer
   const [modulesOpen, setModulesOpen] = useState(false);
+  const [addModOpen, setAddModOpen] = useState(false);
 
   // Scroll the main container back to top whenever the active tab changes
   // — otherwise content can render "behind" the sticky header strip.
@@ -1374,17 +1430,7 @@ function HomeView({
             ))}
             <button
               className="ww-module-toggle"
-              onClick={async () => {
-                const name = prompt('Name des Moduls?', 'Cornhole');
-                if (!name || !name.trim()) return;
-                const modeInput = (prompt('Modus? "teams" oder "solo"', 'teams') || 'teams').toLowerCase();
-                const mode = modeInput === 'solo' ? 'solo' : 'teams';
-                await onCustomCreate({
-                  name: name.trim(), icon: '🎯', mode,
-                  teamCount: 2, pointsPerWin: 3, totalSets: 3,
-                  teams: [], participants: [], sets: [],
-                });
-              }}
+              onClick={() => setAddModOpen(true)}
             >
               <span className="ww-mod-icon"><Plus size={20} /></span>
               <span className="ww-mod-name">NEUES CUSTOM MODUL</span>
@@ -1431,6 +1477,19 @@ function HomeView({
           </ModuleSettingsDrawer>
         );
       })()}
+
+      {addModOpen && (
+        <AddCustomModuleDrawer
+          onSubmit={async ({ name, mode, icon }) => {
+            await onCustomCreate({
+              name, icon, mode,
+              teamCount: 2, pointsPerWin: 3, totalSets: 3,
+              teams: [], participants: [], sets: [],
+            });
+          }}
+          onClose={() => setAddModOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1735,14 +1794,14 @@ function FlunkyView({ me, flunky, members, admin, active, onPatch, onOpenSetting
     onPatch({ games: next });
   };
 
-  const cancelCurrent = () => {
+  const cancelCurrent = async () => {
     if (!cur) return;
-    if (!confirm('Spiel wirklich abbrechen?')) return;
+    if (!await appConfirm('Spiel wirklich abbrechen?', { title: 'Spiel abbrechen?' })) return;
     onPatch({ games: games.filter(g => g.id !== cur.id) });
   };
 
-  const deleteGame = (gameId) => {
-    if (!confirm('Dieses Spiel wirklich löschen?')) return;
+  const deleteGame = async (gameId) => {
+    if (!await appConfirm('Dieses Spiel wirklich löschen?', { title: 'Spiel löschen?' })) return;
     onPatch({ games: games.filter(g => g.id !== gameId) });
   };
 
@@ -2036,9 +2095,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const currentPicker = currentPickerId ? usersById[currentPickerId] : null;
   const iAmPicker = currentPickerId === me.id;
 
-  const finishRound = (ri) => {
+  const finishRound = async (ri) => {
     if (!admin) return;
-    if (!confirm('Runde beenden? Punkte werden ans Stand-Leaderboard übergeben.')) return;
+    if (!await appConfirm('Runde beenden? Punkte werden ans Stand-Leaderboard übergeben.', { title: 'Runde beenden?', destructive: false, okLabel: 'BEENDEN' })) return;
     const next = rounds.map((r, i) => i === ri ? { ...r, finishedAt: new Date().toISOString() } : r);
     onPatch({ rounds: next });
     setOpenQuestion(null);
@@ -2402,8 +2461,8 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
   const allParticipants = () => onPatch({ participants: memberIds });
   const clearParticipants = () => onPatch({ participants: [] });
 
-  const clearRounds = () => {
-    if (!confirm('Alle Runden + Fragen löschen?')) return;
+  const clearRounds = async () => {
+    if (!await appConfirm('Alle Runden + Fragen löschen?', { title: 'Runden löschen?' })) return;
     onPatch({ rounds: [] });
   };
 
@@ -2548,8 +2607,8 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
     setShowAdd(false);
   };
 
-  const deleteExpense = (id) => {
-    if (!confirm('Ausgabe löschen?')) return;
+  const deleteExpense = async (id) => {
+    if (!await appConfirm('Ausgabe löschen?', { title: 'Ausgabe löschen?' })) return;
     onPatch({ expenses: expenses.filter(e => e.id !== id) });
   };
 
@@ -2762,9 +2821,9 @@ function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSett
   const archivedCount = archivedGames.length;
   const currentGameDone = setsArr.filter(s => s.winner).length === totalSets;
 
-  const startNewGame = () => {
+  const startNewGame = async () => {
     const hasState = (mod.sets || []).length > 0 || (mod.teams || []).length > 0 || (mod.participants || []).length > 0;
-    if (hasState && !confirm('Aktuelles Spiel archivieren und neues starten? Teams und Sets werden zurückgesetzt.')) return;
+    if (hasState && !await appConfirm('Aktuelles Spiel archivieren und neues starten? Teams und Sets werden zurückgesetzt.', { title: 'Neues Spiel?', destructive: false, okLabel: 'STARTEN' })) return;
     const games = hasState ? [...archivedGames, {
       id: String(Date.now()),
       mode: mod.mode,
@@ -3188,8 +3247,8 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
   const [ppw, setPpw] = useState(flunky.pointsPerWin || 3);
   useEffect(() => setPpw(flunky.pointsPerWin || 3), [flunky.pointsPerWin]);
   const save = () => onPatch({ pointsPerWin: Number(ppw) });
-  const clearHistory = () => {
-    if (!confirm('Alle Spiele dieses Events löschen?')) return;
+  const clearHistory = async () => {
+    if (!await appConfirm('Alle Spiele dieses Events löschen?', { title: 'Historie löschen?' })) return;
     onPatch({ games: [] });
   };
   return (
@@ -3381,6 +3440,9 @@ function ProfileView({ me, onSave, onLogout }) {
   const [foodWishes, setFoodWishes] = useState(me.foodWishes || '');
   const [drinkWishes, setDrinkWishes] = useState(me.drinkWishes || '');
   const [allergies, setAllergies] = useState(me.allergies || '');
+  const [notifPerm, setNotifPerm] = useState(() =>
+    'Notification' in window ? Notification.permission : 'unsupported'
+  );
   const dirty = displayName !== (me.displayName || '') || emoji !== (me.emoji || '') ||
     foodWishes !== (me.foodWishes || '') || drinkWishes !== (me.drinkWishes || '') || allergies !== (me.allergies || '');
   return (
@@ -3404,6 +3466,30 @@ function ProfileView({ me, onSave, onLogout }) {
         onClick={() => onSave({ displayName: displayName.trim(), emoji, foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim() })}>
         <Check size={20} /><span>SPEICHERN</span>
       </button>
+
+      {notifPerm !== 'unsupported' && (
+        <>
+          <label className="ww-label" style={{ marginTop: 24 }}><Bell size={12} /> PUSH-BENACHRICHTIGUNGEN</label>
+          {notifPerm === 'granted' ? (
+            <div className="ww-notif-banner-ok" style={{ marginTop: 6 }}>
+              <Bell size={13} /><span>Erlaubt — du wirst benachrichtigt wenn ein Event startet.</span>
+            </div>
+          ) : notifPerm === 'denied' ? (
+            <p className="ww-muted" style={{ fontSize: 12 }}>
+              <BellOff size={12} style={{ verticalAlign: 'middle' }} /> Blockiert — in den Browser-/System-Einstellungen erlauben.
+            </p>
+          ) : (
+            <button
+              className="ww-big-cta"
+              style={{ marginTop: 8 }}
+              onClick={async () => { const r = await Notification.requestPermission(); setNotifPerm(r); }}
+            >
+              <Bell size={18} /><span>BENACHRICHTIGUNGEN ERLAUBEN</span>
+            </button>
+          )}
+        </>
+      )}
+
       <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Ausloggen</button>
     </div>
   );
@@ -3526,6 +3612,82 @@ function BottomNav({ view, setView }) {
         </button>
       ))}
     </nav>
+  );
+}
+
+function ConfirmDialog({ msg, title, destructive, okLabel, resolve }) {
+  const yes = () => { _confirmSetState(null); resolve(true); };
+  const no = () => { _confirmSetState(null); resolve(false); };
+  // Dismiss on Escape
+  useEffect(() => {
+    const handler = (e) => { if (e.key === 'Escape') no(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return createPortal(
+    <>
+      <div className="ww-confirm-overlay" onClick={no} />
+      <div className="ww-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ww-confirm-title">
+        <div id="ww-confirm-title" className="ww-confirm-title">{title}</div>
+        <div className="ww-confirm-msg">{msg}</div>
+        <div className="ww-confirm-btns">
+          <button className="ww-confirm-cancel" onClick={no}>ABBRECHEN</button>
+          <button className={`ww-confirm-ok ${destructive ? '' : 'amber'}`} onClick={yes}>
+            {okLabel || (destructive ? 'LÖSCHEN' : 'OK')}
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+}
+
+function AddCustomModuleDrawer({ onSubmit, onClose }) {
+  const [name, setName] = useState('');
+  const [mode, setMode] = useState('teams');
+  const [icon, setIcon] = useState('🎯');
+  const valid = name.trim().length >= 1;
+  const submit = () => {
+    if (!valid) return;
+    onSubmit({ name: name.trim(), mode, icon });
+    onClose();
+  };
+  return (
+    <ModuleSettingsDrawer title="＋ Custom Modul" onClose={onClose}>
+      <label className="ww-label">NAME</label>
+      <input
+        className="ww-input"
+        placeholder="z.B. Cornhole, Bierpong, Dart…"
+        value={name}
+        onChange={e => setName(e.target.value)}
+        maxLength={30}
+        autoFocus
+        onKeyDown={e => e.key === 'Enter' && submit()}
+      />
+      <label className="ww-label" style={{ marginTop: 18 }}>MODUS</label>
+      <div className="ww-auth-tabs" style={{ marginBottom: 0 }}>
+        <button className={`ww-auth-tab ${mode === 'teams' ? 'active' : ''}`} onClick={() => setMode('teams')}>TEAMS</button>
+        <button className={`ww-auth-tab ${mode === 'solo' ? 'active' : ''}`} onClick={() => setMode('solo')}>SOLO</button>
+      </div>
+      <label className="ww-label" style={{ marginTop: 18 }}>ICON</label>
+      <div className="ww-emoji-grid">
+        {MODULE_ICONS.slice(0, 16).map(e => (
+          <button key={e} type="button"
+            className={`ww-emoji-btn ${icon === e ? 'sel' : ''}`}
+            onClick={() => setIcon(e)}>{e}
+          </button>
+        ))}
+      </div>
+      <button
+        className={`ww-big-cta ${valid ? '' : 'disabled'}`}
+        onClick={submit}
+        disabled={!valid}
+        style={{ marginTop: 20 }}
+      >
+        <Plus size={20} /><span>MODUL ERSTELLEN</span>
+      </button>
+    </ModuleSettingsDrawer>
   );
 }
 
