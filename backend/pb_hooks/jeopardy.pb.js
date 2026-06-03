@@ -144,19 +144,19 @@ NUR JSON. Kein Vortext, kein Codeblock, keine Erklärung. Beginnt mit { endet mi
 
 Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 1..5, Kategorie 2 Level 1..5, ..., Kategorie ${cats.length} Level 1..5.`;
 
-  // Model selection. Anthropic retires old snapshots, so a hard-coded id
-  // eventually starts returning 400 invalid_request_error ("model: ..."),
-  // which is exactly the failure we hit with the old "claude-opus-4-7" id.
-  // To stay robust: try a list of candidates newest→older and skip any that
-  // the API rejects as an invalid/unknown model. The maintainer can pin an
-  // exact id via the JEOPARDY_MODEL env var (highest priority) without a
-  // code change.
+  // Model selection — Opus only. Question quality with Sonnet was poor, so we
+  // never fall back to a cheaper/older family. Anthropic retires old snapshots
+  // (that's why the previous hard-coded "claude-opus-4-7" started 400ing), so
+  // we try the current Opus generations newest→older and skip any the API
+  // rejects as invalid/unknown. The maintainer can pin an exact id via the
+  // JEOPARDY_MODEL env var (highest priority) — set it to the latest Opus
+  // snapshot on the HTPC without a code change.
   const envModel = $os.getenv("JEOPARDY_MODEL");
   const modelCandidates = [
     envModel,
+    "claude-opus-4-8",
+    "claude-opus-4-5",
     "claude-opus-4-1",
-    "claude-sonnet-4-5",
-    "claude-3-5-sonnet-latest",
   ].filter(m => typeof m === "string" && m.trim().length > 0);
 
   // Build per-auth request configuration for a given model. We try OAuth (Pro
@@ -258,6 +258,14 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
 
   if (!res || res._err) {
     return e.internalServerError("anthropic http error: " + (res?._err || "no auth configured"), null);
+  }
+  if (isModelError(res.statusCode, bodyStr)) {
+    // Every Opus candidate was rejected — the built-in ids are out of date.
+    // The maintainer must pin the current snapshot via the env var.
+    return e.internalServerError(
+      "kein gültiges Opus-Modell akzeptiert (zuletzt '" + usedModel + "'). " +
+      "Setze die Env-Variable JEOPARDY_MODEL auf die aktuelle Opus-Snapshot-ID. " +
+      "Anthropic: " + bodyStr.slice(0, 300), null);
   }
   if (res.statusCode !== 200) {
     return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "/" + usedModel + "): " + bodyStr.slice(0, 400), null);
