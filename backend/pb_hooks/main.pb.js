@@ -1,5 +1,30 @@
 /// <reference path="../pb_data/types.d.ts" />
 
+// Keep PocketBase's "Application URL" in sync with the public deployment URL.
+// The built-in email-verification / password-reset templates build their
+// links from this setting; if it's left at the default localhost, the link
+// in the verification mail points at localhost and nobody can confirm. We
+// can't ship the domain in the repo, so read it from the APP_URL env var on
+// every boot (set it on the HTPC: APP_URL=https://<public-pocketbase-url>,
+// i.e. the same host the frontend's VITE_PB_URL points at). If APP_URL is
+// unset we leave whatever was configured in the Admin UI untouched.
+onBootstrap((e) => {
+  e.next(); // let the app finish initialising first
+  try {
+    const url = $os.getenv("APP_URL");
+    if (url && url.trim().length > 0) {
+      const settings = e.app.settings();
+      if (settings.meta.appURL !== url) {
+        settings.meta.appURL = url;
+        e.app.save(settings);
+        console.log("[bootstrap] appURL set to " + url);
+      }
+    }
+  } catch (err) {
+    console.log("[bootstrap] appURL sync failed:", err);
+  }
+});
+
 // First registered user becomes site admin (and is auto-approved).
 // Everyone else starts as an unapproved member — an admin must approve
 // them before they can use the app.
