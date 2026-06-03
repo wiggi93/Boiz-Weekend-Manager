@@ -2524,6 +2524,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         const dran = q.currentlyAnswering ? usersById[q.currentlyAnswering] : null;
         const iAmDran = !!q.currentlyAnswering && q.currentlyAnswering === me.id;
         const iAmParticipant = participants.some(p => p.id === me.id);
+        // Solo: when the dran person is the only participant there's nobody
+        // else to judge, so they self-judge (answer shown + Richtig/Falsch).
+        const soloMode = participants.length <= 1;
 
         // Close behaviour differs: hostPlays uses shared data, non-hostPlays uses local state.
         const close = () => {
@@ -2594,14 +2597,14 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 🎯 dran: <b>{dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
               </div>
               <JeoPrompt q={q} />
-              {iAmDran ? (
+              {iAmDran && !soloMode ? (
                 <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
                   🤫 Du bist dran — sag deine Antwort laut.<br />Die anderen sehen die Lösung und werten.
                 </div>
               ) : (
                 <div className="ww-jeo-answer">💡 {q.a}</div>
               )}
-              {iAmParticipant && !iAmDran && active && (
+              {iAmParticipant && (!iAmDran || soloMode) && active && (
                 <div className="ww-grid2" style={{ marginTop: 14 }}>
                   <button className="ww-big-cta green" style={{ marginTop: 0 }}
                     onClick={() => markRight(activeOpen.ri, activeOpen.qi, q.currentlyAnswering)}>
