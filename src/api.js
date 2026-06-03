@@ -257,6 +257,40 @@ export async function deleteCustomModule(id) {
   return pb.collection('custom_modules').delete(id);
 }
 
+// ---- Polls ----
+export async function listPolls(eventId) {
+  return pb.collection('polls').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
+}
+
+export async function createPoll(data) {
+  return pb.collection('polls').create(data);
+}
+
+export async function updatePoll(id, patch) {
+  return pb.collection('polls').update(id, patch);
+}
+
+export async function deletePoll(id) {
+  return pb.collection('polls').delete(id);
+}
+
+export async function listPollVotes(eventId) {
+  // Dot-notation filter across the poll relation gets every vote for the event.
+  return pb.collection('poll_votes').getFullList({ filter: `poll.event="${eventId}"` });
+}
+
+// Upsert the current user's vote for a poll (one row per poll+user).
+export async function castVote(pollId, { optionId, text }) {
+  const meId = pb.authStore.record?.id;
+  if (!meId) throw new Error('Not authenticated');
+  try {
+    const existing = await pb.collection('poll_votes').getFirstListItem(`poll="${pollId}" && user="${meId}"`);
+    return pb.collection('poll_votes').update(existing.id, { optionId: optionId || '', text: text || '' });
+  } catch (_) {
+    return pb.collection('poll_votes').create({ poll: pollId, user: meId, optionId: optionId || '', text: text || '' });
+  }
+}
+
 // ---- Realtime ----
 // onChange receives (collection, event) so the consumer can dispatch
 // incremental updates instead of refetching everything.
@@ -274,6 +308,10 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('custom_modules').subscribe('*', wrap('custom_modules', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('kitty').subscribe('*', wrap('kitty', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('schnelle_fragen').subscribe('*', wrap('schnelle_fragen', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
+    // poll_votes records only carry the poll id, not the event — forward all
+    // and let the consumer refetch (votes are low-frequency).
+    safe(pb.collection('poll_votes').subscribe('*', wrap('poll_votes'))),
     safe(pb.collection('users').subscribe('*', wrap('users'))),
   ]);
   return () => unsubs.forEach(fn => { try { fn(); } catch (_) {} });

@@ -9,9 +9,8 @@ export const MODULES = [
   { id: 'flunky',          name: 'Flunkyball',       icon: '🎳',  available: true,  kind: 'game' },
   { id: 'jeopardy',        name: 'Jeopardy',         icon: '🎤',  available: true,  kind: 'game' },
   { id: 'schnelle_fragen', name: '5 Schnelle',       icon: '⚡',  available: true,  kind: 'game' },
-  { id: 'gokart',          name: 'Go-Kart',          icon: '🏎️', available: false, kind: 'game' },
-  { id: 'padel',           name: 'Padel-Tennis',     icon: '🎾',  available: false, kind: 'game' },
   // --- Tools (Helpers, kein Scoring, immer verfügbar, NICHT in der Modulauswahl) ---
+  { id: 'polls',           name: 'Umfragen',         icon: '📊',  available: true,  kind: 'tool' },
   { id: 'team_split',      name: 'Team Aufteilung',  icon: '🎲',  available: true,  kind: 'tool' },
   { id: 'kitty',           name: 'Kassensturz',      icon: '💰',  available: true,  kind: 'tool' },
 ];

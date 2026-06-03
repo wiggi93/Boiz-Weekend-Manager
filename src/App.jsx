@@ -20,6 +20,7 @@ import {
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
   getKitty, updateKitty, ensureKitty,
   getSchnelleFragen, updateSchnelleFragen, ensureSchnelleFragen,
+  listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
 import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
@@ -166,6 +167,8 @@ export default function App() {
   const schnelleFragenRef = useRef(null);
   useEffect(() => { schnelleFragenRef.current = schnelleFragen; }, [schnelleFragen]);
   const [customModules, setCustomModules] = useState([]);
+  const [polls, setPolls] = useState([]);
+  const [pollVotes, setPollVotes] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
   // by DrinksBar on every bump; cleared on event switch.
@@ -239,11 +242,11 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setPolls([]); setPollVotes([]);
       return;
     }
     try {
-      const [ev, members, stats, fl, je, kt, sf, cms] = await Promise.all([
+      const [ev, members, stats, fl, je, kt, sf, cms, pl, pv] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
@@ -252,9 +255,12 @@ export default function App() {
         getKitty(currentEventId),
         getSchnelleFragen(currentEventId),
         listCustomModules(currentEventId),
+        listPolls(currentEventId),
+        listPollVotes(currentEventId),
       ]);
       setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
+      setPolls(pl); setPollVotes(pv);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -375,6 +381,23 @@ export default function App() {
         if (idx === -1) return [...prev, rec];
         const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
       });
+      return;
+    }
+
+    if (collection === 'polls') {
+      setPolls(prev => {
+        if (ev.action === 'delete') return prev.filter(p => p.id !== rec.id);
+        const idx = prev.findIndex(p => p.id === rec.id);
+        if (idx === -1) return [rec, ...prev];
+        const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
+      });
+      return;
+    }
+
+    if (collection === 'poll_votes') {
+      // Votes only carry the poll id; refetch all votes for the event.
+      const eid = eventRef.current?.id;
+      if (eid) listPollVotes(eid).then(setPollVotes).catch(() => {});
       return;
     }
 
@@ -535,6 +558,38 @@ export default function App() {
   const onSaveProfile = async (patch) => {
     await updateMyProfile(me.id, patch);
     showToast('Profil gespeichert ✓');
+  };
+
+  // ---- Polls ----
+  const onPollCreate = async ({ question, options, allowText }) => {
+    try {
+      await createPoll({
+        event: currentEventId, question, options,
+        allowText: !!allowText, closed: false,
+        createdBy: me.id,
+      });
+      showToast('Umfrage erstellt 📊');
+    } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
+  };
+  const onPollUpdate = async (id, patch) => {
+    setPolls(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p));
+    try { await updatePoll(id, patch); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+  const onPollDelete = async (id) => {
+    if (!(await appConfirm('Umfrage wirklich löschen?'))) return;
+    try { await deletePoll(id); setPolls(prev => prev.filter(p => p.id !== id)); showToast('Umfrage gelöscht'); }
+    catch (e) { showToast('Fehler 😬'); }
+  };
+  const onVote = async (pollId, vote) => {
+    // optimistic local upsert
+    setPollVotes(prev => {
+      const idx = prev.findIndex(v => v.poll === pollId && v.user === me.id);
+      if (idx === -1) return [...prev, { id: `tmp-${pollId}`, poll: pollId, user: me.id, ...vote }];
+      const copy = [...prev]; copy[idx] = { ...copy[idx], ...vote }; return copy;
+    });
+    try { await castVote(pollId, vote); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
   // Event-specific wishes saved on my membership row for the current event.
@@ -727,7 +782,10 @@ export default function App() {
           onToggleSettings={() => setSettingsOpen(v => !v)}
           onSwitchEvent={() => setCurrentEventId(null)} />
         <main className="ww-main">
-          <WaitingScreen event={currentEvent} onLeave={onLeaveEvent} />
+          <WaitingScreen
+            event={currentEvent} onLeave={onLeaveEvent}
+            me={me} polls={polls} pollVotes={pollVotes} onVote={onVote}
+          />
         </main>
         {settingsOpen && (
           <ModuleSettingsDrawer title="⚙️ Event-Settings" onClose={() => setSettingsOpen(false)}>
@@ -779,6 +837,9 @@ export default function App() {
             me={me} admin={admin} event={currentEvent} members={eventMembers}
             kitty={kitty} onKittyPatch={onKittyPatch}
             onSaveEvent={onSaveEvent}
+            polls={polls} pollVotes={pollVotes}
+            onPollCreate={onPollCreate} onPollUpdate={onPollUpdate}
+            onPollDelete={onPollDelete} onVote={onVote}
           />
         )}
         {view === 'profile' && (
@@ -974,29 +1035,28 @@ function Lobby({
   me, memberships, allEvents, allUsers, view, setView, onPick, onJoin, onCreate,
   onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser,
 }) {
-  const [section, setSection] = useState('events');
   const siteAdmin = isSiteAdmin(me);
   const canCreate = isHost(me);
+  const onProfile = view === 'profile';
   return (
-    <div className="ww-auth ww-auth--with-nav">
-      {section === 'events' && (
-        <div className="ww-auth-fixed">
-          <div className="ww-auth-header">
-            <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
-            <h1 className="ww-display ww-title-huge">Events</h1>
-            <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>
-          </div>
-          <div className="ww-auth-tabs">
-            <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
-            <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
-            {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
-            {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
-            {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
-          </div>
+    <div className="ww-auth">
+      <div className="ww-auth-fixed">
+        <div className="ww-auth-header">
+          <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
+          <h1 className="ww-display ww-title-huge">{onProfile ? 'Profil' : 'Events'}</h1>
+          {!onProfile && <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>}
         </div>
-      )}
+        <div className="ww-auth-tabs">
+          <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
+          <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
+          {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
+          {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
+          {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
+          <button className={`ww-auth-tab ${view === 'profile' ? 'active' : ''}`} onClick={() => setView('profile')}>PROFIL</button>
+        </div>
+      </div>
       <div className="ww-auth-scroll">
-        {section === 'events' && (
+        {!onProfile && (
           <>
             {view === 'list' && (
               <div>
@@ -1028,26 +1088,9 @@ function Lobby({
             )}
           </>
         )}
-        {section === 'profile' && <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />}
+        {onProfile && <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />}
       </div>
-      <LobbyNav section={section} setSection={setSection} onLogout={onLogout} />
     </div>
-  );
-}
-
-function LobbyNav({ section, setSection, onLogout }) {
-  return (
-    <nav className="ww-bottomnav">
-      <button className={`ww-nav-btn ${section === 'events' ? 'active' : ''}`} onClick={() => setSection('events')}>
-        <Home size={20} /><span>Events</span>
-      </button>
-      <button className={`ww-nav-btn ${section === 'profile' ? 'active' : ''}`} onClick={() => setSection('profile')}>
-        <UserIcon size={20} /><span>Profil</span>
-      </button>
-      <button className="ww-nav-btn ww-nav-btn-danger" onClick={onLogout}>
-        <LogOut size={20} /><span>Logout</span>
-      </button>
-    </nav>
   );
 }
 
@@ -1248,7 +1291,7 @@ function TopBar({ me, admin, eventName, active, settingsActive, onToggleSettings
   );
 }
 
-function WaitingScreen({ event, onLeave }) {
+function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote }) {
   const [notifPerm, setNotifPerm] = useState(() =>
     'Notification' in window ? Notification.permission : 'unsupported'
   );
@@ -1256,6 +1299,7 @@ function WaitingScreen({ event, onLeave }) {
     const result = await Notification.requestPermission();
     setNotifPerm(result);
   };
+  const openPolls = (polls || []).filter(p => !p.closed);
   return (
     <div className="ww-waiting">
       <Hourglass size={64} className="ww-waiting-icon" />
@@ -1277,6 +1321,20 @@ function WaitingScreen({ event, onLeave }) {
       {notifPerm === 'granted' && (
         <div className="ww-notif-banner-ok">
           <Bell size={13} /><span>Benachrichtigung aktiv — du kriegst Bescheid wenn es losgeht.</span>
+        </div>
+      )}
+      {openPolls.length > 0 && onVote && (
+        <div className="ww-waiting-polls">
+          <div className="ww-section-head"><span>📊</span><h3>UMFRAGEN</h3></div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {openPolls.map(p => (
+              <PollCard
+                key={p.id} poll={p} me={me} admin={false} members={[]}
+                votes={pollVotes.filter(v => v.poll === p.id)}
+                onVote={onVote} onUpdate={() => {}} onDelete={() => {}}
+              />
+            ))}
+          </div>
         </div>
       )}
       <button className="ww-text-btn" onClick={onLeave}><X size={14} /> Event verlassen</button>
@@ -3761,7 +3819,182 @@ function NotAllowed({ onBack }) {
 // Tools view — its own bottom-nav page, separate from game modules.
 // Lists every available tool; tapping opens it inline with a back link.
 // ============================================================
-function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent }) {
+// ============================================================
+// Polls / Umfragen tool
+// ============================================================
+function PollsView({ me, admin, members, polls, pollVotes, onCreate, onUpdate, onDelete, onVote }) {
+  const [creating, setCreating] = useState(false);
+  return (
+    <div className="ww-polls">
+      <p className="ww-muted" style={{ fontSize: 13, marginBottom: 12 }}>
+        Umfragen fürs Event — funktionieren auch bevor das Event gestartet ist.
+      </p>
+
+      {admin && !creating && (
+        <button className="ww-big-cta" style={{ marginTop: 0 }} onClick={() => setCreating(true)}>
+          <Plus size={18} /><span>NEUE UMFRAGE</span>
+        </button>
+      )}
+      {admin && creating && (
+        <PollComposer
+          onCancel={() => setCreating(false)}
+          onSubmit={(data) => { onCreate(data); setCreating(false); }}
+        />
+      )}
+
+      {polls.length === 0 && !creating && (
+        <div className="ww-empty" style={{ marginTop: 14 }}>Noch keine Umfragen.</div>
+      )}
+
+      <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {polls.map(p => (
+          <PollCard
+            key={p.id} poll={p} me={me} admin={admin} members={members}
+            votes={pollVotes.filter(v => v.poll === p.id)}
+            onVote={onVote} onUpdate={onUpdate} onDelete={onDelete}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PollComposer({ onCancel, onSubmit }) {
+  const [question, setQuestion] = useState('');
+  const [options, setOptions] = useState(['', '']);
+  const [allowText, setAllowText] = useState(false);
+  const validOpts = options.map(o => o.trim()).filter(Boolean);
+  const valid = question.trim().length >= 3 && (validOpts.length >= 2 || allowText);
+
+  const submit = () => {
+    if (!valid) return;
+    const opts = validOpts.map((label, i) => ({ id: `o${i}_${Math.random().toString(36).slice(2, 6)}`, label }));
+    onSubmit({ question: question.trim(), options: opts, allowText });
+  };
+
+  return (
+    <div className="ww-poll-composer">
+      <label className="ww-label">FRAGE</label>
+      <input className="ww-input" value={question} onChange={e => setQuestion(e.target.value)}
+        placeholder="z.B. Was wollen wir essen?" maxLength={200} />
+      <label className="ww-label">ANTWORT-OPTIONEN</label>
+      {options.map((o, i) => (
+        <div key={i} className="ww-poll-opt-row">
+          <input className="ww-input" style={{ margin: 0 }} value={o} maxLength={60}
+            placeholder={`Option ${i + 1} (z.B. ${i === 0 ? 'Pizza' : 'Grillen'})`}
+            onChange={e => setOptions(arr => arr.map((x, j) => j === i ? e.target.value : x))} />
+          {options.length > 2 && (
+            <button className="ww-mini-btn red" onClick={() => setOptions(arr => arr.filter((_, j) => j !== i))}>
+              <X size={12} />
+            </button>
+          )}
+        </div>
+      ))}
+      <button className="ww-mini-btn" onClick={() => setOptions(arr => [...arr, ''])} style={{ marginTop: 6 }}>
+        <Plus size={12} /> Option
+      </button>
+      <button
+        className={`ww-module-toggle ${allowText ? 'on' : ''}`}
+        onClick={() => setAllowText(v => !v)}
+        style={{ width: '100%', marginTop: 12 }}
+      >
+        <span className="ww-mod-icon">✏️</span>
+        <span className="ww-mod-name">Freitext-Antwort erlauben</span>
+        {allowText ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
+      <button className={`ww-big-cta ${valid ? '' : 'disabled'}`} disabled={!valid} onClick={submit}>
+        <Check size={18} /><span>UMFRAGE STARTEN</span>
+      </button>
+      <button className="ww-text-btn" onClick={onCancel}><X size={14} /> abbrechen</button>
+    </div>
+  );
+}
+
+function PollCard({ poll, me, admin, members, votes, onVote, onUpdate, onDelete }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+  const myVote = votes.find(v => v.user === me.id);
+  const [text, setText] = useState(myVote?.text || '');
+  useEffect(() => { setText(myVote?.text || ''); }, [myVote?.text]);
+
+  const options = poll.options || [];
+  const total = votes.filter(v => v.optionId).length;
+  const countFor = (oid) => votes.filter(v => v.optionId === oid).length;
+  const textAnswers = votes.filter(v => (v.text || '').trim()).map(v => ({
+    user: usersById[v.user], text: v.text,
+  }));
+
+  const pick = (oid) => {
+    if (poll.closed) return;
+    onVote(poll.id, { optionId: oid, text: myVote?.text || '' });
+  };
+  const saveText = () => {
+    if (poll.closed) return;
+    onVote(poll.id, { optionId: myVote?.optionId || '', text: text.trim() });
+  };
+
+  return (
+    <div className={`ww-poll-card ${poll.closed ? 'closed' : ''}`}>
+      <div className="ww-poll-q-row">
+        <div className="ww-poll-q">{poll.question}</div>
+        {admin && (
+          <div className="ww-poll-admin">
+            <button className="ww-mini-btn" onClick={() => onUpdate(poll.id, { closed: !poll.closed })}>
+              {poll.closed ? 'Öffnen' : 'Schließen'}
+            </button>
+            <button className="ww-mini-btn red" onClick={() => onDelete(poll.id)}><Trash2 size={12} /></button>
+          </div>
+        )}
+      </div>
+      {poll.closed && <div className="ww-poll-closed-tag">GESCHLOSSEN</div>}
+
+      <div className="ww-poll-opts">
+        {options.map(o => {
+          const c = countFor(o.id);
+          const pct = total > 0 ? Math.round((c / total) * 100) : 0;
+          const mine = myVote?.optionId === o.id;
+          return (
+            <button key={o.id} className={`ww-poll-opt ${mine ? 'mine' : ''}`} onClick={() => pick(o.id)} disabled={poll.closed}>
+              <div className="ww-poll-opt-bar" style={{ width: `${pct}%` }} />
+              <span className="ww-poll-opt-label">{mine ? '✓ ' : ''}{o.label}</span>
+              <span className="ww-poll-opt-count">{c} · {pct}%</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {poll.allowText && (
+        <div className="ww-poll-text">
+          <label className="ww-label">DEINE ANTWORT (FREITEXT)</label>
+          <div className="ww-poll-opt-row">
+            <textarea className="ww-textarea" style={{ margin: 0 }} rows={2} value={text}
+              onChange={e => setText(e.target.value)} disabled={poll.closed}
+              placeholder="Schreib was du willst…" />
+          </div>
+          <button className={`ww-mini-btn ${text.trim() !== (myVote?.text || '') ? '' : 'disabled'}`}
+            onClick={saveText} disabled={poll.closed || text.trim() === (myVote?.text || '')} style={{ marginTop: 6 }}>
+            <Check size={12} /> Antwort speichern
+          </button>
+          {textAnswers.length > 0 && (
+            <div className="ww-poll-answers">
+              {textAnswers.map((a, i) => (
+                <div key={i} className="ww-poll-answer">
+                  <b>{a.user?.emoji || '🍺'} {a.user?.displayName || a.user?.email || '?'}:</b> {a.text}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent,
+  polls, pollVotes, onPollCreate, onPollUpdate, onPollDelete, onVote }) {
   const [open, setOpen] = useState(null); // tool id
 
   if (open) {
@@ -3772,6 +4005,10 @@ function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent
           <ArrowLeft size={18} /> Werkzeuge
         </button>
         <h2 className="ww-display ww-title-big">{tool?.icon} {tool?.name}</h2>
+        {open === 'polls' && (
+          <PollsView me={me} admin={admin} members={members} polls={polls} pollVotes={pollVotes}
+            onCreate={onPollCreate} onUpdate={onPollUpdate} onDelete={onPollDelete} onVote={onVote} />
+        )}
         {open === 'team_split' && (
           <TeamSplitView event={event} members={members} admin={admin} onSaveEvent={onSaveEvent} />
         )}

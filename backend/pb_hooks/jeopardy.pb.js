@@ -150,6 +150,9 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
       // quality output.
       model: "claude-opus-4-7",
       max_tokens: 12000,
+      // Lower temperature on the no-thinking path → more deterministic,
+      // factually conservative output (fewer hallucinated dates/lyrics).
+      temperature: 0.5,
       system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration. Verify every single fact before including it; replace any question whose facts you cannot fully verify.",
       messages: [{ role: "user", content: prompt }],
     },

@@ -1559,3 +1559,54 @@
   font-size: 12px; line-height: 1.5; color: var(--muted);
 }
 .ww-profile-hint b { color: var(--text); }
+
+/* ============ Polls / Umfragen ============ */
+.ww-poll-composer {
+  background: var(--card); border: 1px solid var(--amber);
+  border-radius: 8px; padding: 14px; margin-top: 12px;
+}
+.ww-poll-opt-row { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 6px; }
+
+.ww-poll-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px;
+}
+.ww-poll-card.closed { opacity: 0.7; }
+.ww-poll-q-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.ww-poll-q { font-family: 'Bebas Neue', sans-serif; font-size: 19px; letter-spacing: 0.03em; line-height: 1.1; }
+.ww-poll-admin { display: flex; gap: 4px; flex-shrink: 0; }
+.ww-poll-closed-tag {
+  display: inline-block; margin-top: 4px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.2em;
+  color: var(--red);
+}
+.ww-poll-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.ww-poll-opt {
+  position: relative; overflow: hidden;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: var(--card-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 12px 14px;
+  color: var(--text); cursor: pointer; font-family: inherit;
+  text-align: left; width: 100%;
+  transition: border-color 0.12s;
+}
+.ww-poll-opt:disabled { cursor: default; }
+.ww-poll-opt.mine { border-color: var(--amber); }
+.ww-poll-opt-bar {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: rgba(245,165,36,0.16);
+  transition: width 0.3s ease-out; z-index: 0;
+}
+.ww-poll-opt-label { position: relative; z-index: 1; font-size: 14px; font-weight: 600; }
+.ww-poll-opt-count {
+  position: relative; z-index: 1; flex-shrink: 0;
+  font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted);
+}
+.ww-poll-text { margin-top: 12px; }
+.ww-poll-answers { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.ww-poll-answer {
+  font-size: 13px; line-height: 1.4;
+  background: var(--card-2); border-radius: 6px; padding: 8px 10px;
+}
+.ww-poll-answer b { color: var(--amber); font-weight: 600; }
+.ww-waiting-polls { width: 100%; margin-top: 22px; text-align: left; }
