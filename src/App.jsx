@@ -14,7 +14,7 @@ import {
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
-  updateMyProfile, setUserRole, deleteUser, loadAllUsers,
+  updateMyProfile, setUserRole, setUserApproved, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
   getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard,
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
@@ -792,6 +792,17 @@ export default function App() {
     );
   }
 
+  if (!me.approved && me.role !== 'admin') {
+    return (
+      <div className="ww-app">
+        <GrainOverlay />
+        <PendingApprovalScreen me={me} onLogout={onLogout} />
+        {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
+      </div>
+    );
+  }
+
   if (!currentEventId) {
     return (
       <div className="ww-app">
@@ -823,6 +834,17 @@ export default function App() {
                 ? Object.entries(e.response.data).map(([k, v]) => `${k}: ${v.message}`).join(' / ')
                 : (e?.response?.message || e?.message || 'unbekannt');
               showToast(`Fehler: ${e?.status || ''} ${detail}`);
+              await refreshAllUsers();
+            }
+          }}
+          onSetUserApproved={async (id, approved) => {
+            setAllUsers(prev => prev.map(u => u.id === id ? { ...u, approved } : u));
+            try {
+              await setUserApproved(id, approved);
+              showToast(approved ? 'User freigeschaltet ✓' : 'Freigabe entzogen');
+              await refreshAllUsers();
+            } catch (e) {
+              showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`);
               await refreshAllUsers();
             }
           }}
@@ -1003,6 +1025,22 @@ function BootScreen() {
   );
 }
 
+function PendingApprovalScreen({ me, onLogout }) {
+  return (
+    <div className="ww-pending">
+      <div className="ww-pending-card">
+        <div className="ww-pending-emoji">⏳</div>
+        <h2 className="ww-pending-title">Fast geschafft, {me.displayName || 'Boi'}!</h2>
+        <p className="ww-pending-text">
+          Dein Account wartet auf Freigabe durch einen Admin.
+          Sobald du freigeschaltet bist, geht's los. 🍺
+        </p>
+        <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Abmelden</button>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
 // Auth
 // ============================================================
@@ -1155,7 +1193,7 @@ function RegisterForm({ onSubmit }) {
 
 function Lobby({
   me, memberships, allEvents, allUsers, view, setView, onPick, onJoin, onCreate,
-  onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser,
+  onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser, onSetUserApproved,
 }) {
   const siteAdmin = isSiteAdmin(me);
   const canCreate = isHost(me);
@@ -1203,7 +1241,7 @@ function Lobby({
                         <div className="ww-user-emoji">{ev.active ? '🟢' : '⏸'}</div>
                         <div>
                           <div className="ww-user-name">{ev.name}</div>
-                          <div className="ww-muted" style={{ fontSize: 11 }}>{formatDate(ev.date)} · CODE {ev.code}</div>
+                          <div className="ww-muted" style={{ fontSize: 11 }}>{formatEventDates(ev)} · CODE {ev.code}</div>
                         </div>
                       </button>
                     );
@@ -1217,7 +1255,7 @@ function Lobby({
               <AdminAllEvents events={allEvents} onPick={onPick} onDelete={onDeleteEvent} onToggleActive={onToggleActiveAdmin} />
             )}
             {view === 'users' && siteAdmin && (
-              <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} />
+              <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} onSetApproved={onSetUserApproved} />
             )}
           </>
         )}
@@ -1227,37 +1265,53 @@ function Lobby({
   );
 }
 
-function AdminAllUsers({ me, users, onSetRole, onDelete }) {
+function AdminAllUsers({ me, users, onSetRole, onDelete, onSetApproved }) {
   if (users.length === 0) return <p className="ww-muted">Lade…</p>;
+  const others = users.filter(u => u.id !== me.id);
+  const pending = others.filter(u => !u.approved && u.role !== 'admin');
+  const renderRow = (u) => (
+    <div key={u.id} className="ww-user-mgmt-row">
+      <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+      <span className="ww-user-mgmt-name">
+        {u.displayName || u.email}
+        {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
+        {u.role === 'host' && <span className="ww-host-badge"><Shield size={9} /> HOST</span>}
+        {!u.approved && u.role !== 'admin' && <span className="ww-pending-badge">WARTET</span>}
+      </span>
+      {!u.approved && u.role !== 'admin' ? (
+        <button className="ww-mini-btn green" onClick={() => onSetApproved(u.id, true)} title="Freischalten">
+          <Check size={13} /> OK
+        </button>
+      ) : (
+        <div className="ww-role-pick" role="radiogroup" aria-label="Rolle">
+          {['member', 'host', 'admin'].map(r => (
+            <button
+              key={r}
+              className={`ww-role-btn ${(u.role || 'member') === r ? 'active' : ''}`}
+              onClick={() => (u.role || 'member') !== r && onSetRole(u.id, r)}
+              aria-pressed={(u.role || 'member') === r}
+              title={r.toUpperCase()}
+            >{r[0].toUpperCase()}</button>
+          ))}
+        </div>
+      )}
+      <button className="ww-mini-btn red" onClick={() => onDelete(u.id)} title="User löschen"><X size={12} /></button>
+    </div>
+  );
   return (
     <div>
+      {pending.length > 0 && (
+        <div className="ww-pending-block">
+          <p className="ww-label" style={{ marginTop: 0 }}>⏳ WARTEN AUF FREIGABE ({pending.length})</p>
+          <div className="ww-user-mgmt">{pending.map(renderRow)}</div>
+        </div>
+      )}
       <p className="ww-muted" style={{ fontSize: 12 }}>
         Alle registrierten User. Tap auf <b>M</b> / <b>H</b> / <b>A</b> setzt die Rolle:
         Member kann nur joinen, Host darf Events erstellen, Admin alles.
       </p>
       <div className="ww-user-mgmt">
-        {users.filter(u => u.id !== me.id).map(u => (
-          <div key={u.id} className="ww-user-mgmt-row">
-            <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
-            <span className="ww-user-mgmt-name">
-              {u.displayName || u.email}
-              {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
-              {u.role === 'host' && <span className="ww-host-badge"><Shield size={9} /> HOST</span>}
-            </span>
-            <div className="ww-role-pick" role="radiogroup" aria-label="Rolle">
-              {['member', 'host', 'admin'].map(r => (
-                <button
-                  key={r}
-                  className={`ww-role-btn ${(u.role || 'member') === r ? 'active' : ''}`}
-                  onClick={() => (u.role || 'member') !== r && onSetRole(u.id, r)}
-                  aria-pressed={(u.role || 'member') === r}
-                  title={r.toUpperCase()}
-                >{r[0].toUpperCase()}</button>
-              ))}
-            </div>
-            <button className="ww-mini-btn red" onClick={() => onDelete(u.id)} title="User löschen"><X size={12} /></button>
-          </div>
-        ))}
+        {others.filter(u => u.approved || u.role === 'admin').map(renderRow)}
       </div>
     </div>
   );
@@ -1293,6 +1347,8 @@ function JoinForm({ onSubmit }) {
 function CreateEventForm({ onSubmit }) {
   const [name, setName] = useState('');
   const [date, setDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [openEnded, setOpenEnded] = useState(false);
   const [modules, setModules] = useState(['drinks']);
   const [customModulesDraft, setCustomModulesDraft] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -1304,10 +1360,19 @@ function CreateEventForm({ onSubmit }) {
   const addCustomDraft = () => setAddModOpen(true);
   const removeCustomDraft = (i) => setCustomModulesDraft(arr => arr.filter((_, j) => j !== i));
 
+  // Keep end ≥ start
+  const onStartChange = (v) => {
+    setDate(v);
+    if (endDate && v && endDate < v) setEndDate(v);
+  };
+
   const submit = async () => {
     if (!valid) return;
     setBusy(true); setErr('');
-    try { await onSubmit({ name: name.trim(), date, modules, customModules: customModulesDraft }); }
+    const payload = openEnded
+      ? { date: '', endDate: '' }
+      : { date, endDate: endDate || date };
+    try { await onSubmit({ name: name.trim(), ...payload, modules, customModules: customModulesDraft }); }
     catch (e) {
       const detail = e?.response?.data
         ? Object.entries(e.response.data).map(([k, v]) => `${k}: ${v.message}`).join(' / ')
@@ -1319,8 +1384,34 @@ function CreateEventForm({ onSubmit }) {
     <div>
       <label className="ww-label">EVENT-NAME</label>
       <input className="ww-input" value={name} onChange={e => setName(e.target.value)} maxLength={60} placeholder="z.B. Boiz Sommer-Wochenende" />
-      <label className="ww-label">DATUM</label>
-      <input className="ww-input" type="date" value={date} onChange={e => setDate(e.target.value)} />
+      <div className="ww-daterange-head">
+        <label className="ww-label" style={{ margin: 0 }}>ZEITRAUM</label>
+        <button
+          type="button"
+          className={`ww-chip-toggle ${openEnded ? 'on' : ''}`}
+          onClick={() => setOpenEnded(v => !v)}
+          aria-pressed={openEnded}
+        >
+          {openEnded ? <Check size={12} /> : null} Ohne festes Datum
+        </button>
+      </div>
+      {openEnded ? (
+        <p className="ww-muted" style={{ fontSize: 11, marginTop: 2 }}>
+          Läuft unbegrenzt — z.B. für tägliche Spiele im selben Event.
+        </p>
+      ) : (
+        <div className="ww-daterange">
+          <div className="ww-daterange-field">
+            <span className="ww-daterange-cap">VON</span>
+            <input className="ww-input ww-input-date" type="date" value={date} onChange={e => onStartChange(e.target.value)} />
+          </div>
+          <span className="ww-daterange-sep">→</span>
+          <div className="ww-daterange-field">
+            <span className="ww-daterange-cap">BIS</span>
+            <input className="ww-input ww-input-date" type="date" value={endDate} min={date || undefined} onChange={e => setEndDate(e.target.value)} />
+          </div>
+        </div>
+      )}
       <label className="ww-label">SPIELE</label>
       <div className="ww-modules">
         {GAME_MODULES.map(m => (
@@ -1374,7 +1465,7 @@ function AdminAllEvents({ events, onPick, onDelete, onToggleActive }) {
             <div className="ww-user-emoji">{ev.active ? '🟢' : '⏸'}</div>
             <div>
               <div className="ww-user-name">{ev.name}</div>
-              <div className="ww-muted" style={{ fontSize: 11 }}>{formatDate(ev.date)} · CODE {ev.code}</div>
+              <div className="ww-muted" style={{ fontSize: 11 }}>{formatEventDates(ev)} · CODE {ev.code}</div>
             </div>
           </button>
           <div className="ww-admin-event-actions">
@@ -1459,7 +1550,7 @@ function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote,
       {scheduleOn && Array.isArray(schedule?.entries) && schedule.entries.length > 0 && (
         <div className="ww-waiting-polls">
           <div className="ww-section-head"><span>🗓️</span><h3>PROGRAMM</h3></div>
-          <ScheduleView schedule={schedule} admin={false} onPatch={() => {}} eventDate={event.date} />
+          <ScheduleView schedule={schedule} admin={false} onPatch={() => {}} eventStart={event.date} eventEnd={event.endDate} />
         </div>
       )}
       {openPolls.length > 0 && onVote && (
@@ -1519,7 +1610,7 @@ function HomeView({
   return (
     <div className="ww-home">
       <div className="ww-event-banner">
-        <div className="ww-tag">{formatDate(event.date)}</div>
+        <div className="ww-tag">{formatEventDates(event)}</div>
         <h1 className="ww-display ww-title-big">{event.name}</h1>
       </div>
 
@@ -1580,7 +1671,7 @@ function HomeView({
         <SchnelleFragenView state={schnelleFragen} onPatch={onSchnellePatch} />
       )}
       {moduleTab === 'schedule' && (
-        <ScheduleView schedule={schedule} admin={admin} onPatch={onSchedulePatch} eventDate={event.date} />
+        <ScheduleView schedule={schedule} admin={admin} onPatch={onSchedulePatch} eventStart={event.date} eventEnd={event.endDate} />
       )}
       {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
           view (ToolsView), not in the games tab strip. */}
@@ -2343,6 +2434,21 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     onPatch({ rounds: next });
   };
 
+  // Delete a (finished) round from the history. Admin only.
+  const deleteRound = async (roundId) => {
+    if (!admin) return;
+    if (!await appConfirm('Diese Runde endgültig löschen? Die vergebenen Event-Punkte verschwinden.', { title: 'Runde löschen?', destructive: true, okLabel: 'LÖSCHEN' })) return;
+    onPatch({ rounds: rounds.filter(r => r.id !== roundId) });
+    setExpandedRound(null);
+  };
+
+  // Abort the currently running (unfinished) round without awarding points.
+  const cancelCurrentRound = async () => {
+    if (!admin || !currentRound || currentRound.finishedAt) return;
+    if (!await appConfirm('Laufendes Spiel abbrechen? Es werden keine Punkte vergeben und die Runde wird verworfen.', { title: 'Spiel abbrechen?', destructive: true, okLabel: 'ABBRECHEN' })) return;
+    onPatch({ rounds: rounds.filter((_, i) => i !== currentRoundIdx) });
+  };
+
   // Build a 2D grid: category × level (1..5)
   const grid = {};
   for (const c of categories) grid[c] = {};
@@ -2462,9 +2568,14 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
           )}
 
           {admin && active && !currentRound.finishedAt && (
-            <button className="ww-big-cta green" onClick={() => finishRound(currentRoundIdx)} style={{ marginTop: 10 }}>
-              <Flag size={20} /><span>RUNDE BEENDEN & PUNKTE VERTEILEN</span>
-            </button>
+            <>
+              <button className="ww-big-cta green" onClick={() => finishRound(currentRoundIdx)} style={{ marginTop: 10 }}>
+                <Flag size={20} /><span>RUNDE BEENDEN & PUNKTE VERTEILEN</span>
+              </button>
+              <button className="ww-danger-btn red" onClick={cancelCurrentRound} style={{ marginTop: 10 }}>
+                <X size={16} /> Laufendes Spiel abbrechen
+              </button>
+            </>
           )}
         </section>
       )}
@@ -2482,21 +2593,28 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               const isExp = expandedRound === r.id;
               return (
                 <div key={r.id}>
-                  <button
-                    className="ww-board-row"
-                    style={{ width: '100%', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
-                    onClick={() => setExpandedRound(isExp ? null : r.id)}
-                  >
-                    <div className="ww-board-rank">R{ri + 1}</div>
-                    <div className="ww-board-name">
-                      {rk.slice(0, 3).map(([uid, p]) => {
-                        const u = usersById[uid]; if (!u) return null;
-                        return <span key={uid} style={{ marginRight: 8 }}>{u.emoji || '🍺'} {p}</span>;
-                      })}
-                    </div>
-                    <div className="ww-board-pts">+{myEventPts}<span>pkt</span></div>
-                    <ChevronRight size={15} style={{ marginLeft: 6, transform: isExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
-                  </button>
+                  <div className="ww-jeo-past-row">
+                    <button
+                      className="ww-board-row"
+                      style={{ flex: 1, background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
+                      onClick={() => setExpandedRound(isExp ? null : r.id)}
+                    >
+                      <div className="ww-board-rank">R{ri + 1}</div>
+                      <div className="ww-board-name">
+                        {rk.slice(0, 3).map(([uid, p]) => {
+                          const u = usersById[uid]; if (!u) return null;
+                          return <span key={uid} style={{ marginRight: 8 }}>{u.emoji || '🍺'} {p}</span>;
+                        })}
+                      </div>
+                      <div className="ww-board-pts">+{myEventPts}<span>pkt</span></div>
+                      <ChevronRight size={15} style={{ marginLeft: 6, transform: isExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                    </button>
+                    {admin && (
+                      <button className="ww-mini-btn red" onClick={() => deleteRound(r.id)} title="Runde löschen">
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                   {isExp && <JeoBoardReadonly round={r} usersById={usersById} />}
                 </div>
               );
@@ -2657,11 +2775,6 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
   const allParticipants = () => onPatch({ participants: memberIds });
   const clearParticipants = () => onPatch({ participants: [] });
 
-  const clearRounds = async () => {
-    if (!await appConfirm('Alle Runden + Fragen löschen?', { title: 'Runden löschen?' })) return;
-    onPatch({ rounds: [] });
-  };
-
   return (
     <div>
       <label className="ww-label">KATEGORIEN (5)</label>
@@ -2728,10 +2841,9 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
         Anthropic generiert 5 Fragen pro Kategorie. Dauert ca. 5–15 Sek.
       </p>
-
-      <button className="ww-danger-btn red" onClick={clearRounds} style={{ marginTop: 14 }}>
-        <Trash2 size={14} /> Alle Runden löschen
-      </button>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        💡 Einzelne Runden löschst du jetzt direkt unter „Vergangene Runden".
+      </p>
     </div>
   );
 }
@@ -3094,24 +3206,45 @@ function formatScheduleDay(day) {
   } catch { return day; }
 }
 
-function ScheduleView({ schedule, admin, onPatch, eventDate }) {
+// Enumerate ISO days (YYYY-MM-DD) from start to end inclusive. Open-ended
+// (no start) → []. End missing → just the single start day.
+function enumerateDays(start, end) {
+  if (!start) return [];
+  const out = [];
+  const s = new Date(start + 'T00:00:00');
+  if (isNaN(s.getTime())) return [];
+  const e = end ? new Date(end + 'T00:00:00') : s;
+  if (isNaN(e.getTime()) || e < s) return [start];
+  for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+    if (out.length > 60) break; // safety
+  }
+  return out;
+}
+
+function ScheduleView({ schedule, admin, onPatch, eventStart, eventEnd }) {
   const [editing, setEditing] = useState(null); // entry being edited, or {} for new
+  const eventDays = useMemo(() => enumerateDays(eventStart, eventEnd), [eventStart, eventEnd]);
+  const openEnded = !eventStart && !eventEnd;
+
   const entries = useMemo(() => {
     const list = Array.isArray(schedule?.entries) ? [...schedule.entries] : [];
     list.sort((a, b) => (a.day || '').localeCompare(b.day || '') || (a.time || '').localeCompare(b.time || ''));
     return list;
   }, [schedule]);
 
-  // group by day
+  // group by day; for fixed-range events pre-seed every event day so the plan
+  // mirrors the event's timeframe (empty days show a hint).
   const groups = useMemo(() => {
     const m = new Map();
+    for (const d of eventDays) m.set(d, []);
     for (const e of entries) {
       const k = e.day || '';
       if (!m.has(k)) m.set(k, []);
       m.get(k).push(e);
     }
-    return [...m.entries()];
-  }, [entries]);
+    return [...m.entries()].sort((a, b) => (a[0] || '').localeCompare(b[0] || ''));
+  }, [entries, eventDays]);
 
   const saveEntry = (entry) => {
     const list = Array.isArray(schedule?.entries) ? [...schedule.entries] : [];
@@ -3133,12 +3266,12 @@ function ScheduleView({ schedule, admin, onPatch, eventDate }) {
   return (
     <div className="ww-sched">
       {admin && (
-        <button className="ww-big-cta" style={{ marginTop: 0 }} onClick={() => setEditing({ day: eventDate || '' })}>
+        <button className="ww-big-cta" style={{ marginTop: 0 }} onClick={() => setEditing({ day: eventDays[0] || '' })}>
           <Plus size={18} /><span>PROGRAMMPUNKT</span>
         </button>
       )}
 
-      {entries.length === 0 && (
+      {entries.length === 0 && eventDays.length === 0 && (
         <div className="ww-empty" style={{ marginTop: 14 }}>
           {admin ? 'Noch nichts geplant — füge den ersten Programmpunkt hinzu.' : 'Der Host hat noch kein Programm eingetragen.'}
         </div>
@@ -3147,6 +3280,9 @@ function ScheduleView({ schedule, admin, onPatch, eventDate }) {
       {groups.map(([day, items]) => (
         <div key={day || 'none'} className="ww-sched-day">
           <div className="ww-sched-day-head">{formatScheduleDay(day)}</div>
+          {items.length === 0 && (
+            <div className="ww-sched-empty">{admin ? 'Noch nichts geplant für diesen Tag.' : 'Nichts geplant.'}</div>
+          )}
           <div className="ww-sched-list">
             {items.map(e => (
               <div key={e.id} className="ww-sched-item">
@@ -3174,20 +3310,24 @@ function ScheduleView({ schedule, admin, onPatch, eventDate }) {
       ))}
 
       {editing && admin && (
-        <ScheduleEntryDrawer entry={editing} onSave={saveEntry} onClose={() => setEditing(null)} />
+        <ScheduleEntryDrawer entry={editing} onSave={saveEntry} onClose={() => setEditing(null)} eventDays={eventDays} openEnded={openEnded} />
       )}
     </div>
   );
 }
 
-function ScheduleEntryDrawer({ entry, onSave, onClose }) {
-  const [day, setDay] = useState(entry.day || '');
+function ScheduleEntryDrawer({ entry, onSave, onClose, eventDays = [], openEnded = false }) {
+  const [day, setDay] = useState(entry.day || eventDays[0] || '');
   const [time, setTime] = useState(entry.time || '');
   const [title, setTitle] = useState(entry.title || '');
   const [location, setLocation] = useState(entry.location || '');
   const [address, setAddress] = useState(entry.address || '');
   const [note, setNote] = useState(entry.note || '');
   const valid = title.trim().length >= 2;
+  // Fixed-range events: pick from the event's days. Open-ended: free date input.
+  const useDropdown = eventDays.length > 0;
+  // Ensure the currently-edited day is selectable even if it's outside the range.
+  const dayOptions = useDropdown && day && !eventDays.includes(day) ? [day, ...eventDays] : eventDays;
   return (
     <ModuleSettingsDrawer title={entry.id ? '🗓️ Programmpunkt bearbeiten' : '🗓️ Neuer Programmpunkt'} onClose={onClose}>
       <label className="ww-label">TITEL</label>
@@ -3195,7 +3335,13 @@ function ScheduleEntryDrawer({ entry, onSave, onClose }) {
       <div className="ww-grid2">
         <div>
           <label className="ww-label">TAG</label>
-          <input className="ww-input" type="date" value={day} onChange={e => setDay(e.target.value)} />
+          {useDropdown ? (
+            <select className="ww-input" value={day} onChange={e => setDay(e.target.value)}>
+              {dayOptions.map(d => <option key={d} value={d}>{formatScheduleDay(d)}</option>)}
+            </select>
+          ) : (
+            <input className="ww-input" type="date" value={day} onChange={e => setDay(e.target.value)} />
+          )}
         </div>
         <div>
           <label className="ww-label">UHRZEIT</label>
@@ -4507,6 +4653,27 @@ function formatDate(iso) {
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
   } catch { return iso; }
+}
+
+// Compact date used inside a range (no weekday/year noise).
+function formatDateShort(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: 'short' }).toUpperCase();
+  } catch { return iso; }
+}
+
+// Human label for an event's timeframe. Open-ended (no dates) → "OHNE ENDE".
+function formatEventDates(ev) {
+  if (!ev) return '';
+  const { date, endDate } = ev;
+  if (!date && !endDate) return 'OHNE ENDE';
+  if (date && endDate && endDate !== date) {
+    return `${formatDateShort(date)} – ${formatDateShort(endDate)}`;
+  }
+  return formatDate(date || endDate);
 }
 
 function GrainOverlay() { return <div className="ww-grain" aria-hidden="true" />; }

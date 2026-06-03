@@ -1,11 +1,14 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// First registered user becomes site admin.
+// First registered user becomes site admin (and is auto-approved).
+// Everyone else starts as an unapproved member — an admin must approve
+// them before they can use the app.
 onRecordAfterCreateSuccess((e) => {
   try {
     const totalUsers = e.app.countRecords("users");
-    const role = totalUsers <= 1 ? "admin" : "member";
-    e.record.set("role", role);
+    const first = totalUsers <= 1;
+    e.record.set("role", first ? "admin" : "member");
+    e.record.set("approved", first ? true : false);
     e.app.save(e.record);
   } catch (err) {
     console.log("user post-create:", err);

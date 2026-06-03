@@ -1681,6 +1681,7 @@
   margin-bottom: 8px; padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
 }
+.ww-sched-empty { color: var(--muted-2); font-size: 12px; font-style: italic; padding: 2px 0 6px; }
 .ww-sched-list { display: flex; flex-direction: column; gap: 8px; }
 .ww-sched-item {
   display: flex; gap: 12px; align-items: flex-start;
@@ -1724,3 +1725,70 @@
 .ww-jeo-recap-q { line-height: 1.35; }
 .ww-jeo-recap-a { color: var(--muted); font-size: 12px; }
 .ww-jeo-recap-w { flex-shrink: 0; font-size: 14px; padding-top: 1px; }
+
+/* ============ Pending approval gate ============ */
+.ww-pending {
+  min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+  padding: 24px calc(20px + env(safe-area-inset-right)) 24px calc(20px + env(safe-area-inset-left));
+}
+.ww-pending-card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+  padding: 32px 24px; max-width: 360px; width: 100%; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.ww-pending-emoji { font-size: 48px; }
+.ww-pending-title { font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: 0.04em; margin: 0; }
+.ww-pending-text { color: var(--muted); font-size: 14px; line-height: 1.5; margin: 0; }
+.ww-pending-badge {
+  margin-left: 6px; font-size: 9px; letter-spacing: 0.1em;
+  background: var(--amber); color: #000; padding: 1px 5px; border-radius: 3px;
+  font-family: 'IBM Plex Mono', monospace; vertical-align: middle;
+}
+.ww-pending-block {
+  border: 1px solid var(--amber); border-radius: 6px; padding: 12px;
+  margin-bottom: 14px; background: rgba(245, 165, 36, 0.06);
+}
+
+/* ============ Event date-range picker ============ */
+.ww-daterange-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-top: 14px;
+}
+.ww-chip-toggle {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+  padding: 4px 9px; border-radius: 999px; cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.06em;
+}
+.ww-chip-toggle.on { border-color: var(--amber); color: var(--amber); background: rgba(245,165,36,0.1); }
+.ww-daterange { display: flex; align-items: flex-end; gap: 8px; margin-top: 8px; }
+.ww-daterange-field { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ww-daterange-cap { font-size: 9px; letter-spacing: 0.12em; color: var(--muted-2); font-family: 'IBM Plex Mono', monospace; }
+.ww-daterange-sep { color: var(--muted); padding-bottom: 10px; font-size: 14px; }
+.ww-input-date { width: 100%; }
+
+/* ============ Jeopardy past-round row (with delete) ============ */
+.ww-jeo-past-row { display: flex; align-items: stretch; gap: 6px; }
+.ww-jeo-past-row .ww-mini-btn { align-self: center; }
+
+/* ============ Portrait orientation lock ============ */
+.ww-rotate-lock { display: none; }
+@media screen and (orientation: landscape) and (max-height: 540px) {
+  .ww-rotate-lock {
+    display: flex; position: fixed; inset: 0; z-index: 99999;
+    background: var(--bg); align-items: center; justify-content: center;
+    padding: 24px; text-align: center;
+  }
+  .ww-rotate-lock-inner { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .ww-rotate-lock-emoji { font-size: 56px; animation: ww-rotate-hint 1.8s ease-in-out infinite; }
+  .ww-rotate-lock-text {
+    font-family: 'Bebas Neue', sans-serif; font-size: 24px;
+    letter-spacing: 0.04em; color: var(--amber);
+  }
+  /* Hide the app behind the overlay so nothing bleeds through. */
+  #root { display: none; }
+}
+@keyframes ww-rotate-hint {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-90deg); }
+}

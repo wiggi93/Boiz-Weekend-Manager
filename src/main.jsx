@@ -19,6 +19,17 @@ document.addEventListener('touchend', (e) => {
 }, { passive: false });
 document.addEventListener('dblclick', (e) => e.preventDefault());
 
+// Lock to portrait where the platform supports it (installed PWA on Android /
+// Chromium). iOS Safari ignores this API — there a CSS overlay (.ww-rotate-lock
+// in App.css) covers the app in landscape instead.
+const lockPortrait = () => {
+  try { screen.orientation?.lock?.('portrait').catch(() => {}); } catch (_) {}
+};
+lockPortrait();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') lockPortrait();
+});
+
 // Update detection.
 // iOS PWAs are notoriously unreliable about firing service-worker lifecycle
 // events while the app sleeps and re-foregrounds, so the SW-based check was
