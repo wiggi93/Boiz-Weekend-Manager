@@ -42,10 +42,31 @@ const currentBundle = (() => {
   return null;
 })();
 
+// Fire a local push notification when a new version is available, mirroring
+// the in-app banner. Only fires once per detected version and only if the
+// user granted notification permission.
+const notifyNewVersion = async () => {
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const title = '✨ Neue Version verfügbar';
+    const opts = {
+      body: 'Tippe, um Boiz Weekend Manager zu aktualisieren.',
+      icon: '/pwa-192x192.png',
+      badge: '/pwa-192x192.png',
+      tag: 'app-update',
+      renotify: false,
+    };
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg?.showNotification) { await reg.showNotification(title, opts); return; }
+    new Notification(title, opts);
+  } catch (_) { /* permission / unsupported */ }
+};
+
 let bannerShown = false;
 const showBanner = () => {
   if (bannerShown || document.getElementById('ww-update-banner')) return;
   bannerShown = true;
+  notifyNewVersion();
   const banner = document.createElement('div');
   banner.id = 'ww-update-banner';
   banner.style.cssText = [

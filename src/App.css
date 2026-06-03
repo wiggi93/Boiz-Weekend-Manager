@@ -444,7 +444,7 @@
   position: absolute; bottom: 0; left: 0; right: 0;
   background: rgba(10,10,11,0.92); backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(4, 1fr);
   padding: 8px 8px max(8px, env(safe-area-inset-bottom));
   z-index: 20;
 }
@@ -1533,3 +1533,29 @@
 .ww-schnelle-nav-btn.primary:hover:not(:disabled) {
   background: #ffb84d; border-color: #ffb84d;
 }
+
+/* ============ My event wishes (Crew tab) + profile hint ============ */
+.ww-mywishes {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;
+}
+.ww-mywishes-head {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: none; color: var(--text);
+  width: 100%; cursor: pointer; padding: 0; font-family: inherit;
+}
+.ww-mywishes-title {
+  flex: 1; text-align: left;
+  font-family: 'Bebas Neue', sans-serif; font-size: 17px; letter-spacing: 0.05em;
+}
+.ww-mywishes-summary { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.ww-mywishes-form { margin-top: 6px; }
+.ww-mywishes-form .ww-big-cta { margin-top: 12px; }
+
+.ww-profile-hint {
+  background: rgba(245,165,36,0.08); border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: 6px; padding: 10px 12px; margin: 14px 0 6px;
+  font-size: 12px; line-height: 1.5; color: var(--muted);
+}
+.ww-profile-hint b { color: var(--text); }

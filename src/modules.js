@@ -4,16 +4,16 @@
 // in event.modules and don't appear in the "Module verwalten" toggle.
 // `available: false` modules show as "Coming Soon" placeholders.
 export const MODULES = [
-  // --- Games / Competitions (score into leaderboard) ---
+  // --- Games / Module (selectable per event) ---
   { id: 'drinks',          name: 'Bier-Counter',     icon: '🍺',  available: true,  kind: 'game' },
   { id: 'flunky',          name: 'Flunkyball',       icon: '🎳',  available: true,  kind: 'game' },
   { id: 'jeopardy',        name: 'Jeopardy',         icon: '🎤',  available: true,  kind: 'game' },
+  { id: 'schnelle_fragen', name: '5 Schnelle',       icon: '⚡',  available: true,  kind: 'game' },
   { id: 'gokart',          name: 'Go-Kart',          icon: '🏎️', available: false, kind: 'game' },
   { id: 'padel',           name: 'Padel-Tennis',     icon: '🎾',  available: false, kind: 'game' },
-  // --- Tools (Helpers, kein Scoring, immer verfügbar) ---
+  // --- Tools (Helpers, kein Scoring, immer verfügbar, NICHT in der Modulauswahl) ---
   { id: 'team_split',      name: 'Team Aufteilung',  icon: '🎲',  available: true,  kind: 'tool' },
   { id: 'kitty',           name: 'Kassensturz',      icon: '💰',  available: true,  kind: 'tool' },
-  { id: 'schnelle_fragen', name: '5 Schnelle',       icon: '⚡',  available: true,  kind: 'tool' },
 ];
 
 export const moduleById = (id) => MODULES.find(m => m.id === id);

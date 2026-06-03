@@ -105,6 +105,12 @@ export async function kickMember(memberRecordId) {
   return pb.collection('event_members').delete(memberRecordId);
 }
 
+// Per-event wishes live on the membership row (event-specific, unlike the
+// profile-level general preferences on the user record).
+export async function updateMembership(memberRecordId, patch) {
+  return pb.collection('event_members').update(memberRecordId, patch);
+}
+
 // ---- Stats ----
 export async function loadEventStats(eventId) {
   const list = await pb.collection('stats').getFullList({ filter: `event="${eventId}"` });

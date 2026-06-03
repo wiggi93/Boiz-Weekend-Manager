@@ -6,13 +6,13 @@ import {
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
   Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
-  ChevronRight, Bell, BellOff,
+  ChevronRight, Bell, BellOff, Wrench,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
   login, register, logout,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
-  listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember,
+  listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
   updateMyProfile, setUserRole, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
@@ -537,6 +537,16 @@ export default function App() {
     showToast('Profil gespeichert ✓');
   };
 
+  // Event-specific wishes saved on my membership row for the current event.
+  const onSaveMyWishes = async (patch) => {
+    const mine = eventMembers.find(m => m.expand?.user?.id === me.id || m.user === me.id);
+    if (!mine) { showToast('Mitgliedschaft nicht gefunden'); return; }
+    // optimistic
+    setEventMembers(prev => prev.map(m => m.id === mine.id ? { ...m, ...patch } : m));
+    try { await updateMembership(mine.id, patch); showToast('Wünsche gespeichert ✓'); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
   const onFlunkyPatch = async (patch) => {
     const cur = flunkyRef.current;
     if (!cur) return;
@@ -762,7 +772,14 @@ export default function App() {
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} myId={me.id} onShowUserDetail={setDetailUserId} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
+        )}
+        {view === 'tools' && (
+          <ToolsView
+            me={me} admin={admin} event={currentEvent} members={eventMembers}
+            kitty={kitty} onKittyPatch={onKittyPatch}
+            onSaveEvent={onSaveEvent}
+          />
         )}
         {view === 'profile' && (
           <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
@@ -816,6 +833,7 @@ export default function App() {
       {detailUserId && (
         <UserDetailDrawer
           user={(eventMembers.find(m => m.expand?.user?.id === detailUserId) || {}).expand?.user}
+          membership={eventMembers.find(m => m.expand?.user?.id === detailUserId)}
           stats={statsMap[detailUserId]}
           event={currentEvent}
           flunky={flunky}
@@ -934,12 +952,12 @@ function RegisterForm({ onSubmit }) {
           <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
         ))}
       </div>
-      <label className="ww-label"><Utensils size={12} /> ESSENSWÜNSCHE</label>
-      <textarea className="ww-textarea" placeholder="z.B. Spareribs, Pizza, viel Fleisch..." value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
-      <label className="ww-label"><Beer size={12} /> GETRÄNKEWÜNSCHE</label>
-      <textarea className="ww-textarea" placeholder="z.B. Tannenzäpfle, Bourbon, Mate..." value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
+      <label className="ww-label"><Utensils size={12} /> ESSENS-VORLIEBEN (ALLGEMEIN)</label>
+      <textarea className="ww-textarea" placeholder="z.B. mag viel Fleisch, kein Fisch" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
+      <label className="ww-label"><Beer size={12} /> GETRÄNKE-VORLIEBEN (ALLGEMEIN)</label>
+      <textarea className="ww-textarea" placeholder="z.B. Pils, Bourbon, keine süßen Sachen" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
       <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
-      <textarea className="ww-textarea" placeholder="z.B. Laktose, keine Pilze..." value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
+      <textarea className="ww-textarea" placeholder="z.B. Laktose, Nüsse, keine Pilze" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         {busy ? <span className="ww-spinner" /> : <UserPlus size={20} />}<span>{busy ? 'ERSTELLE…' : 'SQUAD BEITRETEN'}</span>
@@ -1154,19 +1172,6 @@ function CreateEventForm({ onSubmit }) {
         Custom-Module sind Competitions wie Cornhole, Tischtennis usw. Teams oder Solo-Modus, Punkte und Sätze einstellbar — die genaue Konfiguration machst du nach dem Erstellen im Event.
       </p>
 
-      <label className="ww-label" style={{ marginTop: 12 }}>WERKZEUGE</label>
-      <div className="ww-modules">
-        {TOOL_MODULES.map(m => (
-          <div key={m.id} className="ww-mod-card ww-mod-card-tool sel" title="Immer verfügbar">
-            <div className="ww-mod-icon">{m.icon}</div>
-            <div className="ww-mod-name">{m.name}</div>
-            <div className="ww-mod-soon">TOOL</div>
-          </div>
-        ))}
-      </div>
-      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
-        Werkzeuge stehen in jedem Event automatisch zur Verfügung — kein An/Aus nötig.
-      </p>
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         {busy ? <span className="ww-spinner" /> : <Plus size={20} />}<span>{busy ? 'ERSTELLE…' : 'EVENT ERSTELLEN'}</span>
@@ -1295,14 +1300,11 @@ function HomeView({
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   // Games are opt-in per event (modules array); tools are ALWAYS available.
   const gameTabs = GAME_MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
-  const toolTabs = TOOL_MODULES;
   const customTabs = (customModules || []).map(cm => ({ id: `cm-${cm.id}`, name: cm.name || 'Modul', icon: cm.icon || '🎯', cm }));
   const drinksOn = modules.includes('drinks');
   const activeCustom = moduleTab?.startsWith?.('cm-')
     ? customModules.find(c => `cm-${c.id}` === moduleTab)
     : null;
-  const [toolsOpen, setToolsOpen] = useState(false);
-  const [toolView, setToolView] = useState(null); // tool id when one is open inside the drawer
   const [modulesOpen, setModulesOpen] = useState(false);
   const [addModOpen, setAddModOpen] = useState(false);
 
@@ -1354,16 +1356,6 @@ function HomeView({
             <span className="ww-mod-tab-icon">＋</span>
           </button>
         )}
-        {toolTabs.length > 0 && (
-          <button
-            className={`ww-mod-tab ww-tools-btn ${toolTabs.some(t => t.id === moduleTab) ? 'active' : ''}`}
-            onClick={() => setToolsOpen(true)}
-            aria-label="Tools"
-            title="Tools"
-          >
-            <span className="ww-mod-tab-icon">🛠</span>
-          </button>
-        )}
       </div>
 
       {moduleTab === 'overview' && (
@@ -1383,8 +1375,11 @@ function HomeView({
           onOpenSettings={() => setModuleSettingsOpen('jeopardy')}
         />
       )}
-      {/* Tools (team_split, kitty) render inside the side-drawer instead
-          of as their own tab views — see the toolsOpen drawer below. */}
+      {moduleTab === 'schnelle_fragen' && (
+        <SchnelleFragenView state={schnelleFragen} onPatch={onSchnellePatch} />
+      )}
+      {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
+          view (ToolsView), not in the games tab strip. */}
       {activeCustom && (
         <CustomModuleView
           me={me} mod={activeCustom} members={members} admin={admin} active={event.active}
@@ -1392,53 +1387,6 @@ function HomeView({
           onOpenSettings={() => setModuleSettingsOpen(moduleTab)}
         />
       )}
-
-      {toolsOpen && (() => {
-        const tool = toolView ? moduleById(toolView) : null;
-        const close = () => { setToolsOpen(false); setToolView(null); };
-        return (
-          <ModuleSettingsDrawer
-            title={tool ? `${tool.icon} ${tool.name}` : '🛠 Tools'}
-            onClose={close}
-          >
-            {!tool ? (
-              <>
-                <p className="ww-muted" style={{ fontSize: 12 }}>
-                  Helpers fürs Event — fließen nicht ins Leaderboard.
-                </p>
-                <div className="ww-tools-list">
-                  {toolTabs.map(t => (
-                    <button
-                      key={t.id}
-                      className="ww-tools-item"
-                      onClick={() => setToolView(t.id)}
-                    >
-                      <span className="ww-tools-item-icon">{t.icon}</span>
-                      <span className="ww-tools-item-name">{t.name}</span>
-                      <ChevronRight size={16} />
-                    </button>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <>
-                <button className="ww-drawer-back" onClick={() => setToolView(null)}>
-                  <ArrowLeft size={14} /> Tools
-                </button>
-                {toolView === 'team_split' && (
-                  <TeamSplitView event={event} members={members} admin={admin} onSaveEvent={onSaveEvent} />
-                )}
-                {toolView === 'kitty' && (
-                  <KittyView me={me} kitty={kitty} members={members} admin={admin} onPatch={onKittyPatch} />
-                )}
-                {toolView === 'schnelle_fragen' && (
-                  <SchnelleFragenView state={schnelleFragen} onPatch={onSchnellePatch} />
-                )}
-              </>
-            )}
-          </ModuleSettingsDrawer>
-        );
-      })()}
 
       {modulesOpen && admin && (
         <ModuleSettingsDrawer title="＋ Module verwalten" onClose={() => setModulesOpen(false)}>
@@ -1462,20 +1410,6 @@ function HomeView({
                 </button>
               );
             })}
-          </div>
-
-          <label className="ww-label" style={{ marginTop: 18 }}>WERKZEUGE — IMMER VERFÜGBAR</label>
-          <p className="ww-muted" style={{ fontSize: 11, marginTop: -2, marginBottom: 6 }}>
-            Helpers ohne Scoring. Stehen jedem Event automatisch zur Verfügung.
-          </p>
-          <div className="ww-module-toggles">
-            {TOOL_MODULES.map(m => (
-              <div key={m.id} className="ww-module-toggle on" style={{ cursor: 'default' }}>
-                <span className="ww-mod-icon">{m.icon}</span>
-                <span className="ww-mod-name">{m.name}</span>
-                <span className="ww-host-badge" style={{ marginLeft: 0 }}>TOOL</span>
-              </div>
-            ))}
           </div>
 
           <label className="ww-label" style={{ marginTop: 18 }}>CUSTOM MODULE</label>
@@ -3419,15 +3353,23 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, myId, onShowUserDetail }) {
+function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, myId, onShowUserDetail, onSaveMyWishes }) {
+  const myMembership = members.find(m => (m.expand?.user?.id || m.user) === myId);
   return (
     <div className="ww-crew">
+      {myMembership && (
+        <MyEventWishes membership={myMembership} onSave={onSaveMyWishes} eventName={event.name} />
+      )}
       <div className="ww-section-head"><Users size={16} /><h3>DIE CREW ({members.length})</h3></div>
       <div className="ww-crew-list">
         {members.map(m => {
           const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
           const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy);
+          // Event-specific wishes live on the membership row; allergies are
+          // a constant profile attribute.
+          const food = m.foodWishes || '';
+          const drink = m.drinkWishes || '';
           return (
             <div key={u.id} className={`ww-crew-card ${u.id === myId ? 'me' : ''}`}>
               <button className="ww-crew-head clickable" onClick={() => onShowUserDetail?.(u.id)}>
@@ -3439,8 +3381,8 @@ function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, m
                 <span><Beer size={11} /> {s.beer || 0}</span>
                 <span><Wine size={11} /> {s.mische || 0}</span>
               </div>
-              {u.foodWishes && <div className="ww-crew-line"><b>Essen:</b> {u.foodWishes}</div>}
-              {u.drinkWishes && <div className="ww-crew-line"><b>Trinken:</b> {u.drinkWishes}</div>}
+              {food && <div className="ww-crew-line"><b>Essen:</b> {food}</div>}
+              {drink && <div className="ww-crew-line"><b>Trinken:</b> {drink}</div>}
               {u.allergies && <div className="ww-crew-line warn"><b>⚠ Allergie:</b> {u.allergies}</div>}
             </div>
           );
@@ -3450,12 +3392,62 @@ function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, m
   );
 }
 
+// Editable card for the current user's event-specific food/drink wishes.
+function MyEventWishes({ membership, onSave, eventName }) {
+  const [food, setFood] = useState(membership.foodWishes || '');
+  const [drink, setDrink] = useState(membership.drinkWishes || '');
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    setFood(membership.foodWishes || '');
+    setDrink(membership.drinkWishes || '');
+  }, [membership.id, membership.foodWishes, membership.drinkWishes]);
+  const dirty = food !== (membership.foodWishes || '') || drink !== (membership.drinkWishes || '');
+  const hasWishes = (membership.foodWishes || '').trim() || (membership.drinkWishes || '').trim();
+
+  return (
+    <div className="ww-mywishes">
+      <button className="ww-mywishes-head" onClick={() => setOpen(o => !o)}>
+        <Utensils size={15} />
+        <span className="ww-mywishes-title">Meine Wünsche für dieses Event</span>
+        <ChevronRight size={16} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+      {!open && !hasWishes && (
+        <p className="ww-muted" style={{ fontSize: 12, margin: '4px 2px 0' }}>
+          Noch keine Wünsche — tippe zum Hinzufügen, was du auf {eventName} essen/trinken willst.
+        </p>
+      )}
+      {!open && hasWishes && (
+        <div className="ww-mywishes-summary">
+          {membership.foodWishes && <div className="ww-crew-line"><b>Essen:</b> {membership.foodWishes}</div>}
+          {membership.drinkWishes && <div className="ww-crew-line"><b>Trinken:</b> {membership.drinkWishes}</div>}
+        </div>
+      )}
+      {open && (
+        <div className="ww-mywishes-form">
+          <label className="ww-label"><Utensils size={12} /> ESSENSWÜNSCHE (DIESES EVENT)</label>
+          <textarea className="ww-textarea" rows={2} value={food} onChange={e => setFood(e.target.value)}
+            placeholder="z.B. Spareribs, Grillkäse, viel Fleisch..." />
+          <label className="ww-label"><Beer size={12} /> GETRÄNKEWÜNSCHE (DIESES EVENT)</label>
+          <textarea className="ww-textarea" rows={2} value={drink} onChange={e => setDrink(e.target.value)}
+            placeholder="z.B. Tannenzäpfle, Bourbon, Mate..." />
+          <button className={`ww-big-cta ${dirty ? '' : 'disabled'}`} disabled={!dirty}
+            onClick={() => onSave({ foodWishes: food.trim(), drinkWishes: drink.trim() })}>
+            <Check size={18} /><span>WÜNSCHE SPEICHERN</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============================================================
 // User detail drawer (point breakdown)
 // ============================================================
 
-function UserDetailDrawer({ user, stats, event, flunky, jeopardy, customModules, isMe, onClose }) {
+function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, isMe, onClose }) {
   if (!user) return null;
+  const evFood = membership?.foodWishes || '';
+  const evDrink = membership?.drinkWishes || '';
   const s = stats || { beer: 0, mische: 0 };
   const beerPts = (s.beer || 0) * (event.pointsPerBeer ?? 1);
   const mischePts = (s.mische || 0) * (event.pointsPerMische ?? 1);
@@ -3559,9 +3551,17 @@ function UserDetailDrawer({ user, stats, event, flunky, jeopardy, customModules,
           </div>
         )}
 
+        {(evFood || evDrink) && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🍽 WÜNSCHE FÜR DIESES EVENT</div>
+            {evFood && <div className="ww-detail-wish"><b>Essen:</b> {evFood}</div>}
+            {evDrink && <div className="ww-detail-wish"><b>Trinken:</b> {evDrink}</div>}
+          </div>
+        )}
+
         {(user.foodWishes || user.drinkWishes || user.allergies) && (
           <div className="ww-detail-section">
-            <div className="ww-detail-section-head">📝 WÜNSCHE</div>
+            <div className="ww-detail-section-head">📝 ALLGEMEINE VORLIEBEN</div>
             {user.foodWishes && <div className="ww-detail-wish"><b>Essen:</b> {user.foodWishes}</div>}
             {user.drinkWishes && <div className="ww-detail-wish"><b>Trinken:</b> {user.drinkWishes}</div>}
             {user.allergies && <div className="ww-detail-wish warn"><b>⚠ Allergie:</b> {user.allergies}</div>}
@@ -3608,12 +3608,19 @@ function ProfileView({ me, onSave, onLogout }) {
           <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
         ))}
       </div>
-      <label className="ww-label"><Utensils size={12} /> ESSENSWÜNSCHE</label>
-      <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
-      <label className="ww-label"><Beer size={12} /> GETRÄNKEWÜNSCHE</label>
-      <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
+      <div className="ww-profile-hint">
+        Allgemeine Vorlieben & Allergien gelten für dich überall. Konkrete
+        Wünsche für ein bestimmtes Event setzt du im <b>Crew</b>-Tab des Events.
+      </div>
+      <label className="ww-label"><Utensils size={12} /> ESSENS-VORLIEBEN (ALLGEMEIN)</label>
+      <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2}
+        placeholder="z.B. mag generell viel Fleisch, kein Fisch" />
+      <label className="ww-label"><Beer size={12} /> GETRÄNKE-VORLIEBEN (ALLGEMEIN)</label>
+      <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2}
+        placeholder="z.B. Pils, Bourbon, keine süßen Sachen" />
       <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
-      <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
+      <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2}
+        placeholder="z.B. Laktose, Nüsse, keine Pilze" />
       <button className={`ww-big-cta ${dirty ? '' : 'disabled'}`} disabled={!dirty}
         onClick={() => onSave({ displayName: displayName.trim(), emoji, foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim() })}>
         <Check size={20} /><span>SPEICHERN</span>
@@ -3750,10 +3757,55 @@ function NotAllowed({ onBack }) {
 // Bottom nav / toast / helpers
 // ============================================================
 
+// ============================================================
+// Tools view — its own bottom-nav page, separate from game modules.
+// Lists every available tool; tapping opens it inline with a back link.
+// ============================================================
+function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent }) {
+  const [open, setOpen] = useState(null); // tool id
+
+  if (open) {
+    const tool = moduleById(open);
+    return (
+      <div>
+        <button className="ww-back" onClick={() => setOpen(null)}>
+          <ArrowLeft size={18} /> Werkzeuge
+        </button>
+        <h2 className="ww-display ww-title-big">{tool?.icon} {tool?.name}</h2>
+        {open === 'team_split' && (
+          <TeamSplitView event={event} members={members} admin={admin} onSaveEvent={onSaveEvent} />
+        )}
+        {open === 'kitty' && (
+          <KittyView me={me} kitty={kitty} members={members} admin={admin} onPatch={onKittyPatch} />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h2 className="ww-display ww-title-big">Werkzeuge</h2>
+      <p className="ww-muted" style={{ fontSize: 13, marginTop: -4, marginBottom: 14 }}>
+        Helfer fürs Event — fließen nicht ins Leaderboard.
+      </p>
+      <div className="ww-tools-list">
+        {TOOL_MODULES.map(t => (
+          <button key={t.id} className="ww-tools-item" onClick={() => setOpen(t.id)}>
+            <span className="ww-tools-item-icon">{t.icon}</span>
+            <span className="ww-tools-item-name">{t.name}</span>
+            <ChevronRight size={16} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function BottomNav({ view, setView }) {
   const items = [
     { k: 'home', icon: <Home size={20} />, label: 'Home' },
     { k: 'crew', icon: <Users size={20} />, label: 'Crew' },
+    { k: 'tools', icon: <Wrench size={20} />, label: 'Tools' },
     { k: 'profile', icon: <UserIcon size={20} />, label: 'Profil' },
   ];
   return (
