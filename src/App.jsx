@@ -2237,7 +2237,6 @@ function JeoPrompt({ q }) {
 }
 
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
-  const [openQuestion, setOpenQuestion] = useState(null); // { ri, qi } — used when hostPlays=false (local-only)
   const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
 
   const usersById = useMemo(() => {
@@ -2253,19 +2252,17 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const positionPts = jeopardy?.pointsPerPosition || [];
   const hostPlays = !!jeopardy?.hostPlays;
 
-  // When hostPlays is ON, the "active question" is data-driven: any question
-  // flagged `opened` and not yet won is shown on EVERYONE's screen via realtime.
-  const sharedActive = useMemo(() => {
-    if (!hostPlays || !currentRound) return null;
+  // The "active question" is always data-driven now (both modes are shared,
+  // turn-based): any question flagged `opened` and not yet won shows on
+  // EVERYONE's screen via realtime.
+  const activeOpen = useMemo(() => {
+    if (!currentRound) return null;
     for (let qi = 0; qi < currentRound.questions.length; qi++) {
       const q = currentRound.questions[qi];
       if (q.opened && !q.winnerUserId) return { ri: currentRoundIdx, qi };
     }
     return null;
-  }, [hostPlays, currentRound, currentRoundIdx]);
-
-  // Effective drawer source
-  const activeOpen = hostPlays ? sharedActive : openQuestion;
+  }, [currentRound, currentRoundIdx]);
 
   const categories = currentRound?.categories || jeopardy?.categories || [];
 
@@ -2283,16 +2280,6 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
       </>
     );
   }
-
-  const setQuestionWinner = (ri, qi, winnerUserId) => {
-    if (!admin || !active) return;
-    const next = rounds.map((r, i) => {
-      if (i !== ri) return r;
-      const qs = r.questions.map((q, j) => j === qi ? { ...q, winnerUserId, revealed: true, opened: false } : q);
-      return { ...r, questions: qs };
-    });
-    onPatch({ rounds: next });
-  };
 
   // Resolved helpers preserve triedUsers so penalties stick after right/close.
 
@@ -2346,7 +2333,6 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     if (!await appConfirm('Runde beenden? Punkte werden ans Stand-Leaderboard übergeben.', { title: 'Runde beenden?', destructive: false, okLabel: 'BEENDEN' })) return;
     const next = rounds.map((r, i) => i === ri ? { ...r, finishedAt: new Date().toISOString() } : r);
     onPatch({ rounds: next });
-    setOpenQuestion(null);
   };
 
   // Build a 2D grid: category × level (1..5)
@@ -2418,23 +2404,18 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                   key={`${c}-${lvl}`}
                   className={`ww-jeo-cell ${cls} ${q.opened ? 'opened' : ''}`}
                   onClick={() => {
-                    if (currentRound.finishedAt && !winner) return;
-                    if (hostPlays) {
-                      // Turn-based: only the current picker (or host as failsafe
-                      // if there's no picker queue yet) can open a tile. The
-                      // picker auto-becomes the first answerer.
-                      if (q.opened || winner || !active) return;
-                      const allowed = iAmPicker || (admin && !currentPickerId);
-                      if (!allowed) return;
-                      const dran = iAmPicker ? me.id : currentPickerId;
-                      openTileShared(currentRoundIdx, q._qi, dran);
-                    } else {
-                      setOpenQuestion({ ri: currentRoundIdx, qi: q._qi });
-                    }
+                    // Turn-based (both modes): only the current picker (or the
+                    // host as failsafe when there's no rotation yet) opens a
+                    // tile; the picker auto-becomes the answerer ("dran").
+                    if (currentRound.finishedAt || q.opened || winner || !active) return;
+                    const allowed = iAmPicker || (admin && !currentPickerId);
+                    if (!allowed) return;
+                    const dran = iAmPicker ? me.id : currentPickerId;
+                    openTileShared(currentRoundIdx, q._qi, dran);
                   }}
                   disabled={
                     (!!currentRound.finishedAt && !winner) ||
-                    (hostPlays && !winner && !q.opened && !(iAmPicker || (admin && !currentPickerId)))
+                    (!winner && !q.opened && !(iAmPicker || (admin && !currentPickerId)))
                   }
                   title={`${c} · Level ${lvl}`}
                 >
@@ -2528,150 +2509,88 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         // else to judge, so they self-judge (answer shown + Richtig/Falsch).
         const soloMode = participants.length <= 1;
 
-        // Close behaviour differs: hostPlays uses shared data, non-hostPlays uses local state.
-        const close = () => {
-          if (hostPlays && admin) closeQuestion(activeOpen.ri, activeOpen.qi);
-          if (!hostPlays) setOpenQuestion(null);
-          // non-admin players can't dismiss a shared modal; it closes when host abandons or marks
-        };
+        const close = () => { if (admin) closeQuestion(activeOpen.ri, activeOpen.qi); };
 
-        // -------- HOST-PLAYS branch (shared, turn-based) --------
-        if (hostPlays) {
+        // Answer visibility + judging depend on the mode:
+        //  hostPlays ON  → answer shown to everyone EXCEPT the dran player;
+        //                  any other participant judges Richtig/Falsch.
+        //  hostPlays OFF → quizmaster: ONLY the host sees the answer and
+        //                  judges; players (incl. dran) just answer aloud.
+        //  soloMode      → the dran player self-judges (no one else there).
+        const seesAnswer = hostPlays ? (!iAmDran || soloMode) : admin;
+        const canJudge = active && (hostPlays ? (iAmParticipant && (!iAmDran || soloMode)) : admin);
+
+        // Step 1: no one assigned yet (rare — e.g. host re-opened). Host picks.
+        if (!q.currentlyAnswering) {
           const tried = q.triedUsers || [];
           const remaining = participants.filter(p => !tried.includes(p.id));
-          // Step 1: only appears AFTER a wrong answer — picker auto-becomes the
-          // first dran on tile-tap. Filters out users who already tried.
-          if (!q.currentlyAnswering) {
-            return (
-              <ModuleSettingsDrawer
-                title={`${q.category} · ${levelPoints(q.level)} Pkt`}
-                onClose={admin ? close : (() => {})}
-              >
-                <JeoPrompt q={q} />
-                {admin ? (
-                  <>
-                    <label className="ww-label" style={{ marginTop: 12 }}>
-                      {tried.length > 0 ? 'WER VERSUCHT JETZT?' : 'WER ANTWORTET?'}
-                    </label>
-                    {remaining.length === 0 ? (
-                      <div className="ww-muted" style={{ fontSize: 13, padding: 8, textAlign: 'center' }}>
-                        Alle haben falsch geantwortet.
-                      </div>
-                    ) : (
-                      <div className="ww-flunky-assign">
-                        {remaining.map(u => (
-                          <button
-                            key={u.id}
-                            className="ww-flunky-assign-row"
-                            onClick={() => setDran(activeOpen.ri, activeOpen.qi, u.id)}
-                            style={{ border: 'none', textAlign: 'left', cursor: 'pointer' }}
-                          >
-                            <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
-                            <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
-                            <ChevronRight size={14} />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <button className="ww-mini-btn red" style={{ marginTop: 10 }}
-                      onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>
-                      Niemand wusste es · Frage zu
-                    </button>
-                  </>
-                ) : (
-                  <div className="ww-muted" style={{ fontSize: 12, margin: '8px 0' }}>
-                    Warte auf den Host — wer versucht es jetzt?
-                  </div>
-                )}
-              </ModuleSettingsDrawer>
-            );
-          }
-
-          // Step 2: somebody is dran → show Q to all, A to all except dran
           return (
-            <ModuleSettingsDrawer
-              title={`${q.category} · ${levelPoints(q.level)} Pkt`}
-              onClose={admin ? close : (() => {})}
-            >
-              <div className="ww-jeo-dran">
-                🎯 dran: <b>{dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
-              </div>
+            <ModuleSettingsDrawer title={`${q.category} · ${levelPoints(q.level)} Pkt`} onClose={admin ? close : (() => {})}>
               <JeoPrompt q={q} />
-              {iAmDran && !soloMode ? (
-                <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
-                  🤫 Du bist dran — sag deine Antwort laut.<br />Die anderen sehen die Lösung und werten.
-                </div>
+              {admin ? (
+                <>
+                  <label className="ww-label" style={{ marginTop: 12 }}>WER ANTWORTET?</label>
+                  {remaining.length === 0 ? (
+                    <div className="ww-muted" style={{ fontSize: 13, padding: 8, textAlign: 'center' }}>Alle haben falsch geantwortet.</div>
+                  ) : (
+                    <div className="ww-flunky-assign">
+                      {remaining.map(u => (
+                        <button key={u.id} className="ww-flunky-assign-row"
+                          onClick={() => setDran(activeOpen.ri, activeOpen.qi, u.id)}
+                          style={{ border: 'none', textAlign: 'left', cursor: 'pointer' }}>
+                          <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                          <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                          <ChevronRight size={14} />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button className="ww-mini-btn red" style={{ marginTop: 10 }}
+                    onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>Frage zu · keine Punkte</button>
+                </>
               ) : (
-                <div className="ww-jeo-answer">💡 {q.a}</div>
-              )}
-              {iAmParticipant && (!iAmDran || soloMode) && active && (
-                <div className="ww-grid2" style={{ marginTop: 14 }}>
-                  <button className="ww-big-cta green" style={{ marginTop: 0 }}
-                    onClick={() => markRight(activeOpen.ri, activeOpen.qi, q.currentlyAnswering)}>
-                    <Check size={20} /><span>RICHTIG</span>
-                  </button>
-                  <button className="ww-big-cta" style={{ marginTop: 0, background: 'var(--red)', boxShadow: 'none' }}
-                    onClick={() => markWrong(activeOpen.ri, activeOpen.qi)}>
-                    <X size={20} /><span>FALSCH</span>
-                  </button>
-                </div>
-              )}
-              {admin && (
-                <button className="ww-mini-btn red" style={{ marginTop: 10 }}
-                  onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>
-                  Niemand wusste es · Punkte annullieren
-                </button>
+                <div className="ww-muted" style={{ fontSize: 12, margin: '8px 0' }}>Warte auf den Host…</div>
               )}
             </ModuleSettingsDrawer>
           );
         }
 
-        // -------- Legacy non-hostPlays branch (local modal, admin picks winner) --------
-        const showAnswer = winner || q.revealed;
+        // Step 2: someone is dran. Everyone sees the question.
         return (
-          <ModuleSettingsDrawer
-            title={`${q.category} · ${levelPoints(q.level)} Pkt`}
-            onClose={close}
-          >
+          <ModuleSettingsDrawer title={`${q.category} · ${levelPoints(q.level)} Pkt`} onClose={admin ? close : (() => {})}>
+            <div className="ww-jeo-dran">
+              🎯 dran: <b>{dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
+            </div>
             <JeoPrompt q={q} />
-            {showAnswer ? (
+            {seesAnswer ? (
               <div className="ww-jeo-answer">💡 {q.a}</div>
+            ) : iAmDran ? (
+              <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
+                🤫 Du bist dran — sag deine Antwort laut.<br />
+                {hostPlays ? 'Die anderen sehen die Lösung und werten.' : 'Der Host sieht die Lösung und entscheidet.'}
+              </div>
             ) : (
-              admin && (
-                <button className="ww-mini-btn" onClick={() => {
-                  const next = rounds.map((rr, i) => i === activeOpen.ri ? {
-                    ...rr,
-                    questions: rr.questions.map((qq, j) => j === activeOpen.qi ? { ...qq, revealed: true } : qq),
-                  } : rr);
-                  onPatch({ rounds: next });
-                }}>Antwort zeigen</button>
-              )
+              <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
+                {dran ? `${dran.displayName || dran.email} ist dran.` : ''} Der Host entscheidet, ob richtig.
+              </div>
             )}
-            {admin && active && !r.finishedAt && (
-              <>
-                <label className="ww-label" style={{ marginTop: 14 }}>SIEGER</label>
-                <div className="ww-flunky-assign">
-                  {participants.map(u => (
-                    <button
-                      key={u.id}
-                      className={`ww-flunky-assign-row ${q.winnerUserId === u.id ? 'sel' : ''}`}
-                      onClick={() => { setQuestionWinner(activeOpen.ri, activeOpen.qi, u.id); setOpenQuestion(null); }}
-                      style={{ background: q.winnerUserId === u.id ? 'rgba(245,165,36,0.15)' : '', border: 'none', textAlign: 'left' }}
-                    >
-                      <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
-                      <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
-                      {q.winnerUserId === u.id && <Check size={14} />}
-                    </button>
-                  ))}
-                </div>
-                <button className="ww-mini-btn red" style={{ marginTop: 10 }}
-                  onClick={() => { setQuestionWinner(activeOpen.ri, activeOpen.qi, null); setOpenQuestion(null); }}>
-                  Niemand · Punkte annullieren
+            {canJudge && (
+              <div className="ww-grid2" style={{ marginTop: 14 }}>
+                <button className="ww-big-cta green" style={{ marginTop: 0 }}
+                  onClick={() => markRight(activeOpen.ri, activeOpen.qi, q.currentlyAnswering)}>
+                  <Check size={20} /><span>RICHTIG</span>
                 </button>
-              </>
+                <button className="ww-big-cta" style={{ marginTop: 0, background: 'var(--red)', boxShadow: 'none' }}
+                  onClick={() => markWrong(activeOpen.ri, activeOpen.qi)}>
+                  <X size={20} /><span>FALSCH</span>
+                </button>
+              </div>
             )}
-            {winner && !admin && (
-              <div className="ww-muted" style={{ marginTop: 12 }}>Gewonnen von {winner.emoji} {winner.displayName || winner.email}</div>
+            {admin && (
+              <button className="ww-mini-btn red" style={{ marginTop: 10 }}
+                onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>
+                Niemand wusste es · Punkte annullieren
+              </button>
             )}
           </ModuleSettingsDrawer>
         );
