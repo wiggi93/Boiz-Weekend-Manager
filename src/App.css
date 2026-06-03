@@ -1713,12 +1713,14 @@
   margin-bottom: 4px;
 }
 .ww-jeo-recap-row {
-  display: flex; align-items: baseline; gap: 8px;
-  padding: 3px 0; font-size: 13px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border);
 }
 .ww-jeo-recap-pts {
-  flex-shrink: 0; min-width: 38px;
-  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted);
+  flex-shrink: 0; min-width: 38px; padding-top: 1px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--amber);
 }
-.ww-jeo-recap-a { flex: 1; min-width: 0; }
-.ww-jeo-recap-w { flex-shrink: 0; font-size: 14px; }
+.ww-jeo-recap-qa { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ww-jeo-recap-q { line-height: 1.35; }
+.ww-jeo-recap-a { color: var(--muted); font-size: 12px; }
+.ww-jeo-recap-w { flex-shrink: 0; font-size: 14px; padding-top: 1px; }

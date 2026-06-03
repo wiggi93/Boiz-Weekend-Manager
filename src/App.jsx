@@ -250,26 +250,37 @@ export default function App() {
       setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]);
       return;
     }
+    // Fetch the event first. ONLY a genuinely missing event (404) kicks the
+    // user back to the lobby — a transient failure of any sub-fetch must not.
+    let ev;
     try {
-      const [ev, members, stats, fl, je, kt, sf, cms, sc, pl, pv] = await Promise.all([
-        getEvent(currentEventId),
-        listEventMembers(currentEventId),
-        loadEventStats(currentEventId),
-        getFlunky(currentEventId),
-        getJeopardy(currentEventId),
-        getKitty(currentEventId),
-        getSchnelleFragen(currentEventId),
-        listCustomModules(currentEventId),
-        getSchedule(currentEventId),
-        listPolls(currentEventId),
-        listPollVotes(currentEventId),
+      ev = await getEvent(currentEventId);
+    } catch (e) {
+      if (e?.status === 404) { setCurrentEventId(null); }
+      else { console.warn('refreshCurrentEvent: getEvent failed (kept)', e); }
+      return;
+    }
+    setCurrentEvent(ev);
+    // Sub-fetches: each tolerates its own failure, never resets the event.
+    const safe = (p, fallback) => p.catch(() => fallback);
+    try {
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv] = await Promise.all([
+        safe(listEventMembers(currentEventId), []),
+        safe(loadEventStats(currentEventId), {}),
+        safe(getFlunky(currentEventId), null),
+        safe(getJeopardy(currentEventId), null),
+        safe(getKitty(currentEventId), null),
+        safe(getSchnelleFragen(currentEventId), null),
+        safe(listCustomModules(currentEventId), []),
+        safe(getSchedule(currentEventId), null),
+        safe(listPolls(currentEventId), []),
+        safe(listPollVotes(currentEventId), []),
       ]);
-      setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats);
+      setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
       setSchedule(sc); setPolls(pl); setPollVotes(pv);
     } catch (e) {
-      console.warn('refreshCurrentEvent', e);
-      setCurrentEventId(null);
+      console.warn('refreshCurrentEvent sub-fetch', e);
     }
   }, [currentEventId]);
 
@@ -2192,12 +2203,16 @@ function JeoBoardReadonly({ round, usersById }) {
           <div className="ww-jeo-recap-cat-name">{c}</div>
           {(byCat[c] || []).map((q, i) => {
             const w = q.winnerUserId ? usersById[q.winnerUserId] : null;
+            const isFlag = q.type === 'flag' && q.flagCode;
             return (
               <div key={i} className="ww-jeo-recap-row">
                 <span className="ww-jeo-recap-pts">{levelPoints(q.level)}</span>
-                <span className="ww-jeo-recap-a">
-                  {q.type === 'flag' && q.flagCode ? `${flagEmoji(q.flagCode)} ${q.a}` : q.a}
-                </span>
+                <div className="ww-jeo-recap-qa">
+                  <div className="ww-jeo-recap-q">
+                    {isFlag ? <>{flagEmoji(q.flagCode)} Welches Land?</> : q.q}
+                  </div>
+                  <div className="ww-jeo-recap-a">→ {q.a}</div>
+                </div>
                 <span className="ww-jeo-recap-w">{w ? (w.emoji || '🍺') : '—'}</span>
               </div>
             );
