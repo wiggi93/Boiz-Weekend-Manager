@@ -144,10 +144,25 @@ NUR JSON. Kein Vortext, kein Codeblock, keine Erklärung. Beginnt mit { endet mi
 
 Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 1..5, Kategorie 2 Level 1..5, ..., Kategorie ${cats.length} Level 1..5.`;
 
-  // Build per-auth request configuration. We try OAuth (Pro subscription)
-  // first; if it 429s we automatically retry with the API key when one is
-  // available, so a Pro rate-limit doesn't block the round.
-  const buildOAuthReq = () => ({
+  // Model selection. Anthropic retires old snapshots, so a hard-coded id
+  // eventually starts returning 400 invalid_request_error ("model: ..."),
+  // which is exactly the failure we hit with the old "claude-opus-4-7" id.
+  // To stay robust: try a list of candidates newest→older and skip any that
+  // the API rejects as an invalid/unknown model. The maintainer can pin an
+  // exact id via the JEOPARDY_MODEL env var (highest priority) without a
+  // code change.
+  const envModel = $os.getenv("JEOPARDY_MODEL");
+  const modelCandidates = [
+    envModel,
+    "claude-opus-4-1",
+    "claude-sonnet-4-5",
+    "claude-3-5-sonnet-latest",
+  ].filter(m => typeof m === "string" && m.trim().length > 0);
+
+  // Build per-auth request configuration for a given model. We try OAuth (Pro
+  // subscription) first; if it 429s we automatically retry with the API key
+  // when one is available, so a Pro rate-limit doesn't block the round.
+  const buildOAuthReq = (model) => ({
     headers: {
       // Pro/Max OAuth tokens only allow Messages API access when the
       // request identifies itself as Claude Code (Anthropic gates third-
@@ -161,34 +176,29 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
     },
     body: {
       // NOTE: Pro/Max OAuth tokens do NOT permit extended thinking. With
-      // `thinking` set, Anthropic returns 429 rate_limit_error (no quota
-      // headers, no clear "feature gated" message). So OAuth requests run
-      // without it; the API-key path below still uses thinking for higher
-      // quality output.
-      model: "claude-opus-4-7",
+      // `thinking` set, Anthropic returns 429 rate_limit_error. So OAuth
+      // requests run without it; the API-key path below uses thinking for
+      // higher quality output.
+      model: model,
       max_tokens: 12000,
-      // NOTE: temperature is deprecated on opus-4-7 and returns
-      // invalid_request_error — do not set it here.
       system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration. Verify every single fact before including it; replace any question whose facts you cannot fully verify.",
       messages: [{ role: "user", content: prompt }],
     },
   });
 
-  const buildApiKeyReq = () => ({
+  const buildApiKeyReq = (model) => ({
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
     body: {
-      // Opus 4.7 with extended thinking — better factual recall and
-      // difficulty-level calibration than Sonnet 4.5 in our testing.
-      // Thinking budget bumped so the model has room for the
-      // self-validation pass demanded by the prompt.
-      model: "claude-opus-4-7",
+      // Extended thinking — better factual recall and difficulty-level
+      // calibration. Budget gives the model room for the self-validation
+      // pass demanded by the prompt.
+      model: model,
       max_tokens: 24000,
       thinking: { type: "enabled", budget_tokens: 10000 },
-      // temperature deprecated on opus-4-7 — omit.
       messages: [{ role: "user", content: prompt }],
     },
   });
@@ -207,33 +217,50 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
     }
   };
 
-  const attempts = [];
-  if (oauthToken) attempts.push({ name: "oauth", req: buildOAuthReq() });
-  if (apiKey)     attempts.push({ name: "apikey", req: buildApiKeyReq() });
+  // True when a 400 body looks like an invalid/unknown-model rejection — the
+  // signal to drop this model id and try the next candidate.
+  const isModelError = (status, body) => {
+    if (status !== 400) return false;
+    const b = (body || "").toLowerCase();
+    return b.indexOf("model") !== -1 &&
+      (b.indexOf("invalid") !== -1 || b.indexOf("not found") !== -1 ||
+       b.indexOf("not_found") !== -1 || b.indexOf("unknown") !== -1 ||
+       b.indexOf("does not exist") !== -1 || b.indexOf("deprecated") !== -1);
+  };
 
-  let res, bodyStr, usedAuth;
-  for (const a of attempts) {
-    res = send(a.req);
-    if (res._err) {
-      // network-level failure — try next auth if any
-      continue;
+  let res, bodyStr, usedAuth, usedModel;
+  outer:
+  for (const model of modelCandidates) {
+    const attempts = [];
+    if (oauthToken) attempts.push({ name: "oauth", req: buildOAuthReq(model) });
+    if (apiKey)     attempts.push({ name: "apikey", req: buildApiKeyReq(model) });
+
+    for (const a of attempts) {
+      res = send(a.req);
+      if (res._err) continue; // network-level failure — try next auth
+      try { bodyStr = typeof res.body === "string" ? res.body : toString(res.body); }
+      catch (_) { bodyStr = ""; }
+      usedAuth = a.name;
+      usedModel = model;
+      // Auto-fall-through on 429 if we still have another auth to try
+      if (res.statusCode === 429 && a !== attempts[attempts.length - 1]) {
+        console.log("[jeopardy] " + a.name + " 429 — falling back to next auth");
+        continue;
+      }
+      // Invalid model → abandon this model, try the next candidate
+      if (isModelError(res.statusCode, bodyStr)) {
+        console.log("[jeopardy] model '" + model + "' rejected (400) — trying next candidate");
+        break;
+      }
+      break outer; // got a usable (200 or non-model-error) response
     }
-    try { bodyStr = typeof res.body === "string" ? res.body : toString(res.body); }
-    catch (_) { bodyStr = ""; }
-    usedAuth = a.name;
-    // Auto-fall-through on 429 if we still have another auth to try
-    if (res.statusCode === 429 && a !== attempts[attempts.length - 1]) {
-      console.log("[jeopardy] " + a.name + " 429 — falling back to next auth");
-      continue;
-    }
-    break;
   }
 
   if (!res || res._err) {
     return e.internalServerError("anthropic http error: " + (res?._err || "no auth configured"), null);
   }
   if (res.statusCode !== 200) {
-    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "): " + bodyStr.slice(0, 400), null);
+    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "/" + usedModel + "): " + bodyStr.slice(0, 400), null);
   }
 
   let text;

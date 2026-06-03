@@ -3795,27 +3795,35 @@ function CustomModuleSettings({ mod, members, onPatch, onDelete }) {
 // ============================================================
 
 function ModuleSettingsDrawer({ title, onClose, children }) {
-  // iOS Safari scrolls the whole (position:fixed) page upward when an input
-  // inside a fixed element gets focused and the keyboard opens — the content
-  // ends up pushed up under the status bar until you manually scroll back.
-  // Pin the window/visualViewport offset back to the top whenever that
-  // happens while the drawer is open. The drawer body still scrolls fine on
-  // its own (it's the scroll container for the form).
+  // The drawer is `position: fixed; bottom: 0; height: 85vh` (layout viewport).
+  // When the iOS keyboard opens it shrinks the *visual* viewport but NOT the
+  // layout viewport, so the drawer's bottom (and the focused input) end up
+  // behind the keyboard. iOS reacts by translating the whole fixed page up —
+  // the "content schiebt sich nach oben" the user sees. Fix: track the visual
+  // viewport, compute the keyboard height, and lift + shrink the drawer to sit
+  // exactly above the keyboard. Then nothing is hidden, so iOS has no reason
+  // to scroll the page. Also defensively pin any residual page offset to 0.
+  const [kb, setKb] = useState(0);
   useEffect(() => {
-    const pin = () => {
-      if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0);
+    const vv = window.visualViewport;
+    const apply = () => {
+      if (vv) {
+        const h = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+        setKb(h);
+      }
+      // Counter the iOS page-translate so the app stays anchored.
+      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
       const se = document.scrollingElement;
       if (se && se.scrollTop !== 0) se.scrollTop = 0;
     };
-    window.addEventListener('scroll', pin, { passive: true });
-    window.addEventListener('resize', pin);
-    window.visualViewport?.addEventListener('resize', pin);
-    window.visualViewport?.addEventListener('scroll', pin);
+    apply();
+    vv?.addEventListener('resize', apply);
+    vv?.addEventListener('scroll', apply);
+    window.addEventListener('scroll', apply, { passive: true });
     return () => {
-      window.removeEventListener('scroll', pin);
-      window.removeEventListener('resize', pin);
-      window.visualViewport?.removeEventListener('resize', pin);
-      window.visualViewport?.removeEventListener('scroll', pin);
+      vv?.removeEventListener('resize', apply);
+      vv?.removeEventListener('scroll', apply);
+      window.removeEventListener('scroll', apply);
     };
   }, []);
 
@@ -3827,7 +3835,12 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
   return createPortal(
     <>
       <div className="ww-drawer-backdrop" onClick={onClose} />
-      <div className="ww-drawer" role="dialog" aria-modal="true">
+      <div
+        className="ww-drawer"
+        role="dialog"
+        aria-modal="true"
+        style={kb > 0 ? { bottom: kb, maxHeight: `calc(100vh - ${kb}px - max(60px, env(safe-area-inset-top, 0px) + 16px))` } : undefined}
+      >
         <div className="ww-drawer-head">
           <h3>{title}</h3>
           <button className="ww-icon-btn" onClick={onClose} aria-label="Schließen"><X size={16} /></button>
@@ -4549,6 +4562,9 @@ function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent
         {open === 'kitty' && (
           <KittyView me={me} kitty={kitty} members={members} admin={admin} onPatch={onKittyPatch} />
         )}
+        {open === 'chessclock' && (
+          <ChessClockView />
+        )}
       </div>
     );
   }
@@ -4568,6 +4584,130 @@ function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+function fmtClock(ms) {
+  if (ms <= 0) return '0:00';
+  const totalSec = ms / 1000;
+  if (totalSec < 10) return totalSec.toFixed(1);
+  const m = Math.floor(totalSec / 60);
+  const s = Math.floor(totalSec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+// Classic two-player chess clock. Pure local timer — nothing is persisted.
+// Two stacked tap-zones (top one rotated 180° for the player sitting
+// opposite). You tap your own side when you're done → the opponent's clock
+// starts counting down.
+function ChessClockView() {
+  const [phase, setPhase] = useState('setup'); // 'setup' | 'play'
+  const [minutes, setMinutes] = useState(5);
+  const [increment, setIncrement] = useState(0); // Fischer increment (sec/move)
+  const [topMs, setTopMs] = useState(0);
+  const [bottomMs, setBottomMs] = useState(0);
+  const [active, setActive] = useState(null); // 'top' | 'bottom' | null (not started)
+  const [paused, setPaused] = useState(false);
+  const lastRef = useRef(0);
+
+  const flagged = topMs <= 0 ? 'top' : bottomMs <= 0 ? 'bottom' : null;
+  const running = phase === 'play' && !!active && !paused && !flagged;
+
+  useEffect(() => {
+    if (!running) return;
+    lastRef.current = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      const dt = now - lastRef.current;
+      lastRef.current = now;
+      if (active === 'top') setTopMs(v => Math.max(0, v - dt));
+      else if (active === 'bottom') setBottomMs(v => Math.max(0, v - dt));
+    }, 100);
+    return () => clearInterval(id);
+  }, [running, active]);
+
+  const start = () => {
+    const ms = Math.max(1, Number(minutes) || 1) * 60000;
+    setTopMs(ms); setBottomMs(ms);
+    setActive(null); setPaused(false);
+    setPhase('play');
+  };
+
+  const tap = (side) => {
+    if (phase !== 'play' || flagged || paused) return;
+    if (active && active !== side) return; // not your turn
+    const inc = (Number(increment) || 0) * 1000;
+    if (inc > 0) {
+      if (side === 'top') setTopMs(v => v + inc);
+      else setBottomMs(v => v + inc);
+    }
+    setActive(side === 'top' ? 'bottom' : 'top');
+  };
+
+  const reset = () => { setPhase('setup'); setActive(null); setPaused(false); };
+  const restart = () => {
+    const ms = Math.max(1, Number(minutes) || 1) * 60000;
+    setTopMs(ms); setBottomMs(ms); setActive(null); setPaused(false);
+  };
+
+  if (phase === 'setup') {
+    const presets = [1, 3, 5, 10, 15, 30];
+    return (
+      <div className="ww-chess-setup">
+        <p className="ww-muted" style={{ fontSize: 13, marginTop: -4 }}>
+          Zwei Spieler, gegenüber. Wer fertig ist, tippt auf seine Seite — die Uhr des Gegners läuft.
+        </p>
+        <label className="ww-label">MINUTEN PRO SPIELER</label>
+        <input className="ww-input" type="number" inputMode="numeric" min={1} max={180}
+          value={minutes} onChange={e => setMinutes(e.target.value)} />
+        <div className="ww-chess-presets">
+          {presets.map(p => (
+            <button key={p} type="button"
+              className={`ww-mini-btn ${Number(minutes) === p ? 'active' : ''}`}
+              onClick={() => setMinutes(p)}>{p} min</button>
+          ))}
+        </div>
+        <label className="ww-label" style={{ marginTop: 14 }}>INKREMENT (SEK PRO ZUG, OPTIONAL)</label>
+        <input className="ww-input" type="number" inputMode="numeric" min={0} max={60}
+          value={increment} onChange={e => setIncrement(e.target.value)} />
+        <button className="ww-big-cta green" onClick={start} style={{ marginTop: 18 }}>
+          <Play size={20} /><span>SCHACHUHR STARTEN</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ww-chess">
+      <button
+        className={`ww-chess-zone top ${active === 'top' ? 'active' : ''} ${flagged === 'top' ? 'flag' : ''}`}
+        onClick={() => tap('top')}
+        disabled={!!flagged}
+      >
+        <span className="ww-chess-time">{fmtClock(topMs)}</span>
+        {flagged === 'top' && <span className="ww-chess-lost">ZEIT ABGELAUFEN</span>}
+        {!flagged && active === 'top' && <span className="ww-chess-hint">du bist dran — tippen wenn fertig</span>}
+      </button>
+
+      <div className="ww-chess-controls">
+        <button className="ww-mini-btn" onClick={() => setPaused(p => !p)} disabled={!active || !!flagged}>
+          {paused ? <Play size={13} /> : <Hourglass size={13} />} {paused ? 'Weiter' : 'Pause'}
+        </button>
+        <button className="ww-mini-btn" onClick={restart}>↺ Neu</button>
+        <button className="ww-mini-btn red" onClick={reset}><X size={12} /> Ende</button>
+      </div>
+
+      <button
+        className={`ww-chess-zone bottom ${active === 'bottom' ? 'active' : ''} ${flagged === 'bottom' ? 'flag' : ''}`}
+        onClick={() => tap('bottom')}
+        disabled={!!flagged}
+      >
+        <span className="ww-chess-time">{fmtClock(bottomMs)}</span>
+        {flagged === 'bottom' && <span className="ww-chess-lost">ZEIT ABGELAUFEN</span>}
+        {!flagged && active === 'bottom' && <span className="ww-chess-hint">du bist dran — tippen wenn fertig</span>}
+        {!flagged && active === null && <span className="ww-chess-hint">tippe nach deinem Zug</span>}
+      </button>
     </div>
   );
 }

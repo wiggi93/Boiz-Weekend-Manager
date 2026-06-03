@@ -14,6 +14,7 @@ export const MODULES = [
   { id: 'polls',           name: 'Umfragen',         icon: '📊',  available: true,  kind: 'tool' },
   { id: 'team_split',      name: 'Team Aufteilung',  icon: '🎲',  available: true,  kind: 'tool' },
   { id: 'kitty',           name: 'Kassensturz',      icon: '💰',  available: true,  kind: 'tool' },
+  { id: 'chessclock',      name: 'Schachuhr',        icon: '⏱️', available: true,  kind: 'tool' },
 ];
 
 export const moduleById = (id) => MODULES.find(m => m.id === id);

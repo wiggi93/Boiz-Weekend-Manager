@@ -1792,3 +1792,47 @@
   0%, 100% { transform: rotate(0deg); }
   50% { transform: rotate(-90deg); }
 }
+
+/* ============ Chess clock (Schachuhr) tool ============ */
+.ww-chess-setup { display: flex; flex-direction: column; }
+.ww-chess-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+.ww-chess { display: flex; flex-direction: column; gap: 10px; }
+.ww-chess-zone {
+  flex: 1 1 0; min-height: 32vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; border-radius: 14px; cursor: pointer;
+  background: var(--card); border: 2px solid var(--border); color: var(--text);
+  transition: background .12s, border-color .12s, transform .06s;
+  -webkit-user-select: none; user-select: none; padding: 16px;
+}
+.ww-chess-zone.top { transform: rotate(180deg); }
+.ww-chess-zone:active { transform: scale(0.99); }
+.ww-chess-zone.top:active { transform: rotate(180deg) scale(0.99); }
+.ww-chess-zone.active {
+  background: rgba(34, 197, 94, 0.14); border-color: var(--green);
+  box-shadow: inset 0 0 40px rgba(34, 197, 94, 0.15);
+}
+.ww-chess-zone.flag {
+  background: rgba(239, 68, 68, 0.16); border-color: var(--red);
+  cursor: default;
+}
+.ww-chess-zone:disabled { cursor: default; }
+.ww-chess-time {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 72px; line-height: 1; letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.ww-chess-zone.active .ww-chess-time { color: var(--green); }
+.ww-chess-zone.flag .ww-chess-time { color: var(--red); }
+.ww-chess-hint {
+  font-size: 11px; letter-spacing: 0.08em; color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace; text-transform: uppercase;
+}
+.ww-chess-lost {
+  font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+  letter-spacing: 0.12em; color: var(--red);
+}
+.ww-chess-controls {
+  display: flex; justify-content: center; gap: 8px; flex: 0 0 auto;
+}
