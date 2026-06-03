@@ -865,9 +865,6 @@ export default function App() {
             onPollDelete={onPollDelete} onVote={onVote}
           />
         )}
-        {view === 'profile' && (
-          <ProfileView me={me} onSave={onSaveProfile} onLogout={onLogout} />
-        )}
       </main>
       <BottomNav view={view} setView={setView} />
       {settingsOpen && (
@@ -1104,19 +1101,30 @@ function Lobby({
   return (
     <div className="ww-auth">
       <div className="ww-auth-fixed">
-        <div className="ww-auth-header">
-          <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
-          <h1 className="ww-display ww-title-huge">{onProfile ? 'Profil' : 'Events'}</h1>
-          {!onProfile && <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>}
+        <div className="ww-lobby-top">
+          <div className="ww-auth-header" style={{ flex: 1 }}>
+            <div className="ww-tag">SERVUS, {(me.displayName || me.email).toUpperCase()}</div>
+            <h1 className="ww-display ww-title-huge">{onProfile ? 'Profil' : 'Events'}</h1>
+            {!onProfile && <p className="ww-muted">Tritt einem Event bei{canCreate ? ' oder erstelle ein neues' : ''}.</p>}
+          </div>
+          <button
+            className={`ww-avatar-btn ${onProfile ? 'active' : ''}`}
+            onClick={() => setView(onProfile ? 'list' : 'profile')}
+            aria-label="Profil"
+            title="Profil & Einstellungen"
+          >
+            {me.emoji || '🍺'}
+          </button>
         </div>
-        <div className="ww-auth-tabs">
-          <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
-          <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
-          {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
-          {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
-          {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
-          <button className={`ww-auth-tab ${view === 'profile' ? 'active' : ''}`} onClick={() => setView('profile')}>PROFIL</button>
-        </div>
+        {!onProfile && (
+          <div className="ww-auth-tabs">
+            <button className={`ww-auth-tab ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')}>MEINE</button>
+            <button className={`ww-auth-tab ${view === 'join' ? 'active' : ''}`} onClick={() => setView('join')}>JOIN</button>
+            {canCreate && <button className={`ww-auth-tab ${view === 'create' ? 'active' : ''}`} onClick={() => setView('create')}>NEU</button>}
+            {siteAdmin && <button className={`ww-auth-tab ${view === 'admin' ? 'active' : ''}`} onClick={() => setView('admin')}>ALLE</button>}
+            {siteAdmin && <button className={`ww-auth-tab ${view === 'users' ? 'active' : ''}`} onClick={() => setView('users')}>USER</button>}
+          </div>
+        )}
       </div>
       <div className="ww-auth-scroll">
         {!onProfile && (
@@ -2913,22 +2921,30 @@ function seededShuffle(arr, seed) {
   return a;
 }
 
+// Pick N distinct random question indices from the full bank.
+function pickFive(n = 5) {
+  const ids = SCHNELLE_FRAGEN.map((_, i) => i);
+  const shuffled = seededShuffle(ids, (Date.now() ^ 0x9e3779b9) & 0xffffffff);
+  return shuffled.slice(0, Math.min(n, shuffled.length));
+}
+
 function SchnelleFragenView({ state, onPatch }) {
+  // A round is exactly 5 questions. qIds holds those 5 bank indices.
   const qIds = Array.isArray(state?.qIds) && state.qIds.length ? state.qIds : null;
   const currentIdx = Math.max(0, Number(state?.currentIdx) || 0);
 
   const ensureDeck = () => {
     if (qIds) return qIds;
-    const ids = SCHNELLE_FRAGEN.map((_, i) => i);
-    const seeded = seededShuffle(ids, Date.now() & 0xffffffff);
-    onPatch({ qIds: seeded, currentIdx: 0 });
-    return seeded;
+    const five = pickFive();
+    onPatch({ qIds: five, currentIdx: 0 });
+    return five;
   };
 
-  const deck = qIds || SCHNELLE_FRAGEN.map((_, i) => i);
+  const deck = qIds || pickFive();
   const safeIdx = Math.min(currentIdx, deck.length - 1);
   const currentQ = SCHNELLE_FRAGEN[deck[safeIdx]] || SCHNELLE_FRAGEN[0];
   const total = deck.length;
+  const isLast = safeIdx >= total - 1;
   // Backwards-compat: bank entries used to be plain strings; now objects.
   const q = typeof currentQ === 'string' ? { q: currentQ } : (currentQ || {});
 
@@ -2939,20 +2955,18 @@ function SchnelleFragenView({ state, onPatch }) {
   };
   const goNext = () => {
     const d = ensureDeck();
-    const next = (safeIdx + 1) % d.length;
-    onPatch({ qIds: d, currentIdx: next });
+    if (safeIdx >= d.length - 1) return; // stop at the 5th — use "neu" to restart
+    onPatch({ qIds: d, currentIdx: safeIdx + 1 });
   };
   const reshuffle = async () => {
-    if (!await appConfirm('Neuen Fragen-Stapel mischen?', { title: 'Neu mischen?', destructive: false, okLabel: 'MISCHEN' })) return;
-    const ids = SCHNELLE_FRAGEN.map((_, i) => i);
-    const seeded = seededShuffle(ids, (Date.now() ^ 0x9e3779b9) & 0xffffffff);
-    onPatch({ qIds: seeded, currentIdx: 0 });
+    if (!await appConfirm('5 neue Fragen ziehen?', { title: 'Neue Runde?', destructive: false, okLabel: 'NEUE 5' })) return;
+    onPatch({ qIds: pickFive(), currentIdx: 0 });
   };
 
   return (
     <div className="ww-schnelle">
       <p className="ww-muted" style={{ fontSize: 12, marginTop: 0 }}>
-        Inspired by „5 Schnelle Fragen" (Gemischtes Hack). Diskutiert die Frage — alle sehen das Gleiche. Jeder kann weiterklicken.
+        5 Fragen pro Runde. Diskutiert sie — alle sehen das Gleiche. Danach „Neue 5" für die nächste Runde.
       </p>
 
       <div className="ww-schnelle-card">
@@ -2984,15 +2998,24 @@ function SchnelleFragenView({ state, onPatch }) {
         <button className="ww-schnelle-nav-btn" onClick={goPrev} disabled={safeIdx === 0} aria-label="Vorherige Frage">
           <ArrowLeft size={20} />
         </button>
-        <button className="ww-schnelle-nav-btn primary" onClick={goNext} aria-label="Nächste Frage">
-          <span>NÄCHSTE</span>
-          <ChevronRight size={20} />
-        </button>
+        {isLast ? (
+          <button className="ww-schnelle-nav-btn primary" onClick={reshuffle} aria-label="Neue 5 Fragen">
+            <RotateCcw size={18} />
+            <span>NEUE 5</span>
+          </button>
+        ) : (
+          <button className="ww-schnelle-nav-btn primary" onClick={goNext} aria-label="Nächste Frage">
+            <span>NÄCHSTE</span>
+            <ChevronRight size={20} />
+          </button>
+        )}
       </div>
 
-      <button className="ww-text-btn" onClick={reshuffle} style={{ marginTop: 16 }}>
-        <RotateCcw size={14} /> Stapel neu mischen
-      </button>
+      {!isLast && (
+        <button className="ww-text-btn" onClick={reshuffle} style={{ marginTop: 16 }}>
+          <RotateCcw size={14} /> Neue 5 ziehen
+        </button>
+      )}
     </div>
   );
 }
@@ -4189,7 +4212,6 @@ function BottomNav({ view, setView }) {
     { k: 'home', icon: <Home size={20} />, label: 'Home' },
     { k: 'crew', icon: <Users size={20} />, label: 'Crew' },
     { k: 'tools', icon: <Wrench size={20} />, label: 'Tools' },
-    { k: 'profile', icon: <UserIcon size={20} />, label: 'Profil' },
   ];
   return (
     <nav className="ww-bottomnav">
@@ -4213,9 +4235,11 @@ function ConfirmDialog({ msg, title, destructive, okLabel, resolve }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return createPortal(
-    <>
-      <div className="ww-confirm-overlay" onClick={no} />
-      <div className="ww-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ww-confirm-title">
+    <div className="ww-confirm-overlay" onClick={no}>
+      <div
+        className="ww-confirm" role="alertdialog" aria-modal="true" aria-labelledby="ww-confirm-title"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div id="ww-confirm-title" className="ww-confirm-title">{title}</div>
         <div className="ww-confirm-msg">{msg}</div>
         <div className="ww-confirm-btns">
@@ -4225,7 +4249,7 @@ function ConfirmDialog({ msg, title, destructive, okLabel, resolve }) {
           </button>
         </div>
       </div>
-    </>,
+    </div>,
     document.body
   );
 }

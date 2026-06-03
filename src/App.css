@@ -444,7 +444,7 @@
   position: absolute; bottom: 0; left: 0; right: 0;
   background: rgba(10,10,11,0.92); backdrop-filter: blur(12px);
   border-top: 1px solid var(--border);
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(3, 1fr);
   padding: 8px 8px max(8px, env(safe-area-inset-bottom));
   z-index: 20;
 }
@@ -1654,3 +1654,20 @@
   font-size: 18px; letter-spacing: 0.04em; color: var(--muted);
   text-align: center;
 }
+
+/* ============ Lobby: avatar in header (profile/logout entry) ============ */
+.ww-lobby-top {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.ww-avatar-btn {
+  flex-shrink: 0;
+  width: 46px; height: 46px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 24px; line-height: 1;
+  background: var(--card); border: 1px solid var(--border);
+  cursor: pointer; margin-top: 4px;
+  transition: border-color 0.12s, transform 0.08s;
+  -webkit-tap-highlight-color: transparent;
+}
+.ww-avatar-btn:active { transform: scale(0.94); }
+.ww-avatar-btn.active { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(245,165,36,0.3); }
