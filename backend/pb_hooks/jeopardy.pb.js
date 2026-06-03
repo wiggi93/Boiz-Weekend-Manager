@@ -228,6 +228,10 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
        b.indexOf("does not exist") !== -1 || b.indexOf("deprecated") !== -1);
   };
 
+  // Diagnostics: record every attempt so a persistent failure tells us which
+  // (auth × model) combos were tried and exactly how each one failed. Shown
+  // in the final error so we never have to guess again.
+  const tried = [];
   let res, bodyStr, usedAuth, usedModel;
   outer:
   for (const model of modelCandidates) {
@@ -235,40 +239,50 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
     if (oauthToken) attempts.push({ name: "oauth", req: buildOAuthReq(model) });
     if (apiKey)     attempts.push({ name: "apikey", req: buildApiKeyReq(model) });
 
+    let modelRejected = false;
     for (const a of attempts) {
       res = send(a.req);
-      if (res._err) continue; // network-level failure — try next auth
+      if (res._err) {
+        tried.push(a.name + "/" + model + ":net");
+        continue; // network-level failure — try next auth
+      }
       try { bodyStr = typeof res.body === "string" ? res.body : toString(res.body); }
       catch (_) { bodyStr = ""; }
       usedAuth = a.name;
       usedModel = model;
-      // Auto-fall-through on 429 if we still have another auth to try
-      if (res.statusCode === 429 && a !== attempts[attempts.length - 1]) {
-        console.log("[jeopardy] " + a.name + " 429 — falling back to next auth");
-        continue;
-      }
-      // Invalid model → abandon this model, try the next candidate
+      tried.push(a.name + "/" + model + ":" + res.statusCode);
+
+      if (res.statusCode === 200) break outer; // success
+      // Invalid model → no point trying the other auth with the SAME model;
+      // jump straight to the next candidate model.
       if (isModelError(res.statusCode, bodyStr)) {
         console.log("[jeopardy] model '" + model + "' rejected (400) — trying next candidate");
+        modelRejected = true;
         break;
       }
-      break outer; // got a usable (200 or non-model-error) response
+      // Any other non-200 (429/401/403/5xx): fall through to the next auth
+      // for THIS model if one remains; otherwise this becomes the final error.
+      console.log("[jeopardy] " + a.name + "/" + model + " -> " + res.statusCode + " — trying next auth/model");
     }
+    if (modelRejected) continue; // next model
+    // All auths for this model failed with non-model errors — try next model
+    // too (e.g. a transient 5xx might not recur on the next snapshot).
   }
 
   if (!res || res._err) {
     return e.internalServerError("anthropic http error: " + (res?._err || "no auth configured"), null);
   }
+  const triedStr = " [tried: " + tried.join(", ") + "]";
   if (isModelError(res.statusCode, bodyStr)) {
     // Every Opus candidate was rejected — the built-in ids are out of date.
     // The maintainer must pin the current snapshot via the env var.
     return e.internalServerError(
       "kein gültiges Opus-Modell akzeptiert (zuletzt '" + usedModel + "'). " +
       "Setze die Env-Variable JEOPARDY_MODEL auf die aktuelle Opus-Snapshot-ID. " +
-      "Anthropic: " + bodyStr.slice(0, 300), null);
+      "Anthropic: " + bodyStr.slice(0, 250) + triedStr, null);
   }
   if (res.statusCode !== 200) {
-    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "/" + usedModel + "): " + bodyStr.slice(0, 400), null);
+    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "/" + usedModel + "): " + bodyStr.slice(0, 300) + triedStr, null);
   }
 
   let text;
