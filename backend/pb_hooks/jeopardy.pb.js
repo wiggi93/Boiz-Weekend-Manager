@@ -167,9 +167,8 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
       // quality output.
       model: "claude-opus-4-7",
       max_tokens: 12000,
-      // Lower temperature on the no-thinking path → more deterministic,
-      // factually conservative output (fewer hallucinated dates/lyrics).
-      temperature: 0.5,
+      // NOTE: temperature is deprecated on opus-4-7 and returns
+      // invalid_request_error — do not set it here.
       system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration. Verify every single fact before including it; replace any question whose facts you cannot fully verify.",
       messages: [{ role: "user", content: prompt }],
     },
@@ -189,7 +188,7 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
       model: "claude-opus-4-7",
       max_tokens: 24000,
       thinking: { type: "enabled", budget_tokens: 10000 },
-      temperature: 1,
+      // temperature deprecated on opus-4-7 — omit.
       messages: [{ role: "user", content: prompt }],
     },
   });
