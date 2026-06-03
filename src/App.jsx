@@ -3011,7 +3011,6 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
             placeholder="z.B. Pizza, Getränke, Eintritt…"
             value={desc}
             onChange={e => setDesc(e.target.value)}
-            autoFocus
           />
           <label className="ww-label">BETRAG (€)</label>
           <input
@@ -3796,6 +3795,30 @@ function CustomModuleSettings({ mod, members, onPatch, onDelete }) {
 // ============================================================
 
 function ModuleSettingsDrawer({ title, onClose, children }) {
+  // iOS Safari scrolls the whole (position:fixed) page upward when an input
+  // inside a fixed element gets focused and the keyboard opens — the content
+  // ends up pushed up under the status bar until you manually scroll back.
+  // Pin the window/visualViewport offset back to the top whenever that
+  // happens while the drawer is open. The drawer body still scrolls fine on
+  // its own (it's the scroll container for the form).
+  useEffect(() => {
+    const pin = () => {
+      if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0);
+      const se = document.scrollingElement;
+      if (se && se.scrollTop !== 0) se.scrollTop = 0;
+    };
+    window.addEventListener('scroll', pin, { passive: true });
+    window.addEventListener('resize', pin);
+    window.visualViewport?.addEventListener('resize', pin);
+    window.visualViewport?.addEventListener('scroll', pin);
+    return () => {
+      window.removeEventListener('scroll', pin);
+      window.removeEventListener('resize', pin);
+      window.visualViewport?.removeEventListener('resize', pin);
+      window.visualViewport?.removeEventListener('scroll', pin);
+    };
+  }, []);
+
   // Portal to <body> so the drawer escapes any ancestor positioning
   // context (.ww-app's flex/overflow:hidden was clipping fixed children
   // on iOS Safari). With the portal it's a direct child of <body>,
@@ -4615,7 +4638,6 @@ function AddCustomModuleDrawer({ onSubmit, onClose }) {
         value={name}
         onChange={e => setName(e.target.value)}
         maxLength={30}
-        autoFocus
         onKeyDown={e => e.key === 'Enter' && submit()}
       />
       <label className="ww-label" style={{ marginTop: 18 }}>MODUS</label>
