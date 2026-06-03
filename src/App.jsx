@@ -25,6 +25,7 @@ import {
 } from './api.js';
 import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
 import { SCHNELLE_FRAGEN } from './schnelleFragenBank.js';
+import { flagEmoji, isFlagsCategory, pickFlagRound } from './flagsBank.js';
 import './App.css';
 
 // ---- Confirm singleton (no prop drilling) ----
@@ -626,7 +627,33 @@ export default function App() {
 
   const onJeopardyGenerate = async (categories) => {
     try {
-      const board = await generateJeopardyBoard(currentEventId, categories);
+      // "Flaggen" is built offline from the local flag pool; only the other
+      // categories are sent to the LLM. Avoids a network call (and cost) for
+      // flags and guarantees correct answers.
+      const flagCats = categories.filter(isFlagsCategory);
+      const aiCats = categories.filter(c => !isFlagsCategory(c));
+
+      let questions = [];
+      if (aiCats.length > 0) {
+        const board = await generateJeopardyBoard(currentEventId, aiCats);
+        questions = (board.questions || []).map(q => ({
+          category: q.category, level: Number(q.level) || 1,
+          q: String(q.q || ''), a: String(q.a || ''),
+          winnerUserId: null, revealed: false,
+        }));
+      }
+
+      for (const cat of flagCats) {
+        for (const f of pickFlagRound()) {
+          questions.push({
+            category: cat, level: f.level,
+            type: 'flag', flagCode: f.code,
+            q: 'Welches Land zeigt diese Flagge?', a: f.name,
+            winnerUserId: null, revealed: false,
+          });
+        }
+      }
+
       // Random pick order for this round so players take turns tapping tiles
       const parts = [...(jeopardyRef.current?.participants || [])];
       const shuffled = parts.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
@@ -637,11 +664,7 @@ export default function App() {
         categories,
         pickerOrder: shuffled,
         pickerIdx: 0,
-        questions: (board.questions || []).map(q => ({
-          category: q.category, level: Number(q.level) || 1,
-          q: String(q.q || ''), a: String(q.a || ''),
-          winnerUserId: null, revealed: false,
-        })),
+        questions,
       };
       const rounds = [...(jeopardyRef.current?.rounds || []), round];
       await onJeopardyPatch({ rounds, categories });
@@ -2047,6 +2070,19 @@ function NewGameComposer({ members, usersById, onCancel, onStart }) {
 // Jeopardy module
 // ============================================================
 
+// Renders a Jeopardy prompt: a big flag for flag-type questions, else text.
+function JeoPrompt({ q }) {
+  if (q?.type === 'flag' && q.flagCode) {
+    return (
+      <div className="ww-jeo-flag-wrap">
+        <div className="ww-jeo-flag">{flagEmoji(q.flagCode)}</div>
+        <div className="ww-jeo-flag-prompt">{q.q}</div>
+      </div>
+    );
+  }
+  return <div className="ww-jeo-question">{q.q}</div>;
+}
+
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
   const [openQuestion, setOpenQuestion] = useState(null); // { ri, qi } — used when hostPlays=false (local-only)
 
@@ -2334,7 +2370,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 title={`${q.category} · ${levelPoints(q.level)} Pkt`}
                 onClose={admin ? close : (() => {})}
               >
-                <div className="ww-jeo-question">{q.q}</div>
+                <JeoPrompt q={q} />
                 {admin ? (
                   <>
                     <label className="ww-label" style={{ marginTop: 12 }}>
@@ -2383,7 +2419,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               <div className="ww-jeo-dran">
                 🎯 dran: <b>{dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
               </div>
-              <div className="ww-jeo-question">{q.q}</div>
+              <JeoPrompt q={q} />
               {iAmDran ? (
                 <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
                   🤫 Du bist dran — sag deine Antwort laut.<br />Die anderen sehen die Lösung und werten.
@@ -2420,7 +2456,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             title={`${q.category} · ${levelPoints(q.level)} Pkt`}
             onClose={close}
           >
-            <div className="ww-jeo-question">{q.q}</div>
+            <JeoPrompt q={q} />
             {showAnswer ? (
               <div className="ww-jeo-answer">💡 {q.a}</div>
             ) : (
@@ -2536,6 +2572,11 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
           maxLength={40}
         />
       ))}
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        💡 Tipp: Kategorie <b>„Flaggen"</b> eintippen → zeigt offline Flaggen-Bilder
+        zum Erraten (kein KI-Generieren, immer korrekt). Eine Flagge pro Schwierigkeit,
+        zufällig aus dem Pool.
+      </p>
 
       <label className="ww-label">PUNKTE PRO PLATZ (komma-getrennt, 1. bis n.)</label>
       <input className="ww-input" value={pts} onChange={e => setPts(e.target.value)} onBlur={savePts} placeholder="5,3,2,1" />

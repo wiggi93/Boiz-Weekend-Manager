@@ -1638,3 +1638,19 @@
   width: 9px; height: 9px; border-radius: 50%; background: #1db954;
   flex-shrink: 0;
 }
+
+/* ============ Jeopardy — Flaggen-Kategorie ============ */
+.ww-jeo-flag-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 8px 0 4px;
+}
+.ww-jeo-flag {
+  font-size: 96px; line-height: 1;
+  /* Slightly larger, centered flag glyph */
+  text-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.ww-jeo-flag-prompt {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 0.04em; color: var(--muted);
+  text-align: center;
+}
