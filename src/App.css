@@ -1702,3 +1702,23 @@
 .ww-sched-addr:active { opacity: 0.7; }
 .ww-sched-note { font-size: 12px; color: var(--muted); font-style: italic; line-height: 1.4; }
 .ww-sched-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+
+/* ============ Jeopardy — Vergangene-Runden Recap ============ */
+.ww-jeo-recap {
+  padding: 8px 4px 4px; display: flex; flex-direction: column; gap: 10px;
+}
+.ww-jeo-recap-cat-name {
+  font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+  letter-spacing: 0.15em; text-transform: uppercase; color: var(--amber);
+  margin-bottom: 4px;
+}
+.ww-jeo-recap-row {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 3px 0; font-size: 13px; border-bottom: 1px solid var(--border);
+}
+.ww-jeo-recap-pts {
+  flex-shrink: 0; min-width: 38px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted);
+}
+.ww-jeo-recap-a { flex: 1; min-width: 0; }
+.ww-jeo-recap-w { flex-shrink: 0; font-size: 14px; }

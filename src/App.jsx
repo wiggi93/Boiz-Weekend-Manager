@@ -1478,7 +1478,10 @@ function HomeView({
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   // Games are opt-in per event (modules array); tools are ALWAYS available.
-  const gameTabs = GAME_MODULES.filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks');
+  const gameTabs = GAME_MODULES
+    .filter(m => modules.includes(m.id) && m.available && m.id !== 'drinks')
+    // Programm/Tagesplan always comes first (right after the Stand tab).
+    .sort((a, b) => (a.id === 'schedule' ? -1 : 0) - (b.id === 'schedule' ? -1 : 0));
   const customTabs = (customModules || []).map(cm => ({ id: `cm-${cm.id}`, name: cm.name || 'Modul', icon: cm.icon || '🎯', cm }));
   const drinksOn = modules.includes('drinks');
   const activeCustom = moduleTab?.startsWith?.('cm-')
@@ -2171,6 +2174,40 @@ function NewGameComposer({ members, usersById, onCancel, onStart }) {
 // Jeopardy module
 // ============================================================
 
+// Read-only recap of a finished round: every question with its answer
+// and who won it. Shown when a past round is expanded in the history.
+function JeoBoardReadonly({ round, usersById }) {
+  const cats = round?.categories || [];
+  const byCat = {};
+  for (const c of cats) byCat[c] = [];
+  for (const q of (round?.questions || [])) {
+    if (!byCat[q.category]) byCat[q.category] = [];
+    byCat[q.category].push(q);
+  }
+  for (const c of cats) byCat[c].sort((a, b) => (a.level || 0) - (b.level || 0));
+  return (
+    <div className="ww-jeo-recap">
+      {cats.map(c => (
+        <div key={c} className="ww-jeo-recap-cat">
+          <div className="ww-jeo-recap-cat-name">{c}</div>
+          {(byCat[c] || []).map((q, i) => {
+            const w = q.winnerUserId ? usersById[q.winnerUserId] : null;
+            return (
+              <div key={i} className="ww-jeo-recap-row">
+                <span className="ww-jeo-recap-pts">{levelPoints(q.level)}</span>
+                <span className="ww-jeo-recap-a">
+                  {q.type === 'flag' && q.flagCode ? `${flagEmoji(q.flagCode)} ${q.a}` : q.a}
+                </span>
+                <span className="ww-jeo-recap-w">{w ? (w.emoji || '🍺') : '—'}</span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Renders a Jeopardy prompt: a big flag for flag-type questions, else text.
 function JeoPrompt({ q }) {
   if (q?.type === 'flag' && q.flagCode) {
@@ -2186,7 +2223,7 @@ function JeoPrompt({ q }) {
 
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
   const [openQuestion, setOpenQuestion] = useState(null); // { ri, qi } — used when hostPlays=false (local-only)
-  const [showFinishedBoard, setShowFinishedBoard] = useState(false); // expand a finished round's board
+  const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
 
   const usersById = useMemo(() => {
     const m = {};
@@ -2309,7 +2346,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
 
   return (
     <>
-      <ModuleHeader title="🎤 Jeopardy" admin={admin} onOpenSettings={onOpenSettings} />
+      {/* No gear: new rounds (incl. category + generate) run via the
+          "Runde starten" button which opens the same settings drawer. */}
+      <ModuleHeader title="🎤 Jeopardy" admin={false} onOpenSettings={onOpenSettings} />
 
       <div className="ww-stats-row">
         <StatPill label="Runde" value={`${rounds.length || 0}`} />
@@ -2317,34 +2356,26 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         <StatPill label="Event-Pkt" value={totalEventPts} accent />
       </div>
 
-      {!currentRound && (
-        <div className="ww-empty">Keine Runde gestartet — Host öffnet Settings und tappt "Neue Runde".</div>
-      )}
-
-      {/* When the latest round is finished, offer a clean "new round" CTA
-          and collapse the old board by default. */}
-      {currentRound && currentRound.finishedAt && admin && (
-        <button className="ww-big-cta green" style={{ marginTop: 6 }} onClick={onOpenSettings}>
-          <Plus size={20} /><span>NEUE RUNDE STARTEN</span>
-        </button>
-      )}
-
-      {currentRound && categories.length > 0 && (
-        <section className="ww-section">
-          <button
-            className="ww-section-head"
-            onClick={() => currentRound.finishedAt && setShowFinishedBoard(v => !v)}
-            style={{ background: 'none', border: 'none', width: '100%', cursor: currentRound.finishedAt ? 'pointer' : 'default', color: 'inherit' }}
-          >
-            <Trophy size={16} />
-            <h3 style={{ flex: 1, textAlign: 'left' }}>RUNDE {currentRoundIdx + 1}{currentRound.finishedAt ? ' · BEENDET' : ''}</h3>
-            {currentRound.finishedAt && (
-              <ChevronRight size={16} style={{ transform: showFinishedBoard ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
-            )}
+      {/* Start button whenever there's no active (unfinished) round. */}
+      {(!currentRound || currentRound.finishedAt) && (
+        admin ? (
+          <button className="ww-big-cta green" style={{ marginTop: 6 }} onClick={onOpenSettings}>
+            <Plus size={20} /><span>{rounds.length ? 'NEUE RUNDE STARTEN' : 'RUNDE STARTEN'}</span>
           </button>
+        ) : (
+          <div className="ww-empty">Warte auf den Host — eine neue Runde startet gleich.</div>
+        )
+      )}
 
-          {currentRound.finishedAt && !showFinishedBoard ? null : (
-          <>
+      {/* Live board only while the current round is running. Finished rounds
+          live in "Vergangene Runden" (expandable). */}
+      {currentRound && !currentRound.finishedAt && categories.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head">
+            <Trophy size={16} />
+            <h3>RUNDE {currentRoundIdx + 1}</h3>
+          </div>
+
           {hostPlays && !currentRound.finishedAt && currentPicker && (
             <div className={`ww-jeo-picker ${iAmPicker ? 'mine' : ''}`}>
               🎯 An der Reihe: <b>{currentPicker.emoji || '🍺'} {currentPicker.displayName || currentPicker.email}</b>
@@ -2431,8 +2462,6 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               <Flag size={20} /><span>RUNDE BEENDEN & PUNKTE VERTEILEN</span>
             </button>
           )}
-          </>
-          )}
         </section>
       )}
 
@@ -2446,16 +2475,25 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               const rk = Object.entries(sc).sort((a, b) => b[1] - a[1]);
               const myPlace = rk.findIndex(([uid]) => uid === me.id);
               const myEventPts = myPlace >= 0 && myPlace < positionPts.length ? (positionPts[myPlace] || 0) : 0;
+              const isExp = expandedRound === r.id;
               return (
-                <div key={r.id} className="ww-board-row">
-                  <div className="ww-board-rank">R{ri + 1}</div>
-                  <div className="ww-board-name">
-                    {rk.slice(0, 3).map(([uid, p]) => {
-                      const u = usersById[uid]; if (!u) return null;
-                      return <span key={uid} style={{ marginRight: 8 }}>{u.emoji || '🍺'} {p}</span>;
-                    })}
-                  </div>
-                  <div className="ww-board-pts">+{myEventPts}<span>pkt</span></div>
+                <div key={r.id}>
+                  <button
+                    className="ww-board-row"
+                    style={{ width: '100%', background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}
+                    onClick={() => setExpandedRound(isExp ? null : r.id)}
+                  >
+                    <div className="ww-board-rank">R{ri + 1}</div>
+                    <div className="ww-board-name">
+                      {rk.slice(0, 3).map(([uid, p]) => {
+                        const u = usersById[uid]; if (!u) return null;
+                        return <span key={uid} style={{ marginRight: 8 }}>{u.emoji || '🍺'} {p}</span>;
+                      })}
+                    </div>
+                    <div className="ww-board-pts">+{myEventPts}<span>pkt</span></div>
+                    <ChevronRight size={15} style={{ marginLeft: 6, transform: isExp ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                  </button>
+                  {isExp && <JeoBoardReadonly round={r} usersById={usersById} />}
                 </div>
               );
             })}
