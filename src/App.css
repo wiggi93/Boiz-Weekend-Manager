@@ -1671,3 +1671,34 @@
 }
 .ww-avatar-btn:active { transform: scale(0.94); }
 .ww-avatar-btn.active { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(245,165,36,0.3); }
+
+/* ============ Programm / Zeitplan ============ */
+.ww-sched-day { margin-top: 16px; }
+.ww-sched-day-head {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; letter-spacing: 0.06em; color: var(--amber);
+  text-transform: capitalize;
+  margin-bottom: 8px; padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.ww-sched-list { display: flex; flex-direction: column; gap: 8px; }
+.ww-sched-item {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px;
+}
+.ww-sched-time {
+  flex-shrink: 0; min-width: 48px;
+  font-family: 'IBM Plex Mono', monospace; font-size: 15px;
+  color: var(--amber); font-weight: 600; padding-top: 1px;
+}
+.ww-sched-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ww-sched-title { font-size: 15px; font-weight: 600; }
+.ww-sched-loc { font-size: 13px; color: var(--muted); }
+.ww-sched-addr {
+  font-size: 13px; color: #4ea0ff; text-decoration: none;
+  display: inline-block; word-break: break-word;
+}
+.ww-sched-addr:active { opacity: 0.7; }
+.ww-sched-note { font-size: 12px; color: var(--muted); font-style: italic; line-height: 1.4; }
+.ww-sched-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }

@@ -281,6 +281,25 @@ export async function deleteCustomModule(id) {
   return pb.collection('custom_modules').delete(id);
 }
 
+// ---- Schedule / Programm ----
+export async function getSchedule(eventId) {
+  try {
+    return await pb.collection('schedule').getFirstListItem(`event="${eventId}"`);
+  } catch {
+    return null;
+  }
+}
+
+export async function updateSchedule(id, patch) {
+  return pb.collection('schedule').update(id, patch);
+}
+
+export async function ensureSchedule(eventId) {
+  const existing = await getSchedule(eventId);
+  if (existing) return existing;
+  return pb.collection('schedule').create({ event: eventId, entries: [] });
+}
+
 // ---- Polls ----
 export async function listPolls(eventId) {
   return pb.collection('polls').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
@@ -332,6 +351,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('custom_modules').subscribe('*', wrap('custom_modules', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('kitty').subscribe('*', wrap('kitty', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('schnelle_fragen').subscribe('*', wrap('schnelle_fragen', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('schedule').subscribe('*', wrap('schedule', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
     // poll_votes records only carry the poll id, not the event — forward all
     // and let the consumer refetch (votes are low-frequency).

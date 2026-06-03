@@ -20,6 +20,7 @@ import {
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
   getKitty, updateKitty, ensureKitty,
   getSchnelleFragen, updateSchnelleFragen, ensureSchnelleFragen,
+  getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
@@ -168,6 +169,9 @@ export default function App() {
   const schnelleFragenRef = useRef(null);
   useEffect(() => { schnelleFragenRef.current = schnelleFragen; }, [schnelleFragen]);
   const [customModules, setCustomModules] = useState([]);
+  const [schedule, setSchedule] = useState(null);
+  const scheduleRef = useRef(null);
+  useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
   const [polls, setPolls] = useState([]);
   const [pollVotes, setPollVotes] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
@@ -243,11 +247,11 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setPolls([]); setPollVotes([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]);
       return;
     }
     try {
-      const [ev, members, stats, fl, je, kt, sf, cms, pl, pv] = await Promise.all([
+      const [ev, members, stats, fl, je, kt, sf, cms, sc, pl, pv] = await Promise.all([
         getEvent(currentEventId),
         listEventMembers(currentEventId),
         loadEventStats(currentEventId),
@@ -256,12 +260,13 @@ export default function App() {
         getKitty(currentEventId),
         getSchnelleFragen(currentEventId),
         listCustomModules(currentEventId),
+        getSchedule(currentEventId),
         listPolls(currentEventId),
         listPollVotes(currentEventId),
       ]);
       setCurrentEvent(ev); setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
-      setPolls(pl); setPollVotes(pv);
+      setSchedule(sc); setPolls(pl); setPollVotes(pv);
     } catch (e) {
       console.warn('refreshCurrentEvent', e);
       setCurrentEventId(null);
@@ -370,6 +375,15 @@ export default function App() {
       setSchnelleFragen(prev => {
         const next = prev ? { ...prev, ...rec } : rec;
         schnelleFragenRef.current = next;
+        return next;
+      });
+      return;
+    }
+
+    if (collection === 'schedule') {
+      setSchedule(prev => {
+        const next = prev ? { ...prev, ...rec } : rec;
+        scheduleRef.current = next;
         return next;
       });
       return;
@@ -700,6 +714,19 @@ export default function App() {
     catch (e) { console.warn('schnelle update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
+  // ---- Schedule / Programm ----
+  const onSchedulePatch = async (patch) => {
+    let cur = scheduleRef.current;
+    if (!cur) {
+      cur = await ensureSchedule(currentEventId);
+      scheduleRef.current = cur; setSchedule(cur);
+    }
+    const next = { ...cur, ...patch };
+    scheduleRef.current = next; setSchedule(next);
+    try { await updateSchedule(cur.id, patch); }
+    catch (e) { console.warn('schedule update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+
   // ---- Custom modules ----
   const onCustomCreate = async (data) => {
     try {
@@ -808,6 +835,7 @@ export default function App() {
           <WaitingScreen
             event={currentEvent} onLeave={onLeaveEvent}
             me={me} polls={polls} pollVotes={pollVotes} onVote={onVote}
+            schedule={schedule} scheduleOn={(currentEvent.modules || []).includes('schedule')}
           />
         </main>
         {settingsOpen && (
@@ -839,6 +867,7 @@ export default function App() {
             jeopardy={jeopardy} onJeopardyPatch={onJeopardyPatch} onJeopardyGenerate={onJeopardyGenerate}
             kitty={kitty} onKittyPatch={onKittyPatch}
             schnelleFragen={schnelleFragen} onSchnellePatch={onSchnellePatch}
+            schedule={schedule} onSchedulePatch={onSchedulePatch}
             customModules={customModules}
             onCustomCreate={onCustomCreate}
             onCustomPatch={onCustomPatch}
@@ -1362,7 +1391,7 @@ function TopBar({ me, admin, eventName, active, settingsActive, onToggleSettings
   );
 }
 
-function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote }) {
+function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote, schedule, scheduleOn }) {
   const [notifPerm, setNotifPerm] = useState(() =>
     'Notification' in window ? Notification.permission : 'unsupported'
   );
@@ -1394,6 +1423,12 @@ function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote 
           <Bell size={13} /><span>Benachrichtigung aktiv — du kriegst Bescheid wenn es losgeht.</span>
         </div>
       )}
+      {scheduleOn && Array.isArray(schedule?.entries) && schedule.entries.length > 0 && (
+        <div className="ww-waiting-polls">
+          <div className="ww-section-head"><span>🗓️</span><h3>PROGRAMM</h3></div>
+          <ScheduleView schedule={schedule} admin={false} onPatch={() => {}} eventDate={event.date} />
+        </div>
+      )}
       {openPolls.length > 0 && onVote && (
         <div className="ww-waiting-polls">
           <div className="ww-section-head"><span>📊</span><h3>UMFRAGEN</h3></div>
@@ -1422,6 +1457,7 @@ function HomeView({
   jeopardy, onJeopardyPatch, onJeopardyGenerate,
   kitty, onKittyPatch,
   schnelleFragen, onSchnellePatch,
+  schedule, onSchedulePatch,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
@@ -1506,6 +1542,9 @@ function HomeView({
       )}
       {moduleTab === 'schnelle_fragen' && (
         <SchnelleFragenView state={schnelleFragen} onPatch={onSchnellePatch} />
+      )}
+      {moduleTab === 'schedule' && (
+        <ScheduleView schedule={schedule} admin={admin} onPatch={onSchedulePatch} eventDate={event.date} />
       )}
       {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
           view (ToolsView), not in the games tab strip. */}
@@ -3017,6 +3056,146 @@ function SchnelleFragenView({ state, onPatch }) {
         </button>
       )}
     </div>
+  );
+}
+
+// ============================================================
+// Programm / Zeitplan
+// ============================================================
+
+// Cross-platform maps link: opens the maps app on mobile, web map on desktop.
+function mapsUrl(address) {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+function formatScheduleDay(day) {
+  if (!day) return 'Ohne Datum';
+  try {
+    const d = new Date(day + 'T00:00:00');
+    if (isNaN(d.getTime())) return day;
+    return d.toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long' });
+  } catch { return day; }
+}
+
+function ScheduleView({ schedule, admin, onPatch, eventDate }) {
+  const [editing, setEditing] = useState(null); // entry being edited, or {} for new
+  const entries = useMemo(() => {
+    const list = Array.isArray(schedule?.entries) ? [...schedule.entries] : [];
+    list.sort((a, b) => (a.day || '').localeCompare(b.day || '') || (a.time || '').localeCompare(b.time || ''));
+    return list;
+  }, [schedule]);
+
+  // group by day
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const e of entries) {
+      const k = e.day || '';
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(e);
+    }
+    return [...m.entries()];
+  }, [entries]);
+
+  const saveEntry = (entry) => {
+    const list = Array.isArray(schedule?.entries) ? [...schedule.entries] : [];
+    if (entry.id) {
+      const idx = list.findIndex(x => x.id === entry.id);
+      if (idx >= 0) list[idx] = entry; else list.push(entry);
+    } else {
+      list.push({ ...entry, id: String(Date.now()) });
+    }
+    onPatch({ entries: list });
+    setEditing(null);
+  };
+  const deleteEntry = async (id) => {
+    if (!await appConfirm('Programmpunkt löschen?')) return;
+    const list = (schedule?.entries || []).filter(x => x.id !== id);
+    onPatch({ entries: list });
+  };
+
+  return (
+    <div className="ww-sched">
+      {admin && (
+        <button className="ww-big-cta" style={{ marginTop: 0 }} onClick={() => setEditing({ day: eventDate || '' })}>
+          <Plus size={18} /><span>PROGRAMMPUNKT</span>
+        </button>
+      )}
+
+      {entries.length === 0 && (
+        <div className="ww-empty" style={{ marginTop: 14 }}>
+          {admin ? 'Noch nichts geplant — füge den ersten Programmpunkt hinzu.' : 'Der Host hat noch kein Programm eingetragen.'}
+        </div>
+      )}
+
+      {groups.map(([day, items]) => (
+        <div key={day || 'none'} className="ww-sched-day">
+          <div className="ww-sched-day-head">{formatScheduleDay(day)}</div>
+          <div className="ww-sched-list">
+            {items.map(e => (
+              <div key={e.id} className="ww-sched-item">
+                <div className="ww-sched-time">{e.time || '—'}</div>
+                <div className="ww-sched-body">
+                  <div className="ww-sched-title">{e.title}</div>
+                  {e.location && <div className="ww-sched-loc">📍 {e.location}</div>}
+                  {e.address && (
+                    <a className="ww-sched-addr" href={mapsUrl(e.address)} target="_blank" rel="noopener noreferrer">
+                      🗺️ {e.address}
+                    </a>
+                  )}
+                  {e.note && <div className="ww-sched-note">{e.note}</div>}
+                </div>
+                {admin && (
+                  <div className="ww-sched-actions">
+                    <button className="ww-mini-btn" onClick={() => setEditing(e)}>✎</button>
+                    <button className="ww-mini-btn red" onClick={() => deleteEntry(e.id)}><X size={12} /></button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {editing && admin && (
+        <ScheduleEntryDrawer entry={editing} onSave={saveEntry} onClose={() => setEditing(null)} />
+      )}
+    </div>
+  );
+}
+
+function ScheduleEntryDrawer({ entry, onSave, onClose }) {
+  const [day, setDay] = useState(entry.day || '');
+  const [time, setTime] = useState(entry.time || '');
+  const [title, setTitle] = useState(entry.title || '');
+  const [location, setLocation] = useState(entry.location || '');
+  const [address, setAddress] = useState(entry.address || '');
+  const [note, setNote] = useState(entry.note || '');
+  const valid = title.trim().length >= 2;
+  return (
+    <ModuleSettingsDrawer title={entry.id ? '🗓️ Programmpunkt bearbeiten' : '🗓️ Neuer Programmpunkt'} onClose={onClose}>
+      <label className="ww-label">TITEL</label>
+      <input className="ww-input" value={title} onChange={e => setTitle(e.target.value)} maxLength={80} placeholder="z.B. Abendessen im Restaurant" />
+      <div className="ww-grid2">
+        <div>
+          <label className="ww-label">TAG</label>
+          <input className="ww-input" type="date" value={day} onChange={e => setDay(e.target.value)} />
+        </div>
+        <div>
+          <label className="ww-label">UHRZEIT</label>
+          <input className="ww-input" type="time" value={time} onChange={e => setTime(e.target.value)} />
+        </div>
+      </div>
+      <label className="ww-label">ORT (NAME)</label>
+      <input className="ww-input" value={location} onChange={e => setLocation(e.target.value)} maxLength={80} placeholder="z.B. Trattoria Bella" />
+      <label className="ww-label">ADRESSE (FÜR KARTEN-APP)</label>
+      <input className="ww-input" value={address} onChange={e => setAddress(e.target.value)} maxLength={160} placeholder="z.B. Hauptstr. 1, 79100 Freiburg" />
+      <label className="ww-label">NOTIZ (OPTIONAL)</label>
+      <textarea className="ww-textarea" rows={2} value={note} onChange={e => setNote(e.target.value)} placeholder="z.B. Tisch auf Disco reserviert, Dresscode leger" />
+      <button className={`ww-big-cta ${valid ? '' : 'disabled'}`} disabled={!valid}
+        onClick={() => onSave({ ...entry, day, time, title: title.trim(), location: location.trim(), address: address.trim(), note: note.trim() })}>
+        <Check size={18} /><span>SPEICHERN</span>
+      </button>
+    </ModuleSettingsDrawer>
   );
 }
 

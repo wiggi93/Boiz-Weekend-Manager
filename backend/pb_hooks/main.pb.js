@@ -102,6 +102,15 @@ onRecordAfterCreateSuccess((e) => {
   } catch (err) {
     console.log("schnelle_fragen seed:", err);
   }
+  try {
+    const scCol = e.app.findCollectionByNameOrId("schedule");
+    const sc = new Record(scCol);
+    sc.set("event", e.record.id);
+    sc.set("entries", []);
+    e.app.save(sc);
+  } catch (err) {
+    console.log("schedule seed:", err);
+  }
   e.next();
 }, "events");
 
