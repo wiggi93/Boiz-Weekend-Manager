@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
-  login, register, logout,
+  login, register, logout, requestPasswordReset, broadcastEmail,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
@@ -974,14 +974,51 @@ function LoginForm({ onSubmit }) {
   const [password, setPassword] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resetMode, setResetMode] = useState(false);
+  const [resetMsg, setResetMsg] = useState('');
   const valid = email.includes('@') && password.length >= 8;
   const submit = async () => {
     if (!valid) return;
     setBusy(true); setErr('');
     try { await onSubmit(email.trim(), password); }
-    catch (e) { setErr('Login fehlgeschlagen — falsche Daten?'); }
+    catch (e) {
+      // PocketBase returns the verification-gate message in the response
+      const msg = e?.response?.message || e?.message || '';
+      if (/bestätige|verif/i.test(msg)) {
+        setErr('E-Mail noch nicht bestätigt — schau in deine Inbox (auch Spam).');
+      } else {
+        setErr('Login fehlgeschlagen — falsche Daten?');
+      }
+    }
     finally { setBusy(false); }
   };
+  const doReset = async () => {
+    if (!email.includes('@')) { setResetMsg('Gib zuerst deine E-Mail ein.'); return; }
+    setBusy(true); setResetMsg('');
+    try {
+      await requestPasswordReset(email.trim());
+      setResetMsg('✓ E-Mail verschickt — folge dem Link zum Zurücksetzen.');
+    } catch (e) {
+      setResetMsg('Konnte keine E-Mail verschicken (E-Mail evtl. unbekannt).');
+    } finally { setBusy(false); }
+  };
+
+  if (resetMode) {
+    return (
+      <div>
+        <label className="ww-label"><Mail size={12} /> E-MAIL</label>
+        <input className="ww-input" type="email" autoComplete="email" placeholder="deine@email.de" value={email} onChange={e => setEmail(e.target.value)} />
+        {resetMsg && <div className={resetMsg.startsWith('✓') ? 'ww-notif-banner-ok' : 'ww-err'} style={{ marginTop: 8 }}>{resetMsg}</div>}
+        <button className={`ww-big-cta ${email.includes('@') && !busy ? '' : 'disabled'}`} onClick={doReset} disabled={!email.includes('@') || busy}>
+          {busy ? <span className="ww-spinner" /> : <Mail size={18} />}<span>RESET-LINK SENDEN</span>
+        </button>
+        <button className="ww-text-btn" onClick={() => { setResetMode(false); setResetMsg(''); }}>
+          <ArrowLeft size={14} /> zurück zum Login
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div>
       <label className="ww-label"><Mail size={12} /> E-MAIL</label>
@@ -991,6 +1028,9 @@ function LoginForm({ onSubmit }) {
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         {busy ? <span className="ww-spinner" /> : <Check size={20} />}<span>{busy ? 'EINLOGGEN…' : 'EINLOGGEN'}</span>
+      </button>
+      <button className="ww-text-btn" onClick={() => { setResetMode(true); setErr(''); }} style={{ color: 'var(--muted)' }}>
+        Passwort vergessen?
       </button>
     </div>
   );
@@ -3848,6 +3888,8 @@ function EventSettingsView({ event, me, members, customModules, onCustomCreate, 
         </div>
       </div>
 
+      <BroadcastSection eventId={event.id} memberCount={members.length} />
+
       <div className="ww-danger">
         <div className="ww-danger-head"><AlertTriangle size={14} /> DANGER ZONE</div>
         <button className="ww-danger-btn" onClick={onResetCounters}>
@@ -3857,6 +3899,50 @@ function EventSettingsView({ event, me, members, customModules, onCustomCreate, 
           <X size={14} /> Event endgültig löschen
         </button>
       </div>
+    </div>
+  );
+}
+
+// Host → all members email broadcast.
+function BroadcastSection({ eventId, memberCount }) {
+  const [open, setOpen] = useState(false);
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState('');
+  const valid = subject.trim().length >= 2 && body.trim().length >= 2;
+
+  const send = async () => {
+    if (!valid) return;
+    if (!await appConfirm(`Nachricht an alle ${memberCount} Teilnehmer per E-Mail senden?`, { title: 'Broadcast senden?', destructive: false, okLabel: 'SENDEN' })) return;
+    setBusy(true); setMsg('');
+    try {
+      const r = await broadcastEmail(eventId, subject.trim(), body.trim());
+      setMsg(`✓ ${r.sent} verschickt${r.failed ? `, ${r.failed} fehlgeschlagen` : ''}.`);
+      setSubject(''); setBody('');
+    } catch (e) {
+      setMsg(`Fehler: ${String(e?.message || e).slice(0, 120)}`);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="ww-section">
+      <button className="ww-section-head" onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', width: '100%', cursor: 'pointer', color: 'inherit' }}>
+        <Mail size={16} /><h3 style={{ flex: 1, textAlign: 'left' }}>NACHRICHT AN ALLE (E-MAIL)</h3>
+        <ChevronRight size={16} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          <label className="ww-label">BETREFF</label>
+          <input className="ww-input" value={subject} onChange={e => setSubject(e.target.value)} maxLength={120} placeholder="z.B. Wichtige Info zum Wochenende" />
+          <label className="ww-label">NACHRICHT</label>
+          <textarea className="ww-textarea" rows={4} value={body} onChange={e => setBody(e.target.value)} placeholder="Deine Nachricht an alle Teilnehmer…" />
+          {msg && <div className={msg.startsWith('✓') ? 'ww-notif-banner-ok' : 'ww-err'} style={{ marginTop: 8 }}>{msg}</div>}
+          <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={send} disabled={!valid || busy}>
+            {busy ? <span className="ww-spinner" /> : <Mail size={18} />}<span>{busy ? 'SENDE…' : `AN ${memberCount} SENDEN`}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

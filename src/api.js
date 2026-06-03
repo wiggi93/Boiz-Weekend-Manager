@@ -29,10 +29,34 @@ export async function register({ email, password, displayName, emoji, foodWishes
     drinkWishes: drinkWishes || '',
     allergies: allergies || '',
   });
+  // Fire off a verification email (no-op if SMTP isn't configured server-side).
+  try { await pb.collection('users').requestVerification(email); } catch (_) {}
   return login(email, password);
 }
 
 export function logout() { pb.authStore.clear(); }
+
+export async function requestPasswordReset(email) {
+  return pb.collection('users').requestPasswordReset(email);
+}
+
+export async function requestVerification(email) {
+  return pb.collection('users').requestVerification(email);
+}
+
+// Host broadcast: email every member of an event.
+export async function broadcastEmail(eventId, subject, body) {
+  const res = await fetch(`${PB_URL}/api/broadcast`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ eventId, subject, body }),
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`broadcast failed (${res.status}): ${t.slice(0, 200)}`);
+  }
+  return res.json();
+}
 
 // ---- Events ----
 export async function listAllEvents() {
