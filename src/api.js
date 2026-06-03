@@ -71,9 +71,9 @@ export async function getEventByCode(code) {
   return pb.collection('events').getFirstListItem(`code="${code.trim().toUpperCase()}"`);
 }
 
-export async function createEvent({ name, date, modules = ['drinks'] }) {
+export async function createEvent({ name, date = '', endDate = '', modules = ['drinks'] }) {
   return pb.collection('events').create({
-    name, date,
+    name, date, endDate,
     modules,
     active: false,
     beerLabel: 'Bier', drinkLabel: 'Mische',
@@ -163,6 +163,10 @@ export async function loadAllUsers() {
 
 export async function setUserRole(userId, role) {
   return pb.collection('users').update(userId, { role });
+}
+
+export async function setUserApproved(userId, approved) {
+  return pb.collection('users').update(userId, { approved });
 }
 
 export async function deleteUser(userId) {

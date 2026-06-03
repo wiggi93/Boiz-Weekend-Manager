@@ -144,10 +144,25 @@ NUR JSON. Kein Vortext, kein Codeblock, keine Erklärung. Beginnt mit { endet mi
 
 Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 1..5, Kategorie 2 Level 1..5, ..., Kategorie ${cats.length} Level 1..5.`;
 
-  // Build per-auth request configuration. We try OAuth (Pro subscription)
-  // first; if it 429s we automatically retry with the API key when one is
-  // available, so a Pro rate-limit doesn't block the round.
-  const buildOAuthReq = () => ({
+  // Model selection — Opus only. Question quality with Sonnet was poor, so we
+  // never fall back to a cheaper/older family. Anthropic retires old snapshots
+  // (that's why the previous hard-coded "claude-opus-4-7" started 400ing), so
+  // we try the current Opus generations newest→older and skip any the API
+  // rejects as invalid/unknown. The maintainer can pin an exact id via the
+  // JEOPARDY_MODEL env var (highest priority) — set it to the latest Opus
+  // snapshot on the HTPC without a code change.
+  const envModel = $os.getenv("JEOPARDY_MODEL");
+  const modelCandidates = [
+    envModel,
+    "claude-opus-4-8",
+    "claude-opus-4-5",
+    "claude-opus-4-1",
+  ].filter(m => typeof m === "string" && m.trim().length > 0);
+
+  // Build per-auth request configuration for a given model. We try OAuth (Pro
+  // subscription) first; if it 429s we automatically retry with the API key
+  // when one is available, so a Pro rate-limit doesn't block the round.
+  const buildOAuthReq = (model) => ({
     headers: {
       // Pro/Max OAuth tokens only allow Messages API access when the
       // request identifies itself as Claude Code (Anthropic gates third-
@@ -161,34 +176,29 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
     },
     body: {
       // NOTE: Pro/Max OAuth tokens do NOT permit extended thinking. With
-      // `thinking` set, Anthropic returns 429 rate_limit_error (no quota
-      // headers, no clear "feature gated" message). So OAuth requests run
-      // without it; the API-key path below still uses thinking for higher
-      // quality output.
-      model: "claude-opus-4-7",
+      // `thinking` set, Anthropic returns 429 rate_limit_error. So OAuth
+      // requests run without it; the API-key path below uses thinking for
+      // higher quality output.
+      model: model,
       max_tokens: 12000,
-      // NOTE: temperature is deprecated on opus-4-7 and returns
-      // invalid_request_error — do not set it here.
       system: "You are Claude Code, Anthropic's official CLI for Claude. The user is asking you to generate a German Jeopardy board. Be meticulous about factual correctness and difficulty calibration. Verify every single fact before including it; replace any question whose facts you cannot fully verify.",
       messages: [{ role: "user", content: prompt }],
     },
   });
 
-  const buildApiKeyReq = () => ({
+  const buildApiKeyReq = (model) => ({
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
     body: {
-      // Opus 4.7 with extended thinking — better factual recall and
-      // difficulty-level calibration than Sonnet 4.5 in our testing.
-      // Thinking budget bumped so the model has room for the
-      // self-validation pass demanded by the prompt.
-      model: "claude-opus-4-7",
+      // Extended thinking — better factual recall and difficulty-level
+      // calibration. Budget gives the model room for the self-validation
+      // pass demanded by the prompt.
+      model: model,
       max_tokens: 24000,
       thinking: { type: "enabled", budget_tokens: 10000 },
-      // temperature deprecated on opus-4-7 — omit.
       messages: [{ role: "user", content: prompt }],
     },
   });
@@ -207,33 +217,72 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
     }
   };
 
-  const attempts = [];
-  if (oauthToken) attempts.push({ name: "oauth", req: buildOAuthReq() });
-  if (apiKey)     attempts.push({ name: "apikey", req: buildApiKeyReq() });
+  // True when a 400 body looks like an invalid/unknown-model rejection — the
+  // signal to drop this model id and try the next candidate.
+  const isModelError = (status, body) => {
+    if (status !== 400) return false;
+    const b = (body || "").toLowerCase();
+    return b.indexOf("model") !== -1 &&
+      (b.indexOf("invalid") !== -1 || b.indexOf("not found") !== -1 ||
+       b.indexOf("not_found") !== -1 || b.indexOf("unknown") !== -1 ||
+       b.indexOf("does not exist") !== -1 || b.indexOf("deprecated") !== -1);
+  };
 
-  let res, bodyStr, usedAuth;
-  for (const a of attempts) {
-    res = send(a.req);
-    if (res._err) {
-      // network-level failure — try next auth if any
-      continue;
+  // Diagnostics: record every attempt so a persistent failure tells us which
+  // (auth × model) combos were tried and exactly how each one failed. Shown
+  // in the final error so we never have to guess again.
+  const tried = [];
+  let res, bodyStr, usedAuth, usedModel;
+  outer:
+  for (const model of modelCandidates) {
+    const attempts = [];
+    if (oauthToken) attempts.push({ name: "oauth", req: buildOAuthReq(model) });
+    if (apiKey)     attempts.push({ name: "apikey", req: buildApiKeyReq(model) });
+
+    let modelRejected = false;
+    for (const a of attempts) {
+      res = send(a.req);
+      if (res._err) {
+        tried.push(a.name + "/" + model + ":net");
+        continue; // network-level failure — try next auth
+      }
+      try { bodyStr = typeof res.body === "string" ? res.body : toString(res.body); }
+      catch (_) { bodyStr = ""; }
+      usedAuth = a.name;
+      usedModel = model;
+      tried.push(a.name + "/" + model + ":" + res.statusCode);
+
+      if (res.statusCode === 200) break outer; // success
+      // Invalid model → no point trying the other auth with the SAME model;
+      // jump straight to the next candidate model.
+      if (isModelError(res.statusCode, bodyStr)) {
+        console.log("[jeopardy] model '" + model + "' rejected (400) — trying next candidate");
+        modelRejected = true;
+        break;
+      }
+      // Any other non-200 (429/401/403/5xx): fall through to the next auth
+      // for THIS model if one remains; otherwise this becomes the final error.
+      console.log("[jeopardy] " + a.name + "/" + model + " -> " + res.statusCode + " — trying next auth/model");
     }
-    try { bodyStr = typeof res.body === "string" ? res.body : toString(res.body); }
-    catch (_) { bodyStr = ""; }
-    usedAuth = a.name;
-    // Auto-fall-through on 429 if we still have another auth to try
-    if (res.statusCode === 429 && a !== attempts[attempts.length - 1]) {
-      console.log("[jeopardy] " + a.name + " 429 — falling back to next auth");
-      continue;
-    }
-    break;
+    if (modelRejected) continue; // next model
+    // All auths for this model failed with non-model errors — try next model
+    // too (e.g. a transient 5xx might not recur on the next snapshot).
   }
 
   if (!res || res._err) {
     return e.internalServerError("anthropic http error: " + (res?._err || "no auth configured"), null);
   }
+  const triedStr = " [tried: " + tried.join(", ") + "]";
+  if (isModelError(res.statusCode, bodyStr)) {
+    // Every Opus candidate was rejected — the built-in ids are out of date.
+    // The maintainer must pin the current snapshot via the env var.
+    return e.internalServerError(
+      "kein gültiges Opus-Modell akzeptiert (zuletzt '" + usedModel + "'). " +
+      "Setze die Env-Variable JEOPARDY_MODEL auf die aktuelle Opus-Snapshot-ID. " +
+      "Anthropic: " + bodyStr.slice(0, 250) + triedStr, null);
+  }
   if (res.statusCode !== 200) {
-    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "): " + bodyStr.slice(0, 400), null);
+    return e.internalServerError("anthropic " + res.statusCode + " (" + usedAuth + "/" + usedModel + "): " + bodyStr.slice(0, 300) + triedStr, null);
   }
 
   let text;
