@@ -647,9 +647,22 @@ export default function App() {
       const flagCats = categories.filter(isFlagsCategory);
       const aiCats = categories.filter(c => !isFlagsCategory(c));
 
+      // Collect everything already used in PREVIOUS rounds of this event so
+      // the generator avoids repeats. AI: question + answer texts. Flags:
+      // already-shown country codes.
+      const prevRounds = jeopardyRef.current?.rounds || [];
+      const usedQA = [];
+      const usedFlagCodes = [];
+      for (const r of prevRounds) {
+        for (const q of (r.questions || [])) {
+          if (q.type === 'flag') { if (q.flagCode) usedFlagCodes.push(q.flagCode); }
+          else { if (q.q) usedQA.push(q.q); if (q.a) usedQA.push(q.a); }
+        }
+      }
+
       let questions = [];
       if (aiCats.length > 0) {
-        const board = await generateJeopardyBoard(currentEventId, aiCats);
+        const board = await generateJeopardyBoard(currentEventId, aiCats, usedQA);
         questions = (board.questions || []).map(q => ({
           category: q.category, level: Number(q.level) || 1,
           q: String(q.q || ''), a: String(q.a || ''),
@@ -658,7 +671,8 @@ export default function App() {
       }
 
       for (const cat of flagCats) {
-        for (const f of pickFlagRound()) {
+        for (const f of pickFlagRound(usedFlagCodes)) {
+          usedFlagCodes.push(f.code); // avoid dupes across multiple flag cats too
           questions.push({
             category: cat, level: f.level,
             type: 'flag', flagCode: f.code,
@@ -2172,6 +2186,7 @@ function JeoPrompt({ q }) {
 
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
   const [openQuestion, setOpenQuestion] = useState(null); // { ri, qi } — used when hostPlays=false (local-only)
+  const [showFinishedBoard, setShowFinishedBoard] = useState(false); // expand a finished round's board
 
   const usersById = useMemo(() => {
     const m = {};
@@ -2306,13 +2321,30 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         <div className="ww-empty">Keine Runde gestartet — Host öffnet Settings und tappt "Neue Runde".</div>
       )}
 
+      {/* When the latest round is finished, offer a clean "new round" CTA
+          and collapse the old board by default. */}
+      {currentRound && currentRound.finishedAt && admin && (
+        <button className="ww-big-cta green" style={{ marginTop: 6 }} onClick={onOpenSettings}>
+          <Plus size={20} /><span>NEUE RUNDE STARTEN</span>
+        </button>
+      )}
+
       {currentRound && categories.length > 0 && (
         <section className="ww-section">
-          <div className="ww-section-head">
+          <button
+            className="ww-section-head"
+            onClick={() => currentRound.finishedAt && setShowFinishedBoard(v => !v)}
+            style={{ background: 'none', border: 'none', width: '100%', cursor: currentRound.finishedAt ? 'pointer' : 'default', color: 'inherit' }}
+          >
             <Trophy size={16} />
-            <h3>RUNDE {currentRoundIdx + 1}{currentRound.finishedAt ? ' · BEENDET' : ''}</h3>
-          </div>
+            <h3 style={{ flex: 1, textAlign: 'left' }}>RUNDE {currentRoundIdx + 1}{currentRound.finishedAt ? ' · BEENDET' : ''}</h3>
+            {currentRound.finishedAt && (
+              <ChevronRight size={16} style={{ transform: showFinishedBoard ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+            )}
+          </button>
 
+          {currentRound.finishedAt && !showFinishedBoard ? null : (
+          <>
           {hostPlays && !currentRound.finishedAt && currentPicker && (
             <div className={`ww-jeo-picker ${iAmPicker ? 'mine' : ''}`}>
               🎯 An der Reihe: <b>{currentPicker.emoji || '🍺'} {currentPicker.displayName || currentPicker.email}</b>
@@ -2398,6 +2430,8 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             <button className="ww-big-cta green" onClick={() => finishRound(currentRoundIdx)} style={{ marginTop: 10 }}>
               <Flag size={20} /><span>RUNDE BEENDEN & PUNKTE VERTEILEN</span>
             </button>
+          )}
+          </>
           )}
         </section>
       )}
@@ -2593,7 +2627,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
 const DEFAULT_JEO_CATS = [
   'Geographie',
   'Zurück in die Schule',
-  'Reality TV Deutschland',
+  'Flaggen',
   'Twitch & Youtube Deutschland',
   'Songtexte 2000er',
 ];

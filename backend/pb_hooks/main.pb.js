@@ -71,7 +71,7 @@ onRecordAfterCreateSuccess((e) => {
     j.set("categories", [
       "Geographie",
       "Zurück in die Schule",
-      "Reality TV Deutschland",
+      "Flaggen",
       "Twitch & Youtube Deutschland",
       "Songtexte 2000er",
     ]);

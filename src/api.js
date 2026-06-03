@@ -207,14 +207,14 @@ export async function ensureJeopardy(eventId) {
   });
 }
 
-export async function generateJeopardyBoard(eventId, categories) {
+export async function generateJeopardyBoard(eventId, categories, avoid = []) {
   const res = await fetch(`${PB_URL}/api/jeopardy/generate`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: pb.authStore.token,
     },
-    body: JSON.stringify({ eventId, categories }),
+    body: JSON.stringify({ eventId, categories, avoid }),
   });
   if (!res.ok) {
     const text = await res.text();

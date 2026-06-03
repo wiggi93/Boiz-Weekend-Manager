@@ -119,12 +119,16 @@ export const isFlagsCategory = (name) =>
   typeof name === 'string' && name.trim().toLowerCase() === 'flaggen';
 
 // Zieht pro Level (1..5) eine zufällige, nicht-doppelte Flagge.
+// `usedCodes` (Array von ISO-Codes) werden bevorzugt vermieden — so wiederholen
+// sich Flaggen nicht über mehrere Runden im selben Event. Erst wenn ein Level
+// komplett aufgebraucht ist, wird wieder aus allen gezogen.
 // Liefert ein Array mit 5 Einträgen { level, code, name }.
-export function pickFlagRound() {
-  const used = new Set();
+export function pickFlagRound(usedCodes = []) {
+  const used = new Set(usedCodes);
   const out = [];
   for (let level = 1; level <= 5; level++) {
-    const pool = FLAGS.filter(f => f.level === level && !used.has(f.code));
+    let pool = FLAGS.filter(f => f.level === level && !used.has(f.code));
+    if (pool.length === 0) pool = FLAGS.filter(f => f.level === level); // Level erschöpft → reset
     const pick = pool.length
       ? pool[Math.floor(Math.random() * pool.length)]
       : FLAGS[Math.floor(Math.random() * FLAGS.length)];

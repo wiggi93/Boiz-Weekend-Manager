@@ -7,7 +7,7 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   const auth = e.auth;
   if (!auth) return e.unauthorizedError("auth required", null);
 
-  const data = new DynamicModel({ eventId: "", categories: [] });
+  const data = new DynamicModel({ eventId: "", categories: [], avoid: [] });
   e.bindBody(data);
 
   if (!data.eventId) return e.badRequestError("eventId required", null);
@@ -15,6 +15,12 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   if (cats.length < 1 || cats.length > 8) {
     return e.badRequestError("between 1 and 8 categories required", null);
   }
+  // Questions/answers already used in earlier rounds of this event — the
+  // model must avoid these and anything closely similar. Cap to keep the
+  // prompt bounded.
+  const avoid = (Array.isArray(data.avoid) ? data.avoid : [])
+    .filter(x => typeof x === "string" && x.trim().length > 0)
+    .slice(0, 400);
 
   // Authorisation: site admin OR event creator OR event-host
   let ev;
@@ -39,10 +45,21 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   }
 
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
+  const avoidBlock = avoid.length
+    ? `\n================================================================
+== BEREITS GESTELLT — NICHT WIEDERHOLEN
+================================================================
+Diese Fragen/Antworten wurden in diesem Event schon verwendet. Stelle KEINE
+davon erneut und auch nichts inhaltlich sehr Ähnliches (gleiche Antwort,
+gleiches Faktum mit anderem Wortlaut). Wähle frische Themen:
+${avoid.map(x => `- ${x}`).join("\n")}
+`
+    : "";
   const prompt = `Du erstellst ein deutsches Jeopardy-Brett für einen Spieleabend mit Freunden.
 
 Kategorien (genau ${cats.length} Stück):
 ${catBlock}
+${avoidBlock}
 
 ================================================================
 == KORREKTHEIT — ABSOLUTE PRIORITÄT (höher als jede andere Regel)
