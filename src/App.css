@@ -1610,3 +1610,31 @@
 }
 .ww-poll-answer b { color: var(--amber); font-weight: 600; }
 .ww-waiting-polls { width: 100%; margin-top: 22px; text-align: left; }
+
+/* ============ 5 Schnelle — Frage-Metadaten ============ */
+.ww-schnelle-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  margin-top: 16px;
+}
+.ww-schnelle-chip {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--muted);
+  background: var(--card-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px;
+}
+.ww-schnelle-spotify {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px; letter-spacing: 0.05em;
+  color: #1db954; text-decoration: none;
+  background: rgba(29,185,84,0.12); border: 1px solid rgba(29,185,84,0.5);
+  border-radius: 999px; padding: 5px 12px;
+  -webkit-tap-highlight-color: transparent;
+}
+.ww-schnelle-spotify:active { transform: scale(0.97); }
+.ww-schnelle-spotify-dot {
+  width: 9px; height: 9px; border-radius: 50%; background: #1db954;
+  flex-shrink: 0;
+}

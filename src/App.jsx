@@ -2848,6 +2848,8 @@ function SchnelleFragenView({ state, onPatch }) {
   const safeIdx = Math.min(currentIdx, deck.length - 1);
   const currentQ = SCHNELLE_FRAGEN[deck[safeIdx]] || SCHNELLE_FRAGEN[0];
   const total = deck.length;
+  // Backwards-compat: bank entries used to be plain strings; now objects.
+  const q = typeof currentQ === 'string' ? { q: currentQ } : (currentQ || {});
 
   const goPrev = () => {
     const d = ensureDeck();
@@ -2877,7 +2879,24 @@ function SchnelleFragenView({ state, onPatch }) {
           <span className="ww-schnelle-counter-num">{safeIdx + 1}</span>
           <span className="ww-schnelle-counter-total">/ {total}</span>
         </div>
-        <div className="ww-schnelle-question">{currentQ}</div>
+        <div className="ww-schnelle-question">{q.q}</div>
+        {(q.ep || q.year || q.author || q.link) && (
+          <div className="ww-schnelle-meta">
+            {q.author && <span className="ww-schnelle-chip">{q.author}</span>}
+            {q.ep && <span className="ww-schnelle-chip">Folge {q.ep}</span>}
+            {q.year && <span className="ww-schnelle-chip">{q.year}</span>}
+            {q.link && (
+              <a
+                className="ww-schnelle-spotify"
+                href={q.link}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span className="ww-schnelle-spotify-dot" /> Spotify{q.ts ? ` · ${q.ts}` : ''}
+              </a>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="ww-schnelle-nav">
