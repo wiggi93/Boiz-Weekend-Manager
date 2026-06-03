@@ -58,20 +58,24 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ vars.WATCHTOWER_URL != '' }}
     steps:
+      # The Cloudflare→Traefik→Watchtower hop occasionally 5xx's. Retry hard
+      # (~4 min window). The images are already on Docker Hub at this point,
+      # so a webhook that still fails is best-effort: it must NOT mark the
+      # whole workflow red (Watchtower's nightly run + a manual trigger both
+      # catch up). Hence the trailing `|| echo` to keep the step green.
       - name: Update backend
-        # The Cloudflare→Traefik→Watchtower hop occasionally 5xx's; retry up
-        # to 5 times with 10s spacing so a single transient hiccup doesn't
-        # fail the whole deploy.
         run: |
-          curl -fsS --max-time 60 \
-            --retry 5 --retry-delay 10 --retry-all-errors \
+          curl -fsS --max-time 90 \
+            --retry 8 --retry-delay 15 --retry-all-errors --retry-max-time 240 \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
-            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-backend"
+            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-backend" \
+            || echo "::warning::backend deploy webhook failed — Watchtower nightly/manual will catch up"
       - name: Wait for backend
         run: sleep 8
       - name: Update frontend
         run: |
-          curl -fsS --max-time 60 \
-            --retry 5 --retry-delay 10 --retry-all-errors \
+          curl -fsS --max-time 90 \
+            --retry 8 --retry-delay 15 --retry-all-errors --retry-max-time 240 \
             -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}" \
-            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-manager"
+            "${{ vars.WATCHTOWER_URL }}/v1/update?image=${{ secrets.DOCKERHUB_USERNAME }}/boiz-weekend-manager" \
+            || echo "::warning::frontend deploy webhook failed — Watchtower nightly/manual will catch up"

@@ -805,7 +805,8 @@ export default function App() {
           onRefreshAll={refreshAllEvents}
           onDeleteEvent={async (id) => {
             if (!await appConfirm('Event wirklich löschen?', { title: 'Event löschen?' })) return;
-            await deleteEvent(id); await refreshAllEvents(); showToast('Event gelöscht');
+            try { await deleteEvent(id); await refreshAllEvents(); showToast('Event gelöscht'); }
+            catch (e) { showToast(`Löschen fehlgeschlagen: ${e?.status || ''} ${e?.message || ''}`); }
           }}
           onToggleActiveAdmin={async (id, next) => {
             await updateEvent(id, { active: next }); await refreshAllEvents();
@@ -934,11 +935,18 @@ export default function App() {
                 onResetCounters={onResetCounters}
                 onDeleteEvent={async () => {
                   if (!await appConfirm('Event endgültig löschen?', { title: 'Event löschen?' })) return;
-                  await deleteEvent(currentEvent.id);
-                  setCurrentEventId(null);
-                  await refreshMemberships();
-                  showToast('Event gelöscht');
+                  const id = currentEvent.id;
+                  // Close the drawer + leave the event UI first so a stale
+                  // currentEvent can't crash the settings view mid-delete.
                   setSettingsOpen(false);
+                  try {
+                    await deleteEvent(id);
+                    setCurrentEventId(null);
+                    await refreshMemberships();
+                    showToast('Event gelöscht');
+                  } catch (e) {
+                    showToast(`Löschen fehlgeschlagen: ${e?.status || ''} ${e?.message || ''}`);
+                  }
                 }}
                 onKickMember={async (memberId) => {
                   if (!await appConfirm('User wirklich aus diesem Event entfernen?', { title: 'Aus Event entfernen?' })) return;
