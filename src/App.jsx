@@ -2398,7 +2398,10 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   };
 
   const openTileShared = (ri, qi, dranUserId) => {
-    if (!active) return;
+    // A running (unfinished) round is itself the "live" state — interaction
+    // is NOT gated on the event's global active/live toggle, so a host can
+    // play a round (e.g. solo testing) without flipping the event live.
+    if (!currentRound || currentRound.finishedAt) return;
     // The picker (whoever tapped the tile) auto-becomes the first dran.
     resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [] }, false);
   };
@@ -2521,7 +2524,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                     // Turn-based (both modes): only the current picker (or the
                     // host as failsafe when there's no rotation yet) opens a
                     // tile; the picker auto-becomes the answerer ("dran").
-                    if (currentRound.finishedAt || q.opened || winner || !active) return;
+                    if (currentRound.finishedAt || q.opened || winner) return;
                     const allowed = iAmPicker || (admin && !currentPickerId);
                     if (!allowed) return;
                     const dran = iAmPicker ? me.id : currentPickerId;
@@ -2567,7 +2570,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             </div>
           )}
 
-          {admin && active && !currentRound.finishedAt && (
+          {admin && !currentRound.finishedAt && (
             <>
               <button className="ww-big-cta green" onClick={() => finishRound(currentRoundIdx)} style={{ marginTop: 10 }}>
                 <Flag size={20} /><span>RUNDE BEENDEN & PUNKTE VERTEILEN</span>
@@ -2644,7 +2647,11 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         //                  judges; players (incl. dran) just answer aloud.
         //  soloMode      → the dran player self-judges (no one else there).
         const seesAnswer = hostPlays ? (!iAmDran || soloMode) : admin;
-        const canJudge = active && (hostPlays ? (iAmParticipant && (!iAmDran || soloMode)) : admin);
+        // Interaction is gated by the round being live (activeOpen only exists
+        // within an unfinished round), NOT by the event's global active flag —
+        // otherwise a host playing solo without flipping the event live can
+        // open a tile but never judge it.
+        const canJudge = hostPlays ? (iAmParticipant && (!iAmDran || soloMode)) : admin;
 
         // Step 1: no one assigned yet (rare — e.g. host re-opened). Host picks.
         if (!q.currentlyAnswering) {
