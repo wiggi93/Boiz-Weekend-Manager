@@ -181,6 +181,7 @@ export default function App() {
   const [allEvents, setAllEvents] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [view, setView] = useState('home');
+  const [toolOpen, setToolOpen] = useState(null); // open tool id within the Tools tab (lifted so the top-bar back button is context-aware)
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moduleTab, setModuleTab] = useState('overview');
   const [moduleSettingsOpen, setModuleSettingsOpen] = useState(null); // module id or null
@@ -914,8 +915,14 @@ export default function App() {
       <TopBar
         me={me} admin={admin} eventName={currentEvent.name} active={currentEvent.active}
         settingsActive={settingsOpen}
+        backToTools={view === 'tools' && !!toolOpen}
         onToggleSettings={() => setSettingsOpen(v => !v)}
-        onSwitchEvent={() => setCurrentEventId(null)}
+        onSwitchEvent={() => {
+          // Context-aware back: inside an open tool, go back to the tool list
+          // first instead of leaving the whole event.
+          if (view === 'tools' && toolOpen) setToolOpen(null);
+          else setCurrentEventId(null);
+        }}
       />
       <main className="ww-main">
         {view === 'home' && (
@@ -951,10 +958,11 @@ export default function App() {
             polls={polls} pollVotes={pollVotes}
             onPollCreate={onPollCreate} onPollUpdate={onPollUpdate}
             onPollDelete={onPollDelete} onVote={onVote}
+            open={toolOpen} setOpen={setToolOpen}
           />
         )}
       </main>
-      <BottomNav view={view} setView={setView} />
+      <BottomNav view={view} setView={(v) => { setToolOpen(null); setView(v); }} />
       {settingsOpen && (
         <ModuleSettingsDrawer title="⚙️ Event-Settings" onClose={() => setSettingsOpen(false)}>
           {admin
@@ -1553,11 +1561,16 @@ function AdminAllEvents({ events, onPick, onDelete, onToggleActive }) {
 // Top bar
 // ============================================================
 
-function TopBar({ me, admin, eventName, active, settingsActive, onToggleSettings, onSwitchEvent }) {
+function TopBar({ me, admin, eventName, active, settingsActive, backToTools, onToggleSettings, onSwitchEvent }) {
   return (
     <header className="ww-topbar">
       <div className="ww-topbar-left">
-        <button className="ww-icon-btn" onClick={onSwitchEvent} aria-label="Andere Events" title="Andere Events">
+        <button
+          className="ww-icon-btn"
+          onClick={onSwitchEvent}
+          aria-label={backToTools ? 'Zurück zu den Werkzeugen' : 'Andere Events'}
+          title={backToTools ? 'Zurück zu den Werkzeugen' : 'Andere Events'}
+        >
           <ArrowLeft size={16} />
         </button>
         <div className="ww-me-block">
@@ -4626,13 +4639,11 @@ function PollCard({ poll, me, admin, members, votes, onVote, onUpdate, onDelete 
 }
 
 function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent,
-  polls, pollVotes, onPollCreate, onPollUpdate, onPollDelete, onVote }) {
-  const [open, setOpen] = useState(null); // tool id
-
+  polls, pollVotes, onPollCreate, onPollUpdate, onPollDelete, onVote, open, setOpen }) {
   if (open) {
     const tool = moduleById(open);
     return (
-      <div>
+      <div className="ww-tool-open">
         <button className="ww-back" onClick={() => setOpen(null)}>
           <ArrowLeft size={18} /> Werkzeuge
         </button>
@@ -4763,8 +4774,10 @@ function ChessClockView() {
     );
   }
 
-  return (
-    <div className="ww-chess">
+  // Play phase = a fixed full-screen layer (portal to body) so it fits the
+  // viewport exactly and never scrolls — like a real chess-clock app.
+  return createPortal(
+    <div className="ww-chess-fs">
       <button
         className={`ww-chess-zone top ${active === 'top' ? 'active' : ''} ${flagged === 'top' ? 'flag' : ''}`}
         onClick={() => tap('top')}
@@ -4780,7 +4793,7 @@ function ChessClockView() {
           {paused ? <Play size={13} /> : <Hourglass size={13} />} {paused ? 'Weiter' : 'Pause'}
         </button>
         <button className="ww-mini-btn" onClick={restart}>↺ Neu</button>
-        <button className="ww-mini-btn red" onClick={reset}><X size={12} /> Ende</button>
+        <button className="ww-mini-btn red" onClick={reset}><X size={12} /> Beenden</button>
       </div>
 
       <button
@@ -4793,7 +4806,8 @@ function ChessClockView() {
         {!flagged && active === 'bottom' && <span className="ww-chess-hint">du bist dran — tippen wenn fertig</span>}
         {!flagged && active === null && <span className="ww-chess-hint">tippe nach deinem Zug</span>}
       </button>
-    </div>
+    </div>,
+    document.body
   );
 }
 

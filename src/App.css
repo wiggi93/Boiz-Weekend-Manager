@@ -1797,9 +1797,17 @@
 .ww-chess-setup { display: flex; flex-direction: column; }
 .ww-chess-presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
-.ww-chess { display: flex; flex-direction: column; gap: 10px; }
+/* Fixed full-screen play layer — fits the viewport exactly, never scrolls. */
+.ww-chess-fs {
+  position: fixed; inset: 0; z-index: 60;
+  background: var(--bg);
+  display: flex; flex-direction: column; gap: 8px;
+  padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  overscroll-behavior: none; touch-action: manipulation;
+}
 .ww-chess-zone {
-  flex: 1 1 0; min-height: 32vh;
+  flex: 1 1 0; min-height: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 8px; border-radius: 14px; cursor: pointer;
   background: var(--card); border: 2px solid var(--border); color: var(--text);
