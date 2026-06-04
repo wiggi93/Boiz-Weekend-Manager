@@ -3212,6 +3212,15 @@ function formatScheduleDay(day) {
   } catch { return day; }
 }
 
+// Format a Date as a local ISO day (YYYY-MM-DD). Avoids toISOString(), which
+// converts to UTC and can shift the date by ±1 in non-UTC timezones.
+function localISODay(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // Enumerate ISO days (YYYY-MM-DD) from start to end inclusive. Open-ended
 // (no start) → []. End missing → just the single start day.
 function enumerateDays(start, end) {
@@ -3222,7 +3231,7 @@ function enumerateDays(start, end) {
   const e = end ? new Date(end + 'T00:00:00') : s;
   if (isNaN(e.getTime()) || e < s) return [start];
   for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
-    out.push(d.toISOString().slice(0, 10));
+    out.push(localISODay(d));
     if (out.length > 60) break; // safety
   }
   return out;
