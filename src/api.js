@@ -211,14 +211,30 @@ export async function ensureJeopardy(eventId) {
 }
 
 export async function generateJeopardyBoard(eventId, categories, avoid = []) {
-  const res = await fetch(`${PB_URL}/api/jeopardy/generate`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: pb.authStore.token,
-    },
-    body: JSON.stringify({ eventId, categories, avoid }),
-  });
+  // Generation can take a while (Opus). Give it a generous-but-bounded window
+  // and surface a clear timeout message instead of the browser's opaque
+  // "load failed" when an edge proxy drops a too-long request.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 110000);
+  let res;
+  try {
+    res = await fetch(`${PB_URL}/api/jeopardy/generate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: pb.authStore.token,
+      },
+      body: JSON.stringify({ eventId, categories, avoid }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    if (e?.name === 'AbortError') {
+      throw new Error('Zeitüberschreitung beim Generieren — versuch es nochmal (ggf. weniger/kürzere Kategorien).');
+    }
+    throw new Error('Verbindung beim Generieren abgebrochen — nochmal versuchen.');
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`generate failed (${res.status}): ${text.slice(0, 300)}`);

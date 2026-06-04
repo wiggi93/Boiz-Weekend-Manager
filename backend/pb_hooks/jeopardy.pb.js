@@ -193,12 +193,16 @@ Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 
       "content-type": "application/json",
     },
     body: {
-      // Extended thinking — better factual recall and difficulty-level
-      // calibration. Budget gives the model room for the self-validation
-      // pass demanded by the prompt.
+      // Extended thinking improves factual recall + difficulty calibration,
+      // but thinking tokens dominate latency: a 10k budget pushed total
+      // generation past the ~100s edge proxy (Cloudflare) timeout, so the
+      // browser saw "load failed" after a long wait. Keep a SMALL thinking
+      // budget for a quick validation pass and cap output low — the board
+      // JSON for 25 questions is only a few thousand tokens. This keeps the
+      // round-trip comfortably under the proxy limit while staying on Opus.
       model: model,
-      max_tokens: 24000,
-      thinking: { type: "enabled", budget_tokens: 10000 },
+      max_tokens: 6000,
+      thinking: { type: "enabled", budget_tokens: 2000 },
       messages: [{ role: "user", content: prompt }],
     },
   });
