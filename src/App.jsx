@@ -708,6 +708,16 @@ export default function App() {
       };
       const rounds = [...(jeopardyRef.current?.rounds || []), round];
       await onJeopardyPatch({ rounds, categories });
+      // Starting a round means group play has begun — make sure the event is
+      // live. Otherwise non-host players are stuck on the "noch nicht
+      // gestartet" waiting screen and never see the board (it's gated on
+      // event.active), which looks like "the game only started for the host".
+      const curEv = eventRef.current;
+      if (curEv && !curEv.active) {
+        const nextEv = { ...curEv, active: true };
+        eventRef.current = nextEv; setCurrentEvent(nextEv);
+        try { await updateEvent(curEv.id, { active: true }); } catch (_) {}
+      }
       // Close the settings drawer so the host lands directly on the board.
       setModuleSettingsOpen(null);
       showToast('Neue Runde mit frischen Fragen 🎤');
