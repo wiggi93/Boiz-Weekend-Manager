@@ -1185,8 +1185,6 @@ function RegisterForm({ onSubmit, onGoLogin }) {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [emoji, setEmoji] = useState(EMOJI_AVATARS[0]);
-  const [foodWishes, setFoodWishes] = useState('');
-  const [drinkWishes, setDrinkWishes] = useState('');
   const [allergies, setAllergies] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1200,7 +1198,7 @@ function RegisterForm({ onSubmit, onGoLogin }) {
       await onSubmit({
         email: email.trim(), password,
         displayName: displayName.trim(), emoji,
-        foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim(),
+        allergies: allergies.trim(),
       });
       setDone(true);
     } catch (e) {
@@ -1249,12 +1247,11 @@ function RegisterForm({ onSubmit, onGoLogin }) {
           <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
         ))}
       </div>
-      <label className="ww-label"><Utensils size={12} /> ESSENS-VORLIEBEN (ALLGEMEIN)</label>
-      <textarea className="ww-textarea" placeholder="z.B. mag viel Fleisch, kein Fisch" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2} />
-      <label className="ww-label"><Beer size={12} /> GETRÄNKE-VORLIEBEN (ALLGEMEIN)</label>
-      <textarea className="ww-textarea" placeholder="z.B. Pils, Bourbon, keine süßen Sachen" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2} />
       <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
       <textarea className="ww-textarea" placeholder="z.B. Laktose, Nüsse, keine Pilze" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2} />
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Essens- & Getränke-Wünsche trägst du später pro Event im Crew-Tab ein.
+      </p>
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         {busy ? <span className="ww-spinner" /> : <UserPlus size={20} />}<span>{busy ? 'ERSTELLE…' : 'SQUAD BEITRETEN'}</span>
@@ -4216,12 +4213,10 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
           </div>
         )}
 
-        {(user.foodWishes || user.drinkWishes || user.allergies) && (
+        {user.allergies && (
           <div className="ww-detail-section">
-            <div className="ww-detail-section-head">📝 ALLGEMEINE VORLIEBEN</div>
-            {user.foodWishes && <div className="ww-detail-wish"><b>Essen:</b> {user.foodWishes}</div>}
-            {user.drinkWishes && <div className="ww-detail-wish"><b>Trinken:</b> {user.drinkWishes}</div>}
-            {user.allergies && <div className="ww-detail-wish warn"><b>⚠ Allergie:</b> {user.allergies}</div>}
+            <div className="ww-detail-section-head">⚠ ALLERGIEN</div>
+            <div className="ww-detail-wish warn">{user.allergies}</div>
           </div>
         )}
       </div>
@@ -4246,14 +4241,12 @@ function DetailRow({ label, count, pts, bold }) {
 function ProfileView({ me, onSave, onLogout }) {
   const [displayName, setDisplayName] = useState(me.displayName || '');
   const [emoji, setEmoji] = useState(me.emoji || EMOJI_AVATARS[0]);
-  const [foodWishes, setFoodWishes] = useState(me.foodWishes || '');
-  const [drinkWishes, setDrinkWishes] = useState(me.drinkWishes || '');
   const [allergies, setAllergies] = useState(me.allergies || '');
   const [notifPerm, setNotifPerm] = useState(() =>
     'Notification' in window ? Notification.permission : 'unsupported'
   );
   const dirty = displayName !== (me.displayName || '') || emoji !== (me.emoji || '') ||
-    foodWishes !== (me.foodWishes || '') || drinkWishes !== (me.drinkWishes || '') || allergies !== (me.allergies || '');
+    allergies !== (me.allergies || '');
   return (
     <div className="ww-form-wrap">
       <h2 className="ww-display ww-title-big">Mein Profil</h2>
@@ -4266,20 +4259,14 @@ function ProfileView({ me, onSave, onLogout }) {
         ))}
       </div>
       <div className="ww-profile-hint">
-        Allgemeine Vorlieben & Allergien gelten für dich überall. Konkrete
-        Wünsche für ein bestimmtes Event setzt du im <b>Crew</b>-Tab des Events.
+        Allergien gelten für dich überall. Essens- & Getränke-Wünsche setzt du
+        pro Event im <b>Crew</b>-Tab des jeweiligen Events.
       </div>
-      <label className="ww-label"><Utensils size={12} /> ESSENS-VORLIEBEN (ALLGEMEIN)</label>
-      <textarea className="ww-textarea" value={foodWishes} onChange={e => setFoodWishes(e.target.value)} rows={2}
-        placeholder="z.B. mag generell viel Fleisch, kein Fisch" />
-      <label className="ww-label"><Beer size={12} /> GETRÄNKE-VORLIEBEN (ALLGEMEIN)</label>
-      <textarea className="ww-textarea" value={drinkWishes} onChange={e => setDrinkWishes(e.target.value)} rows={2}
-        placeholder="z.B. Pils, Bourbon, keine süßen Sachen" />
       <label className="ww-label"><AlertTriangle size={12} /> ALLERGIEN</label>
       <textarea className="ww-textarea" value={allergies} onChange={e => setAllergies(e.target.value)} rows={2}
         placeholder="z.B. Laktose, Nüsse, keine Pilze" />
       <button className={`ww-big-cta ${dirty ? '' : 'disabled'}`} disabled={!dirty}
-        onClick={() => onSave({ displayName: displayName.trim(), emoji, foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim() })}>
+        onClick={() => onSave({ displayName: displayName.trim(), emoji, allergies: allergies.trim() })}>
         <Check size={20} /><span>SPEICHERN</span>
       </button>
 
