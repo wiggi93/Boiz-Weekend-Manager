@@ -21,11 +21,10 @@ export async function login(email, password) {
   return pb.collection('users').authWithPassword(email, password);
 }
 
-export async function register({ email, password, displayName, emoji, allergies }) {
+export async function register({ email, password, displayName, emoji }) {
   await pb.collection('users').create({
     email, password, passwordConfirm: password,
     displayName, emoji,
-    allergies: allergies || '',
   });
   // Fire off a verification email. Do NOT auto-login: verification is required
   // before the account can sign in, so we leave the user logged out and let the
