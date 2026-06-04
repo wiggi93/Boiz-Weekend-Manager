@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
-  login, register, logout, requestPasswordReset, broadcastEmail,
+  login, register, logout, requestPasswordReset, requestVerification, broadcastEmail,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
@@ -468,7 +468,7 @@ export default function App() {
 
   // ---- Handlers ----
   const onLogin = async (email, password) => { await login(email, password); showToast('Eingeloggt 🍻'); };
-  const onRegister = async (data) => { await register(data); showToast(`Willkommen, ${data.displayName}! 🤘`); };
+  const onRegister = async (data) => { await register(data); showToast('Fast fertig — bestätige deine E-Mail 📧'); };
   const onLogout = () => {
     logout(); setCurrentEventId(null); setMyMemberships([]);
     setView('home'); setLobbyView('list'); setAuthView('login');
@@ -792,6 +792,17 @@ export default function App() {
     );
   }
 
+  if (!me.verified) {
+    return (
+      <div className="ww-app">
+        <GrainOverlay />
+        <VerifyEmailScreen me={me} onLogout={onLogout} />
+        {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
+      </div>
+    );
+  }
+
   if (!me.approved && me.role !== 'admin') {
     return (
       <div className="ww-app">
@@ -1041,6 +1052,34 @@ function PendingApprovalScreen({ me, onLogout }) {
   );
 }
 
+function VerifyEmailScreen({ me, onLogout }) {
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const resend = async () => {
+    setBusy(true); setMsg('');
+    try { await requestVerification(me.email); setMsg('✓ Bestätigungs-Mail erneut verschickt — schau in deine Inbox (auch Spam).'); }
+    catch (_) { setMsg('Konnte Mail nicht erneut senden.'); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="ww-pending">
+      <div className="ww-pending-card">
+        <div className="ww-pending-emoji">📧</div>
+        <h2 className="ww-pending-title">Bestätige deine E-Mail</h2>
+        <p className="ww-pending-text">
+          Wir haben dir einen Link an <b>{me.email}</b> geschickt. Klick ihn an,
+          danach geht's weiter. (Schau auch im Spam-Ordner.)
+        </p>
+        {msg && <div className={msg.startsWith('✓') ? 'ww-notif-banner-ok' : 'ww-err'}>{msg}</div>}
+        <button className="ww-big-cta" onClick={resend} disabled={busy} style={{ marginTop: 4 }}>
+          {busy ? <span className="ww-spinner" /> : <Mail size={18} />}<span>MAIL ERNEUT SENDEN</span>
+        </button>
+        <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Abmelden</button>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
 // Auth
 // ============================================================
@@ -1060,7 +1099,7 @@ function AuthScreen({ view, setView, onLogin, onRegister }) {
         </div>
       </div>
       <div className="ww-auth-scroll">
-        {view === 'login' ? <LoginForm onSubmit={onLogin} /> : <RegisterForm onSubmit={onRegister} />}
+        {view === 'login' ? <LoginForm onSubmit={onLogin} /> : <RegisterForm onSubmit={onRegister} onGoLogin={() => setView('login')} />}
       </div>
     </div>
   );
@@ -1133,7 +1172,7 @@ function LoginForm({ onSubmit }) {
   );
 }
 
-function RegisterForm({ onSubmit }) {
+function RegisterForm({ onSubmit, onGoLogin }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -1143,6 +1182,8 @@ function RegisterForm({ onSubmit }) {
   const [allergies, setAllergies] = useState('');
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [resendMsg, setResendMsg] = useState('');
   const valid = email.includes('@') && password.length >= 8 && displayName.trim().length >= 2;
   const submit = async () => {
     if (!valid) return;
@@ -1153,12 +1194,39 @@ function RegisterForm({ onSubmit }) {
         displayName: displayName.trim(), emoji,
         foodWishes: foodWishes.trim(), drinkWishes: drinkWishes.trim(), allergies: allergies.trim(),
       });
+      setDone(true);
     } catch (e) {
       setErr(e?.response?.data
         ? Object.values(e.response.data).map(v => v.message).join(' / ')
         : 'Registrierung fehlgeschlagen');
     } finally { setBusy(false); }
   };
+  const resend = async () => {
+    setResendMsg('');
+    try { await requestVerification(email.trim()); setResendMsg('✓ Bestätigungs-Mail erneut verschickt.'); }
+    catch (_) { setResendMsg('Konnte Mail nicht erneut senden.'); }
+  };
+
+  if (done) {
+    return (
+      <div className="ww-verify-done">
+        <div className="ww-verify-emoji">📧</div>
+        <h3 className="ww-verify-title">Bestätige deine E-Mail</h3>
+        <p className="ww-verify-text">
+          Wir haben dir einen Link an <b>{email.trim()}</b> geschickt. Klick ihn an,
+          danach kannst du dich einloggen. (Schau auch im Spam-Ordner.)
+        </p>
+        <p className="ww-verify-text" style={{ color: 'var(--muted-2)', fontSize: 12 }}>
+          Danach muss dich noch ein Admin freischalten, bevor du loslegen kannst.
+        </p>
+        {resendMsg && <div className={resendMsg.startsWith('✓') ? 'ww-notif-banner-ok' : 'ww-err'} style={{ marginTop: 4 }}>{resendMsg}</div>}
+        <button className="ww-big-cta" onClick={onGoLogin} style={{ marginTop: 12 }}>
+          <Check size={18} /><span>ZUM LOGIN</span>
+        </button>
+        <button className="ww-text-btn" onClick={resend}>Mail erneut senden</button>
+      </div>
+    );
+  }
   return (
     <div>
       <label className="ww-label"><Mail size={12} /> E-MAIL</label>
@@ -1277,6 +1345,7 @@ function AdminAllUsers({ me, users, onSetRole, onDelete, onSetApproved }) {
         {u.role === 'admin' && <span className="ww-admin-badge"><ShieldCheck size={9} /> ADMIN</span>}
         {u.role === 'host' && <span className="ww-host-badge"><Shield size={9} /> HOST</span>}
         {!u.approved && u.role !== 'admin' && <span className="ww-pending-badge">WARTET</span>}
+        {!u.verified && <span className="ww-pending-badge" style={{ background: 'var(--muted-2)', color: '#fff' }}>UNVERIFIZIERT</span>}
       </span>
       {!u.approved && u.role !== 'admin' ? (
         <button className="ww-mini-btn green" onClick={() => onSetApproved(u.id, true)} title="Freischalten">

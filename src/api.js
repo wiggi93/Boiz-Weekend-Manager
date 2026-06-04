@@ -29,9 +29,11 @@ export async function register({ email, password, displayName, emoji, foodWishes
     drinkWishes: drinkWishes || '',
     allergies: allergies || '',
   });
-  // Fire off a verification email (no-op if SMTP isn't configured server-side).
+  // Fire off a verification email. Do NOT auto-login: verification is required
+  // before the account can sign in, so we leave the user logged out and let the
+  // UI tell them to confirm via the link first.
   try { await pb.collection('users').requestVerification(email); } catch (_) {}
-  return login(email, password);
+  return { needsVerification: true, email };
 }
 
 export function logout() { pb.authStore.clear(); }

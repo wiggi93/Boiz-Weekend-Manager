@@ -7,12 +7,14 @@
 // from code.
 
 // ---- Require verified email for password login --------------------------
-// Gated on REQUIRE_EMAIL_VERIFICATION=true so we never lock anyone out
-// before SMTP is actually configured. Existing users are grandfathered
-// verified by migration 1748500000.
+// Verification is REQUIRED by default now that SMTP is configured. Set
+// REQUIRE_EMAIL_VERIFICATION=false on the server to disable (escape hatch in
+// case SMTP breaks). Existing users are grandfathered verified by migration
+// 1748500000, so nobody currently registered gets locked out.
 onRecordAuthWithPasswordRequest((e) => {
   try {
-    if ($os.getenv("REQUIRE_EMAIL_VERIFICATION") === "true" && e.record && !e.record.get("verified")) {
+    const disabled = $os.getenv("REQUIRE_EMAIL_VERIFICATION") === "false";
+    if (!disabled && e.record && !e.record.get("verified")) {
       throw new BadRequestError("Bitte bestätige zuerst deine E-Mail-Adresse (Link in deiner Inbox).");
     }
   } catch (err) {
