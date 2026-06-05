@@ -210,7 +210,7 @@ export async function ensureJeopardy(eventId) {
   });
 }
 
-export async function generateJeopardyBoard(eventId, categories, avoid = []) {
+export async function generateJeopardyBoard(eventId, categories, avoid = [], surprise = false) {
   // Generation can take a while (Opus). Give it a generous-but-bounded window
   // and surface a clear timeout message instead of the browser's opaque
   // "load failed" when an edge proxy drops a too-long request.
@@ -224,7 +224,7 @@ export async function generateJeopardyBoard(eventId, categories, avoid = []) {
         'Content-Type': 'application/json',
         Authorization: pb.authStore.token,
       },
-      body: JSON.stringify({ eventId, categories, avoid }),
+      body: JSON.stringify({ eventId, categories, avoid, surprise }),
       signal: ctrl.signal,
     });
   } catch (e) {
@@ -341,6 +341,31 @@ export async function listPollVotes(eventId) {
   return pb.collection('poll_votes').getFullList({ filter: `poll.event="${eventId}"` });
 }
 
+// ---- Challenges (peer dares for points) ----
+export async function listChallenges(eventId) {
+  return pb.collection('challenges').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
+}
+
+export async function createChallenge({ eventId, toUser, text, reward }) {
+  return pb.collection('challenges').create({
+    event: eventId,
+    fromUser: pb.authStore.record.id,
+    toUser,
+    text,
+    reward: Number(reward) || 0,
+    penalty: 0,
+    status: 'open',
+  });
+}
+
+export async function updateChallenge(id, patch) {
+  return pb.collection('challenges').update(id, patch);
+}
+
+export async function deleteChallenge(id) {
+  return pb.collection('challenges').delete(id);
+}
+
 // Upsert the current user's vote for a poll (one row per poll+user).
 export async function castVote(pollId, { optionId, text }) {
   const meId = pb.authStore.record?.id;
@@ -372,6 +397,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('schnelle_fragen').subscribe('*', wrap('schnelle_fragen', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('schedule').subscribe('*', wrap('schedule', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
     // poll_votes records only carry the poll id, not the event — forward all
     // and let the consumer refetch (votes are low-frequency).
     safe(pb.collection('poll_votes').subscribe('*', wrap('poll_votes'))),

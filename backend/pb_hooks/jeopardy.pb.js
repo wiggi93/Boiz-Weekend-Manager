@@ -7,14 +7,18 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   const auth = e.auth;
   if (!auth) return e.unauthorizedError("auth required", null);
 
-  const data = new DynamicModel({ eventId: "", categories: [], avoid: [] });
+  const data = new DynamicModel({ eventId: "", categories: [], avoid: [], surprise: false });
   e.bindBody(data);
 
   if (!data.eventId) return e.badRequestError("eventId required", null);
   const cats = Array.isArray(data.categories) ? data.categories.filter(c => typeof c === "string" && c.trim().length > 0).map(c => c.trim()) : [];
-  if (cats.length < 1 || cats.length > 8) {
+  // Surprise mode: the model picks 5 popular quiz categories itself, so the
+  // caller doesn't have to provide any.
+  const surprise = !!data.surprise || cats.length === 0;
+  if (!surprise && (cats.length < 1 || cats.length > 8)) {
     return e.badRequestError("between 1 and 8 categories required", null);
   }
+  const catCount = surprise ? 5 : cats.length;
   // Questions/answers already used in earlier rounds of this event — the
   // model must avoid these and anything closely similar. Cap to keep the
   // prompt bounded.
@@ -44,7 +48,14 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
     return e.internalServerError("neither CLAUDE_OAUTH_TOKEN nor ANTHROPIC_API_KEY configured on the server", null);
   }
 
-  const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
+  const catBlock = surprise
+    ? `WÄHLE SELBST genau 5 Kategorien — gängige, bunt gemischte Quiz-Kategorien,
+wie man sie von Quiz-/Kneipenabenden kennt. Mische die Bereiche (z.B.
+Geographie, Geschichte, Musik, Film & Serien, Sport, Wissenschaft & Natur,
+Essen & Trinken, Kunst & Literatur, Technik, Popkultur, Sprache). Nimm gut
+spielbare, allgemein bekannte Kategorien — keine Nischen-Themen. Verwende
+deutsche Kategorie-Namen und schreibe sie in jedes "category"-Feld.`
+    : cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
   const avoidBlock = avoid.length
     ? `\n================================================================
 == SPERRLISTE — DIESE INHALTE SIND VERBOTEN (HARTE REGEL)
@@ -64,7 +75,7 @@ ${avoid.map(x => `- ${x}`).join("\n")}
     : "";
   const prompt = `Du erstellst ein deutsches Jeopardy-Brett für einen Spieleabend mit Freunden.
 
-Kategorien (genau ${cats.length} Stück):
+Kategorien (genau ${catCount} Stück):
 ${catBlock}
 ${avoidBlock}
 
@@ -144,7 +155,7 @@ Halte dich strikt an die Kategorie. "Geographie" ≠ Hauptstadt-Quiz mit einer e
 == AUFGABE
 ================================================================
 1. Pro Kategorie GENAU 5 Fragen — exakt eine je Level 1, 2, 3, 4, 5.
-2. Insgesamt also exakt ${cats.length * 5} Fragen.
+2. Insgesamt also exakt ${catCount * 5} Fragen.
 3. Fragen max 30 Wörter, eindeutig formuliert.
 4. Antwort kurz und präzise (max 10 Wörter).
 5. Bei Songtexten in der Frage selbst zitieren, Antwort = das fehlende Wort/die Antwort.
@@ -164,11 +175,11 @@ Schritt 7: Erst dann JSON ausgeben.
 ================================================================
 == AUSGABE
 ================================================================
-NUR JSON. Kein Vortext, kein Codeblock, keine Erklärung. Beginnt mit { endet mit }. level-Feld ist 1..5 (NICHT 100..500). Kategorie-Name MUSS wortgleich mit der Eingabe sein. Schema:
+NUR JSON. Kein Vortext, kein Codeblock, keine Erklärung. Beginnt mit { endet mit }. level-Feld ist 1..5 (NICHT 100..500). ${surprise ? "Vergib selbst gewählte, gängige Kategorie-Namen und nutze sie konsistent in allen 5 Fragen je Kategorie." : "Kategorie-Name MUSS wortgleich mit der Eingabe sein."} Schema:
 
 {"questions":[{"category":"<Kategoriename wortgleich>","level":1,"q":"<Frage>","a":"<Antwort>"}]}
 
-Insgesamt ${cats.length * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 1..5, Kategorie 2 Level 1..5, ..., Kategorie ${cats.length} Level 1..5.`;
+Insgesamt ${catCount * 5} Einträge in dieser Reihenfolge: Kategorie 1 Level 1..5, Kategorie 2 Level 1..5, ..., Kategorie ${catCount} Level 1..5.`;
 
   // Model selection — Opus only. Question quality with Sonnet was poor, so we
   // never fall back to a cheaper/older family. Anthropic retires old snapshots
