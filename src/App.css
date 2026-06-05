@@ -1864,6 +1864,8 @@
 
 /* ============ Challenges module ============ */
 .ww-challenges { display: flex; flex-direction: column; }
+.ww-chal-modes { display: flex; gap: 6px; }
+.ww-chal-modes .ww-auth-tab { flex: 1; padding: 8px 4px; font-size: 12px; }
 .ww-chal-card {
   background: var(--card); border: 1px solid var(--border);
   border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;

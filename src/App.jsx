@@ -648,10 +648,15 @@ export default function App() {
   };
 
   // ---- Challenges (peer dares) ----
-  const onChallengeCreate = async ({ toUser, text, reward }) => {
+  // toUsers is an array: 1 entry for a single/random target, N for a group
+  // challenge (one row per targeted member — reuses the normal per-target
+  // scoring + resolution).
+  const onChallengeCreate = async ({ toUsers, text, reward }) => {
+    const targets = (toUsers || []).filter(Boolean);
+    if (targets.length === 0) return;
     try {
-      await createChallenge({ eventId: currentEventId, toUser, text, reward });
-      showToast('Challenge gestellt 🎯');
+      await Promise.all(targets.map(t => createChallenge({ eventId: currentEventId, toUser: t, text, reward })));
+      showToast(targets.length > 1 ? `Gruppen-Challenge an ${targets.length} 🎯` : 'Challenge gestellt 🎯');
     } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
   };
   const onChallengeResolve = async (id, patch) => {
@@ -3574,6 +3579,7 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
   }, [members]);
   const others = members.map(m => m.expand?.user).filter(u => u && u.id !== me.id);
 
+  const [mode, setMode] = useState('single'); // 'single' | 'random' | 'group'
   const [toUser, setToUser] = useState('');
   const [text, setText] = useState('');
   const [reward, setReward] = useState(3);
@@ -3583,17 +3589,22 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
 
   const open = challenges.filter(c => !c.status || c.status === 'open');
   const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
-  const valid = toUser && text.trim().length >= 2 && Number(reward) > 0;
+  const textOk = text.trim().length >= 2 && Number(reward) > 0;
+  const valid = textOk && others.length > 0 && (mode !== 'single' || toUser);
   const canResolve = (c) => c.fromUser === me.id || admin;
 
   const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
 
   const submit = async () => {
     if (!valid) return;
+    let toUsers = [];
+    if (mode === 'group') toUsers = others.map(u => u.id);
+    else if (mode === 'random') toUsers = [others[Math.floor(Math.random() * others.length)].id];
+    else toUsers = [toUser];
     setBusy(true);
     try {
-      await onCreate({ toUser, text: text.trim(), reward: Number(reward) });
-      setText(''); setToUser(''); setReward(3);
+      await onCreate({ toUsers, text: text.trim(), reward: Number(reward) });
+      setText(''); setToUser(''); setReward(3); setMode('single');
     } finally { setBusy(false); }
   };
   const markDone = (c) => onResolve(c.id, { status: 'done' });
@@ -3609,10 +3620,34 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
           er's nicht, legst du beim Auflösen die Strafe fest.
         </p>
         <label className="ww-label">WEN?</label>
-        <select className="ww-input" value={toUser} onChange={e => setToUser(e.target.value)}>
-          <option value="">— Spieler wählen —</option>
-          {others.map(u => <option key={u.id} value={u.id}>{u.displayName || u.email}</option>)}
-        </select>
+        <div className="ww-chal-modes">
+          {[
+            { k: 'single', label: 'Spieler' },
+            { k: 'random', label: '🎲 Zufällig' },
+            { k: 'group', label: '👥 Gruppe' },
+          ].map(m => (
+            <button key={m.k} type="button"
+              className={`ww-auth-tab ${mode === m.k ? 'active' : ''}`}
+              onClick={() => setMode(m.k)}>{m.label}</button>
+          ))}
+        </div>
+        {mode === 'single' && (
+          <select className="ww-input" style={{ marginTop: 8 }} value={toUser} onChange={e => setToUser(e.target.value)}>
+            <option value="">— Spieler wählen —</option>
+            {others.map(u => <option key={u.id} value={u.id}>{u.displayName || u.email}</option>)}
+          </select>
+        )}
+        {mode === 'random' && (
+          <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
+            🎲 Ein zufälliger Mitspieler wird beim Stellen ausgelost.
+          </p>
+        )}
+        {mode === 'group' && (
+          <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
+            👥 Alle {others.length} Mitspieler bekommen die Challenge — jeder
+            wird einzeln aufgelöst.
+          </p>
+        )}
         <label className="ww-label">CHALLENGE</label>
         <textarea className="ww-textarea" rows={2} maxLength={280} value={text}
           onChange={e => setText(e.target.value)} placeholder="z.B. Trink ein Bier in unter 10 Sekunden" />
