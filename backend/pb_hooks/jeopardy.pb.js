@@ -47,11 +47,18 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
   const catBlock = cats.map((c, i) => `${i + 1}. ${c}`).join("\n");
   const avoidBlock = avoid.length
     ? `\n================================================================
-== BEREITS GESTELLT — NICHT WIEDERHOLEN
+== SPERRLISTE — DIESE INHALTE SIND VERBOTEN (HARTE REGEL)
 ================================================================
-Diese Fragen/Antworten wurden in diesem Event schon verwendet. Stelle KEINE
-davon erneut und auch nichts inhaltlich sehr Ähnliches (gleiche Antwort,
-gleiches Faktum mit anderem Wortlaut). Wähle frische Themen:
+Die folgenden Fragen UND Antworten wurden in FRÜHEREN Runden dieses Events
+bereits gestellt. Das ist eine harte Sperrliste:
+  • Verwende KEINE dieser Antworten erneut — auch nicht mit anderem Fragetext.
+  • Verwende KEINE Frage zum selben Fakt/Thema (z.B. ist "Berlin" einmal die
+    Antwort gewesen, darf Berlin in KEINER Frage mehr die Antwort sein).
+  • Auch wenn die Kategorie identisch zur Vorrunde ist: nimm KOMPLETT andere
+    Themen/Personen/Orte/Werke. Gleiche Kategorie ≠ gleiche Fragen.
+Geh die Liste durch und prüfe JEDE neue Frage gegen sie, bevor du sie nimmst.
+
+GESPERRT:
 ${avoid.map(x => `- ${x}`).join("\n")}
 `
     : "";
@@ -79,6 +86,23 @@ Konkrete Risiko-Bereiche (besonders streng prüfen):
 Eindeutigkeits-Test: Die Antwort muss eindeutig sein. "Dieser Song von 2010" → es muss CONTEXT geben, der nur EINEN Song zulässt. "Dieser Schauspieler aus Hollywood" → unzureichend.
 
 Selbsttest pro Frage: Wenn ein Spieler nach der Antwort "moment, ist das nicht eigentlich X?" sagen könnte und teilweise recht hätte → Frage umformulieren oder Antwort um Alternativen erweitern.
+
+================================================================
+== ANTWORT NICHT VERRATEN (HARTE REGEL — sonst ist die Frage wertlos)
+================================================================
+Die Frage darf die Antwort NICHT enthalten oder trivial verraten. Konkret verboten:
+  • Das Antwortwort (oder ein Teil davon) steht im Fragetext.
+      SCHLECHT: "In welchem Jahr wurde die Berliner Mauer in Berlin gebaut?" (Antwort Berlin steht drin)
+      SCHLECHT: "Welcher Planet ist der rote Planet?" → Antwort "Mars" — "rot" verrät Mars direkt.
+  • Eine wörtliche Übersetzung / offensichtliches Synonym der Antwort steht im Text.
+      SCHLECHT: "Dieses Edelmetall mit dem Symbol Au heißt auf Deutsch wie?" → Au = Gold ist 1:1.
+  • Ein Eigenname im Text, der die Antwort eindeutig festnagelt.
+      SCHLECHT: "In welcher Stadt steht der Eiffelturm in der Hauptstadt Frankreichs?"
+  • Die Antwort ist aus der Satzstruktur/Definition direkt ablesbar (reine Definitionsfrage).
+GUT (Jeopardy-Stil, Antwort erschlossen, nicht genannt):
+  "Dieses Bauwerk aus Stahl wurde 1889 zur Weltausstellung errichtet und ist 330m hoch." → Eiffelturm
+  "Dieser Planet erscheint durch Eisenoxid auf seiner Oberfläche rötlich." → Mars
+Selbsttest pro Frage: Streiche im Kopf die Antwort — ist sie aus der Frage trotzdem fast zwingend? Dann umformulieren.
 
 ================================================================
 == SCHWIERIGKEITS-ANKER — Level 1..5
@@ -129,11 +153,13 @@ Halte dich strikt an die Kategorie. "Geographie" ≠ Hauptstadt-Quiz mit einer e
 ================================================================
 == ARBEITSWEISE (im Thinking-Block)
 ================================================================
-Schritt 1: Pro Kategorie 5 Themen-Kandidaten sammeln, einen pro Level.
+Schritt 1: Pro Kategorie 5 Themen-Kandidaten sammeln, einen pro Level. Wenn eine Sperrliste oben steht: jeden Kandidaten dagegen abgleichen und gesperrte Themen/Antworten sofort verwerfen.
 Schritt 2: Korrektheits-Check pro Frage: "Bin ich mir bei diesem Fakt zu 100% sicher?" — bei NEIN: ersetzen.
-Schritt 3: Level-Konsistenz-Check: Stimmt die geschätzte Lösungsquote? Würde eine Level-5-Frage von 50% der Leute gelöst → zu leicht.
-Schritt 4: Eindeutigkeits-Check: Gibt es nur EINE valide Antwort?
-Schritt 5: Erst dann JSON ausgeben.
+Schritt 3: Antwort-verraten-Check: Steht die Antwort (Wort, Synonym, Übersetzung, verräterischer Eigenname) im Fragetext? Bei JA: umformulieren, bis die Antwort erschlossen werden muss.
+Schritt 4: Level-Konsistenz-Check: Stimmt die geschätzte Lösungsquote? Würde eine Level-5-Frage von 50% der Leute gelöst → zu leicht.
+Schritt 5: Eindeutigkeits-Check: Gibt es nur EINE valide Antwort?
+Schritt 6: Sperrlisten-Check (falls vorhanden): Keine Antwort und kein Faktum doppelt mit der Sperrliste oder innerhalb dieses Bretts.
+Schritt 7: Erst dann JSON ausgeben.
 
 ================================================================
 == AUSGABE
