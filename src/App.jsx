@@ -6,7 +6,7 @@ import {
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
   Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
-  ChevronRight, Bell, BellOff, Wrench,
+  ChevronRight, Bell, BellOff, Wrench, Target,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
@@ -22,6 +22,7 @@ import {
   getSchnelleFragen, updateSchnelleFragen, ensureSchnelleFragen,
   getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
+  listChallenges, createChallenge, updateChallenge, deleteChallenge,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
 import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
@@ -136,11 +137,26 @@ const computeJeopardyPoints = (userId, jeopardy) => {
   return total;
 };
 
-const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy) =>
+// Peer challenges: a player earns `reward` when a challenge assigned to them
+// is marked done, and loses `penalty` when it's marked failed. Open challenges
+// don't count yet.
+const computeChallengePoints = (userId, challenges) => {
+  if (!Array.isArray(challenges)) return 0;
+  let total = 0;
+  for (const c of challenges) {
+    if (c.toUser !== userId) continue;
+    if (c.status === 'done') total += Number(c.reward) || 0;
+    else if (c.status === 'failed') total -= Number(c.penalty) || 0;
+  }
+  return total;
+};
+
+const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, challenges) =>
   computeDrinkPoints(s, ev)
   + computeFlunkyPoints(userId, flunky)
   + computeCustomPoints(userId, customModules)
-  + computeJeopardyPoints(userId, jeopardy);
+  + computeJeopardyPoints(userId, jeopardy)
+  + computeChallengePoints(userId, challenges);
 
 // ============================================================
 // Root
@@ -174,6 +190,7 @@ export default function App() {
   useEffect(() => { scheduleRef.current = schedule; }, [schedule]);
   const [polls, setPolls] = useState([]);
   const [pollVotes, setPollVotes] = useState([]);
+  const [challenges, setChallenges] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
   // by DrinksBar on every bump; cleared on event switch.
@@ -248,7 +265,7 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]);
       return;
     }
     // Fetch the event first. ONLY a genuinely missing event (404) kicks the
@@ -265,7 +282,7 @@ export default function App() {
     // Sub-fetches: each tolerates its own failure, never resets the event.
     const safe = (p, fallback) => p.catch(() => fallback);
     try {
-      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv] = await Promise.all([
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch] = await Promise.all([
         safe(listEventMembers(currentEventId), []),
         safe(loadEventStats(currentEventId), {}),
         safe(getFlunky(currentEventId), null),
@@ -276,10 +293,11 @@ export default function App() {
         safe(getSchedule(currentEventId), null),
         safe(listPolls(currentEventId), []),
         safe(listPollVotes(currentEventId), []),
+        safe(listChallenges(currentEventId), []),
       ]);
       setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
-      setSchedule(sc); setPolls(pl); setPollVotes(pv);
+      setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch);
     } catch (e) {
       console.warn('refreshCurrentEvent sub-fetch', e);
     }
@@ -415,6 +433,16 @@ export default function App() {
       setPolls(prev => {
         if (ev.action === 'delete') return prev.filter(p => p.id !== rec.id);
         const idx = prev.findIndex(p => p.id === rec.id);
+        if (idx === -1) return [rec, ...prev];
+        const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
+      });
+      return;
+    }
+
+    if (collection === 'challenges') {
+      setChallenges(prev => {
+        if (ev.action === 'delete') return prev.filter(c => c.id !== rec.id);
+        const idx = prev.findIndex(c => c.id === rec.id);
         if (idx === -1) return [rec, ...prev];
         const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
       });
@@ -619,6 +647,24 @@ export default function App() {
     catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
+  // ---- Challenges (peer dares) ----
+  const onChallengeCreate = async ({ toUser, text, reward }) => {
+    try {
+      await createChallenge({ eventId: currentEventId, toUser, text, reward });
+      showToast('Challenge gestellt 🎯');
+    } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
+  };
+  const onChallengeResolve = async (id, patch) => {
+    setChallenges(prev => prev.map(c => c.id === id ? { ...c, ...patch } : c));
+    try { await updateChallenge(id, patch); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+  const onChallengeDelete = async (id) => {
+    if (!(await appConfirm('Challenge wirklich löschen?'))) return;
+    try { await deleteChallenge(id); setChallenges(prev => prev.filter(c => c.id !== id)); showToast('Challenge gelöscht'); }
+    catch (e) { showToast('Fehler 😬'); }
+  };
+
   // Event-specific wishes saved on my membership row for the current event.
   const onSaveMyWishes = async (patch) => {
     const mine = eventMembers.find(m => m.expand?.user?.id === me.id || m.user === me.id);
@@ -651,14 +697,9 @@ export default function App() {
     catch (e) { console.warn('jeopardy update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
-  const onJeopardyGenerate = async (categories) => {
+  const onJeopardyGenerate = async (categories, opts = {}) => {
+    const surprise = !!opts.surprise;
     try {
-      // "Flaggen" is built offline from the local flag pool; only the other
-      // categories are sent to the LLM. Avoids a network call (and cost) for
-      // flags and guarantees correct answers.
-      const flagCats = categories.filter(isFlagsCategory);
-      const aiCats = categories.filter(c => !isFlagsCategory(c));
-
       // Collect everything already used in PREVIOUS rounds of this event so
       // the generator avoids repeats. AI: question + answer texts. Flags:
       // already-shown country codes.
@@ -673,24 +714,47 @@ export default function App() {
       }
 
       let questions = [];
-      if (aiCats.length > 0) {
-        const board = await generateJeopardyBoard(currentEventId, aiCats, usedQA);
+      let roundCategories = categories;
+
+      if (surprise) {
+        // The model picks 5 popular quiz categories itself; we derive the
+        // category list from the returned board (order of first appearance).
+        const board = await generateJeopardyBoard(currentEventId, [], usedQA, true);
         questions = (board.questions || []).map(q => ({
           category: q.category, level: Number(q.level) || 1,
           q: String(q.q || ''), a: String(q.a || ''),
           winnerUserId: null, revealed: false,
         }));
-      }
+        roundCategories = [];
+        for (const q of questions) {
+          if (q.category && !roundCategories.includes(q.category)) roundCategories.push(q.category);
+        }
+      } else {
+        // "Flaggen" is built offline from the local flag pool; only the other
+        // categories are sent to the LLM. Avoids a network call (and cost) for
+        // flags and guarantees correct answers.
+        const flagCats = categories.filter(isFlagsCategory);
+        const aiCats = categories.filter(c => !isFlagsCategory(c));
 
-      for (const cat of flagCats) {
-        for (const f of pickFlagRound(usedFlagCodes)) {
-          usedFlagCodes.push(f.code); // avoid dupes across multiple flag cats too
-          questions.push({
-            category: cat, level: f.level,
-            type: 'flag', flagCode: f.code,
-            q: 'Welches Land zeigt diese Flagge?', a: f.name,
+        if (aiCats.length > 0) {
+          const board = await generateJeopardyBoard(currentEventId, aiCats, usedQA);
+          questions = (board.questions || []).map(q => ({
+            category: q.category, level: Number(q.level) || 1,
+            q: String(q.q || ''), a: String(q.a || ''),
             winnerUserId: null, revealed: false,
-          });
+          }));
+        }
+
+        for (const cat of flagCats) {
+          for (const f of pickFlagRound(usedFlagCodes)) {
+            usedFlagCodes.push(f.code); // avoid dupes across multiple flag cats too
+            questions.push({
+              category: cat, level: f.level,
+              type: 'flag', flagCode: f.code,
+              q: 'Welches Land zeigt diese Flagge?', a: f.name,
+              winnerUserId: null, revealed: false,
+            });
+          }
         }
       }
 
@@ -701,13 +765,13 @@ export default function App() {
         id: String(Date.now()),
         startedAt: new Date().toISOString(),
         finishedAt: null,
-        categories,
+        categories: roundCategories,
         pickerOrder: shuffled,
         pickerIdx: 0,
         questions,
       };
       const rounds = [...(jeopardyRef.current?.rounds || []), round];
-      await onJeopardyPatch({ rounds, categories });
+      await onJeopardyPatch({ rounds, categories: roundCategories });
       // Starting a round means group play has begun — make sure the event is
       // live. Otherwise non-host players are stuck on the "noch nicht
       // gestartet" waiting screen and never see the board (it's gated on
@@ -944,6 +1008,10 @@ export default function App() {
             kitty={kitty} onKittyPatch={onKittyPatch}
             schnelleFragen={schnelleFragen} onSchnellePatch={onSchnellePatch}
             schedule={schedule} onSchedulePatch={onSchedulePatch}
+            challenges={challenges}
+            onChallengeCreate={onChallengeCreate}
+            onChallengeResolve={onChallengeResolve}
+            onChallengeDelete={onChallengeDelete}
             customModules={customModules}
             onCustomCreate={onCustomCreate}
             onCustomPatch={onCustomPatch}
@@ -958,7 +1026,7 @@ export default function App() {
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
         )}
         {view === 'tools' && (
           <ToolsView
@@ -1667,6 +1735,7 @@ function HomeView({
   kitty, onKittyPatch,
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
+  challenges, onChallengeCreate, onChallengeResolve, onChallengeDelete,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
@@ -1736,7 +1805,7 @@ function HomeView({
       </div>
 
       {moduleTab === 'overview' && (
-        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} onShowUserDetail={onShowUserDetail} />
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} onShowUserDetail={onShowUserDetail} />
       )}
       {moduleTab === 'flunky' && flunky && (
         <FlunkyView
@@ -1757,6 +1826,12 @@ function HomeView({
       )}
       {moduleTab === 'schedule' && (
         <ScheduleView schedule={schedule} admin={admin} onPatch={onSchedulePatch} eventStart={event.date} eventEnd={event.endDate} />
+      )}
+      {moduleTab === 'challenges' && (
+        <ChallengesView
+          me={me} admin={admin} members={members} challenges={challenges}
+          onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete}
+        />
       )}
       {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
           view (ToolsView), not in the games tab strip. */}
@@ -2070,12 +2145,12 @@ function DrinkPill({ emoji, label, count, disabled, onInc, onDec }) {
 // Overview (leaderboard / standings)
 // ============================================================
 
-function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, onShowUserDetail }) {
+function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, challenges, onShowUserDetail }) {
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
       const s = statsMap[u.id] || { beer: 0, mische: 0 };
-      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy) };
+      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges) };
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points),
@@ -2871,6 +2946,11 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
     try { await onGenerate(filtered); } finally { setBusy(false); }
   };
 
+  const startSurprise = async () => {
+    setBusy(true);
+    try { await onGenerate([], { surprise: true }); } finally { setBusy(false); }
+  };
+
   const toggleParticipant = (uid) => {
     const has = participants.includes(uid);
     onPatch({ participants: has ? participants.filter(x => x !== uid) : [...participants, uid] });
@@ -2880,6 +2960,15 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
 
   return (
     <div>
+      <button className="ww-big-cta" onClick={startSurprise} disabled={busy} style={{ marginTop: 0 }}>
+        <Dice5 size={20} /><span>{busy ? 'GENERIERE FRAGEN…' : '🎲 ÜBERRASCHUNGS-RUNDE'}</span>
+      </button>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6, marginBottom: 16 }}>
+        Claude wählt 5 zufällige, gängige Quiz-Kategorien für dich aus — keine
+        Eingabe nötig.
+      </p>
+      <div className="ww-or-divider"><span>oder Kategorien selbst wählen</span></div>
+
       <label className="ww-label">KATEGORIEN (5)</label>
       {Array.from({ length: 5 }).map((_, i) => (
         <input
@@ -3474,6 +3563,130 @@ function ScheduleEntryDrawer({ entry, onSave, onClose, eventDays = [], openEnded
 }
 
 // ============================================================
+// Challenges (peer dares for points)
+// ============================================================
+
+function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, onDelete }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+  const others = members.map(m => m.expand?.user).filter(u => u && u.id !== me.id);
+
+  const [toUser, setToUser] = useState('');
+  const [text, setText] = useState('');
+  const [reward, setReward] = useState(3);
+  const [busy, setBusy] = useState(false);
+  const [failingId, setFailingId] = useState(null); // challenge being marked failed
+  const [penalty, setPenalty] = useState(3);
+
+  const open = challenges.filter(c => !c.status || c.status === 'open');
+  const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
+  const valid = toUser && text.trim().length >= 2 && Number(reward) > 0;
+  const canResolve = (c) => c.fromUser === me.id || admin;
+
+  const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
+
+  const submit = async () => {
+    if (!valid) return;
+    setBusy(true);
+    try {
+      await onCreate({ toUser, text: text.trim(), reward: Number(reward) });
+      setText(''); setToUser(''); setReward(3);
+    } finally { setBusy(false); }
+  };
+  const markDone = (c) => onResolve(c.id, { status: 'done' });
+  const startFail = (c) => { setFailingId(c.id); setPenalty(Number(c.reward) || 3); };
+  const confirmFail = (c) => { onResolve(c.id, { status: 'failed', penalty: Number(penalty) || 0 }); setFailingId(null); };
+
+  return (
+    <div className="ww-challenges">
+      <section className="ww-section">
+        <div className="ww-section-head"><Target size={16} /><h3>NEUE CHALLENGE</h3></div>
+        <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
+          Fordere jemanden heraus. Schafft er's, kriegt er die Punkte. Schafft
+          er's nicht, legst du beim Auflösen die Strafe fest.
+        </p>
+        <label className="ww-label">WEN?</label>
+        <select className="ww-input" value={toUser} onChange={e => setToUser(e.target.value)}>
+          <option value="">— Spieler wählen —</option>
+          {others.map(u => <option key={u.id} value={u.id}>{u.displayName || u.email}</option>)}
+        </select>
+        <label className="ww-label">CHALLENGE</label>
+        <textarea className="ww-textarea" rows={2} maxLength={280} value={text}
+          onChange={e => setText(e.target.value)} placeholder="z.B. Trink ein Bier in unter 10 Sekunden" />
+        <label className="ww-label">PUNKTE BEI ERFOLG</label>
+        <input className="ww-input" type="number" inputMode="numeric" min={1} max={100}
+          value={reward} onChange={e => setReward(e.target.value)} />
+        <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
+          {busy ? <span className="ww-spinner" /> : <Target size={20} />}<span>CHALLENGE STELLEN</span>
+        </button>
+      </section>
+
+      {open.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><h3>OFFEN</h3></div>
+          <div className="ww-board">
+            {open.map(c => (
+              <div key={c.id} className="ww-chal-card">
+                <div className="ww-chal-top">
+                  <span className="ww-chal-who">{uname(c.fromUser)} → <b>{uname(c.toUser)}</b></span>
+                  <span className="ww-chal-reward">+{c.reward}</span>
+                </div>
+                <div className="ww-chal-text">{c.text}</div>
+                {canResolve(c) && failingId !== c.id && (
+                  <div className="ww-chal-actions">
+                    <button className="ww-mini-btn green" onClick={() => markDone(c)}><Check size={12} /> Erfüllt</button>
+                    <button className="ww-mini-btn red" onClick={() => startFail(c)}><X size={12} /> Nicht erfüllt</button>
+                    <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>
+                  </div>
+                )}
+                {canResolve(c) && failingId === c.id && (
+                  <div className="ww-chal-fail">
+                    <span className="ww-muted" style={{ fontSize: 12 }}>Strafe (Punkte abziehen):</span>
+                    <input className="ww-input ww-chal-penalty" type="number" inputMode="numeric" min={0} max={100}
+                      value={penalty} onChange={e => setPenalty(e.target.value)} />
+                    <button className="ww-mini-btn red" onClick={() => confirmFail(c)}>−{Number(penalty) || 0} bestätigen</button>
+                    <button className="ww-mini-btn" onClick={() => setFailingId(null)}>Abbruch</button>
+                  </div>
+                )}
+                {!canResolve(c) && (
+                  <div className="ww-muted" style={{ fontSize: 11 }}>{uname(c.fromUser).split(' ').slice(1).join(' ')} entscheidet, ob erfüllt.</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {resolved.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><h3>ERLEDIGT</h3></div>
+          <div className="ww-board">
+            {resolved.map(c => (
+              <div key={c.id} className={`ww-chal-card ${c.status === 'done' ? 'done' : 'failed'}`}>
+                <div className="ww-chal-top">
+                  <span className="ww-chal-who"><b>{uname(c.toUser)}</b></span>
+                  <span className={c.status === 'done' ? 'ww-chal-reward' : 'ww-chal-penalty-badge'}>
+                    {c.status === 'done' ? `+${c.reward}` : `−${c.penalty || 0}`}
+                  </span>
+                </div>
+                <div className="ww-chal-text">{c.text}</div>
+                <div className="ww-chal-bottom">
+                  <span className={`ww-chal-status ${c.status}`}>{c.status === 'done' ? '✓ erfüllt' : '✗ nicht erfüllt'}</span>
+                  {canResolve(c) && <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // Custom-module view + settings (generic competition)
 // ============================================================
 
@@ -4024,7 +4237,7 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, myId, onShowUserDetail, onSaveMyWishes }) {
+function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, challenges, myId, onShowUserDetail, onSaveMyWishes }) {
   const myMembership = members.find(m => (m.expand?.user?.id || m.user) === myId);
   return (
     <div className="ww-crew">
@@ -4036,7 +4249,7 @@ function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, m
         {members.map(m => {
           const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
-          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy);
+          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges);
           // Event-specific wishes live on the membership row.
           const food = m.foodWishes || '';
           const drink = m.drinkWishes || '';
