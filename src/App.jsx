@@ -2487,13 +2487,18 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     // is NOT gated on the event's global active/live toggle, so a host can
     // play a round (e.g. solo testing) without flipping the event live.
     if (!currentRound || currentRound.finishedAt) return;
+    // Defense-in-depth: never re-open a tile that's already resolved
+    // (won / closed / tried) or currently open.
+    const t = rounds[ri]?.questions?.[qi];
+    if (t && (t.opened || t.winnerUserId || t.resolved || t.revealed ||
+        (Array.isArray(t.triedUsers) && t.triedUsers.length > 0))) return;
     // The picker (whoever tapped the tile) auto-becomes the first dran.
     resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [] }, false);
   };
   const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId }, false);
   // markRight does NOT clear triedUsers — those users tried wrong and keep
   // their −half penalty in the round scoring.
-  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, opened: false, currentlyAnswering: null }, true);
+  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, resolved: true, opened: false, currentlyAnswering: null }, true);
   // FALSCH in hostPlays mode closes the question immediately — by the time
   // someone clicks Richtig/Falsch the non-dran participants already saw the
   // correct answer on their screen, so a second-try "Wer versucht jetzt?"
@@ -2502,11 +2507,11 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const markWrong = (ri, qi) => {
     const q = rounds[ri]?.questions?.[qi]; if (!q) return;
     const tried = Array.from(new Set([...(q.triedUsers || []), q.currentlyAnswering].filter(Boolean)));
-    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried }, true);
+    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried, revealed: true, resolved: true }, true);
   };
   // closeQuestion ("Niemand") also preserves triedUsers so penalties for
   // everyone who tried still apply.
-  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null }, true);
+  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, revealed: true, resolved: true }, true);
 
   // Current picker derivation
   const pickerOrder = currentRound?.pickerOrder || [];
@@ -2595,6 +2600,12 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               if (!q) return <div key={`${c}-${lvl}`} className="ww-jeo-cell empty">—</div>;
               const winner = q.winnerUserId ? usersById[q.winnerUserId] : null;
               const triedWithoutWinner = !winner && Array.isArray(q.triedUsers) && q.triedUsers.length > 0 && !q.opened;
+              // A tile is "done" once it has been resolved in any way — won,
+              // marked wrong/closed (resolved/revealed flags), or tried by at
+              // least one player. Done tiles must NOT be re-openable; clicking
+              // one used to reset it and break the picker rotation.
+              const done = !!q.winnerUserId || !!q.resolved || !!q.revealed ||
+                (Array.isArray(q.triedUsers) && q.triedUsers.length > 0);
               const pts = levelPoints(lvl);
               const cls = q.winnerUserId
                 ? 'won'
@@ -2609,15 +2620,15 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                     // Turn-based (both modes): only the current picker (or the
                     // host as failsafe when there's no rotation yet) opens a
                     // tile; the picker auto-becomes the answerer ("dran").
-                    if (currentRound.finishedAt || q.opened || winner) return;
+                    if (currentRound.finishedAt || q.opened || done) return;
                     const allowed = iAmPicker || (admin && !currentPickerId);
                     if (!allowed) return;
                     const dran = iAmPicker ? me.id : currentPickerId;
                     openTileShared(currentRoundIdx, q._qi, dran);
                   }}
                   disabled={
-                    (!!currentRound.finishedAt && !winner) ||
-                    (!winner && !q.opened && !(iAmPicker || (admin && !currentPickerId)))
+                    !!currentRound.finishedAt || q.opened || done ||
+                    !(iAmPicker || (admin && !currentPickerId))
                   }
                   title={`${c} · Level ${lvl}`}
                 >
