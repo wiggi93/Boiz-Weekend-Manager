@@ -2677,6 +2677,14 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   // everyone who tried still apply.
   const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, revealed: true, resolved: true }, true);
 
+  // Correct a mis-judged tile (admin): reset it to fresh/unanswered so it can
+  // be re-opened and re-judged. Removes its points until it's resolved again.
+  const correctTile = async (ri, qi) => {
+    if (!admin) return;
+    if (!await appConfirm('Wertung korrigieren? Das Feld wird zurückgesetzt und kann neu beantwortet werden.', { title: 'Wertung korrigieren?', okLabel: 'ZURÜCKSETZEN' })) return;
+    resolveQuestion(ri, qi, { winnerUserId: null, triedUsers: [], opened: false, currentlyAnswering: null, resolved: false, revealed: false }, false);
+  };
+
   // Current picker derivation
   const pickerOrder = currentRound?.pickerOrder || [];
   const pickerIdx = currentRound?.pickerIdx || 0;
@@ -2781,20 +2789,24 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                   key={`${c}-${lvl}`}
                   className={`ww-jeo-cell ${cls} ${q.opened ? 'opened' : ''}`}
                   onClick={() => {
+                    if (currentRound.finishedAt || q.opened) return;
+                    // A resolved tile: admins may tap it to correct a wrong
+                    // judgement (resets it); everyone else can't re-open it.
+                    if (done) { if (admin) correctTile(currentRoundIdx, q._qi); return; }
                     // Turn-based (both modes): only the current picker (or the
                     // host as failsafe when there's no rotation yet) opens a
                     // tile; the picker auto-becomes the answerer ("dran").
-                    if (currentRound.finishedAt || q.opened || done) return;
                     const allowed = iAmPicker || (admin && !currentPickerId);
                     if (!allowed) return;
                     const dran = iAmPicker ? me.id : currentPickerId;
                     openTileShared(currentRoundIdx, q._qi, dran);
                   }}
                   disabled={
-                    !!currentRound.finishedAt || q.opened || done ||
-                    !(iAmPicker || (admin && !currentPickerId))
+                    !!currentRound.finishedAt || q.opened ||
+                    (done && !admin) ||
+                    (!done && !(iAmPicker || (admin && !currentPickerId)))
                   }
-                  title={`${c} · Level ${lvl}`}
+                  title={done && admin ? 'Tippen zum Korrigieren' : `${c} · Level ${lvl}`}
                 >
                   {winner ? (
                     <span className="ww-jeo-winner">{winner.emoji || '🍺'} · {pts}</span>
@@ -2807,6 +2819,12 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               );
             }))}
           </div>
+
+          {admin && (
+            <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
+              ✎ Als Host: gewertetes Feld antippen, um eine Fehlwertung zu korrigieren.
+            </p>
+          )}
 
           {participants.length > 0 && (
             <div className="ww-section" style={{ marginTop: 12 }}>
@@ -3000,6 +3018,23 @@ const DEFAULT_JEO_CATS = [
   'Songtexte 2000er',
 ];
 
+// Curated pool of common, well-playable quiz categories. The 🎲 button
+// pre-fills 5 random ones into the inputs (re-rollable) — the host can then
+// tweak or re-roll before actually generating the round.
+const JEO_CATEGORY_POOL = [
+  'Geographie', 'Hauptstädte', 'Flaggen', 'Deutsche Geschichte', 'Weltgeschichte',
+  'Berühmte Persönlichkeiten', 'Wissenschaft & Natur', 'Tierwelt', 'Der menschliche Körper',
+  'Mathe & Logik', 'Physik', 'Chemie', 'Weltall & Astronomie', 'Erfindungen',
+  'Filme & Kino', 'Serien & Streaming', 'Disney & Pixar', 'Harry Potter', 'Marvel & DC',
+  'Musik allgemein', 'Songtexte 2000er', 'Deutscher Rap', '90er Hits', 'Eurovision',
+  'Sport allgemein', 'Fußball', 'Olympische Spiele', 'Formel 1', 'Tennis',
+  'Essen & Trinken', 'Biersorten', 'Cocktails', 'Internationale Küche', 'Süßigkeiten',
+  'Videospiele', 'Twitch & Youtube Deutschland', 'Memes & Internet', 'Brettspiele',
+  'Kunst & Malerei', 'Literatur & Bücher', 'Mythologie', 'Sprichwörter & Redewendungen',
+  'Autos & Technik', 'Marken & Logos', 'Mode', 'Reality TV Deutschland', 'Zurück in die Schule',
+  'Deutschland', 'Europa', 'Die 80er', 'Reisen & Sehenswürdigkeiten',
+];
+
 function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
   const [cats, setCats] = useState(jeopardy?.categories?.length ? jeopardy.categories : DEFAULT_JEO_CATS);
   const [pts, setPts] = useState((jeopardy?.pointsPerPosition || [5, 3, 2, 1]).join(','));
@@ -3035,9 +3070,16 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
     try { await onGenerate(filtered); } finally { setBusy(false); }
   };
 
-  const startSurprise = async () => {
-    setBusy(true);
-    try { await onGenerate([], { surprise: true }); } finally { setBusy(false); }
+  // Pre-fill 5 random categories from the pool (re-rollable). Does NOT start
+  // the round — the host can tweak them and then hit "Runde starten".
+  const rollCategories = () => {
+    const pool = [...JEO_CATEGORY_POOL];
+    const picked = [];
+    while (picked.length < 5 && pool.length) {
+      picked.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    }
+    setCats(picked);
+    onPatch({ categories: picked });
   };
 
   const toggleParticipant = (uid) => {
@@ -3049,14 +3091,13 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
 
   return (
     <div>
-      <button className="ww-big-cta" onClick={startSurprise} disabled={busy} style={{ marginTop: 0 }}>
-        <Dice5 size={20} /><span>{busy ? 'GENERIERE FRAGEN…' : '🎲 ÜBERRASCHUNGS-RUNDE'}</span>
+      <button className="ww-big-cta" onClick={rollCategories} disabled={busy} type="button" style={{ marginTop: 0 }}>
+        <Dice5 size={20} /><span>🎲 ZUFÄLLIGE KATEGORIEN</span>
       </button>
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6, marginBottom: 16 }}>
-        Claude wählt 5 zufällige, gängige Quiz-Kategorien für dich aus — keine
-        Eingabe nötig.
+        Füllt 5 zufällige Kategorien vor — nochmal tippen zum neu würfeln. Du
+        kannst sie danach anpassen und dann unten die Runde starten.
       </p>
-      <div className="ww-or-divider"><span>oder Kategorien selbst wählen</span></div>
 
       <label className="ww-label">KATEGORIEN (5)</label>
       {Array.from({ length: 5 }).map((_, i) => (
