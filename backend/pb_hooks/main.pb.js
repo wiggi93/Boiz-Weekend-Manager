@@ -23,6 +23,21 @@ onBootstrap((e) => {
   } catch (err) {
     console.log("[bootstrap] appURL sync failed:", err);
   }
+
+  // Keep users logged in for a long time. A short auth-token TTL was causing
+  // random sign-outs mid-event (token expires → next request 401 → the SDK
+  // clears the session). Bump it to 60 days. Idempotent.
+  try {
+    const users = e.app.findCollectionByNameOrId("users");
+    const SIXTY_DAYS = 60 * 24 * 60 * 60; // seconds
+    if (users.authToken && users.authToken.duration < SIXTY_DAYS) {
+      users.authToken.duration = SIXTY_DAYS;
+      e.app.save(users);
+      console.log("[bootstrap] users auth token duration set to 60d");
+    }
+  } catch (err) {
+    console.log("[bootstrap] auth token duration set failed:", err);
+  }
 });
 
 // First registered user becomes site admin (and is auto-approved).
