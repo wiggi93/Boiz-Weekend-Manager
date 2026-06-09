@@ -3133,11 +3133,11 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
 // Kitty Split (Kassensturz)
 // ============================================================
 
-function kittySettlement(expenses, users) {
+function kittySettlement(expenses, parties) {
   const balances = {};
-  for (const u of users) balances[u.id] = 0;
+  for (const p of parties) balances[p.id] = 0;
   for (const exp of expenses) {
-    const parts = (exp.participants || []).filter(pid => users.some(u => u.id === pid));
+    const parts = (exp.participants || []).filter(pid => parties.some(p => p.id === pid));
     if (parts.length === 0) continue;
     const share = exp.amount / parts.length;
     for (const pid of parts) {
@@ -3166,16 +3166,27 @@ function kittySettlement(expenses, users) {
 function KittyView({ me, kitty, members, admin, onPatch }) {
   const users = members.map(m => m.expand?.user).filter(Boolean);
   const expenses = kitty?.expenses || [];
+  const externals = Array.isArray(kitty?.externals) ? kitty.externals : [];
+  const done = Array.isArray(kitty?.done) ? kitty.done : [];
+
+  // Unified "party" list: app members + external (non-app) people.
+  const parties = [
+    ...users.map(u => ({ id: u.id, name: u.displayName || u.email?.split('@')[0] || '?', emoji: u.emoji || '🍺', external: false })),
+    ...externals.map(x => ({ id: x.id, name: x.name, emoji: '👤', external: true })),
+  ];
+  const partyById = (id) => parties.find(p => p.id === id);
 
   const [showAdd, setShowAdd] = useState(false);
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [paidBy, setPaidBy] = useState(me.id);
-  const [participants, setParticipants] = useState(() => users.map(u => u.id));
+  const [participants, setParticipants] = useState(() => parties.map(p => p.id));
+  const [extName, setExtName] = useState('');
 
   const openAdd = () => {
     setDesc(''); setAmount(''); setPaidBy(me.id);
-    setParticipants(users.map(u => u.id));
+    setParticipants(parties.map(p => p.id));
+    setExtName('');
     setShowAdd(true);
   };
 
@@ -3185,6 +3196,7 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
     );
   };
 
+  // Any change to the expense set means confirmations are stale — clear `done`.
   const addExpense = () => {
     const amt = parseFloat(amount.replace(',', '.'));
     if (!desc.trim() || isNaN(amt) || amt <= 0 || participants.length === 0) return;
@@ -3197,19 +3209,40 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
       createdBy: me.id,
       createdAt: new Date().toISOString(),
     };
-    onPatch({ expenses: [...expenses, expense] });
+    onPatch({ expenses: [...expenses, expense], done: [] });
     setShowAdd(false);
   };
 
   const deleteExpense = async (id) => {
     if (!await appConfirm('Ausgabe löschen?', { title: 'Ausgabe löschen?' })) return;
-    onPatch({ expenses: expenses.filter(e => e.id !== id) });
+    onPatch({ expenses: expenses.filter(e => e.id !== id), done: [] });
+  };
+
+  const addExternal = () => {
+    const name = extName.trim();
+    if (name.length < 1) return;
+    const id = `ext-${Date.now()}`;
+    onPatch({ externals: [...externals, { id, name }] });
+    setParticipants(prev => [...prev, id]); // auto-include the new person
+    setExtName('');
+  };
+  const removeExternal = (id) => {
+    onPatch({ externals: externals.filter(x => x.id !== id) });
+    setParticipants(prev => prev.filter(p => p !== id));
+    if (paidBy === id) setPaidBy(me.id);
+  };
+
+  const toggleDone = () => {
+    const next = done.includes(me.id) ? done.filter(d => d !== me.id) : [...done, me.id];
+    onPatch({ done: next });
   };
 
   const totalAmount = expenses.reduce((s, e) => s + (e.amount || 0), 0);
-  const settlement = kittySettlement(expenses, users);
+  const settlement = kittySettlement(expenses, parties);
+  const iAmDone = done.includes(me.id);
+  const doneCount = users.filter(u => done.includes(u.id)).length;
+  const allDone = users.length > 0 && doneCount === users.length;
 
-  const userById = (id) => users.find(u => u.id === id);
   const fmt = (n) => n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
@@ -3233,9 +3266,9 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
 
       <div className="ww-kitty-list">
         {[...expenses].reverse().map(exp => {
-          const payer = userById(exp.paidBy);
+          const payer = partyById(exp.paidBy);
           const canDelete = admin || exp.createdBy === me.id || exp.paidBy === me.id;
-          const parts = (exp.participants || []).map(pid => userById(pid)).filter(Boolean);
+          const parts = (exp.participants || []).map(pid => partyById(pid)).filter(Boolean);
           const myShare = exp.participants?.includes(me.id)
             ? exp.amount / (exp.participants?.length || 1)
             : 0;
@@ -3246,7 +3279,7 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
                 <span className="ww-kitty-exp-amount">{fmt(exp.amount)} €</span>
               </div>
               <div className="ww-kitty-exp-meta">
-                <span>{payer?.emoji || '🍺'} {payer?.displayName || '?'} hat bezahlt</span>
+                <span>{payer?.emoji || '🍺'} {payer?.name || '?'} hat bezahlt</span>
                 <span className="ww-kitty-exp-parts">
                   {parts.map(u => u.emoji || '🍺').join('')} ÷{parts.length}
                   {myShare > 0.005 && <span className="ww-kitty-myshare"> · mein Anteil: {fmt(myShare)} €</span>}
@@ -3269,13 +3302,13 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
             <div className="ww-muted" style={{ textAlign: 'center', padding: '12px 0' }}>Alles ausgeglichen ✓</div>
           ) : (
             settlement.map((tx, i) => {
-              const from = userById(tx.from);
-              const to = userById(tx.to);
+              const from = partyById(tx.from);
+              const to = partyById(tx.to);
               return (
                 <div key={i} className="ww-kitty-tx">
-                  <span className="ww-kitty-tx-from">{from?.emoji || '🍺'} {from?.displayName || '?'}</span>
+                  <span className="ww-kitty-tx-from">{from?.emoji || '🍺'} {from?.name || '?'}</span>
                   <span className="ww-kitty-tx-arrow">→</span>
-                  <span className="ww-kitty-tx-to">{to?.emoji || '🍺'} {to?.displayName || '?'}</span>
+                  <span className="ww-kitty-tx-to">{to?.emoji || '🍺'} {to?.name || '?'}</span>
                   <span className="ww-kitty-tx-amt">{fmt(tx.amount)} €</span>
                 </div>
               );
@@ -3283,6 +3316,28 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
           )}
         </div>
       )}
+
+      {/* Final-status: everyone confirms when they've submitted all expenses */}
+      <div className="ww-kitty-done">
+        <div className="ww-section-head"><h3>FERTIG-STATUS</h3></div>
+        {allDone ? (
+          <div className="ww-kitty-alldone">✅ Alle fertig — ihr könnt jetzt ausgleichen! 💸</div>
+        ) : (
+          <div className="ww-muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            {doneCount} von {users.length} haben alles eingereicht. Erst ausgleichen, wenn alle fertig sind.
+          </div>
+        )}
+        <div className="ww-kitty-done-chips">
+          {users.map(u => (
+            <span key={u.id} className={`ww-kitty-done-chip ${done.includes(u.id) ? 'on' : ''}`}>
+              {done.includes(u.id) ? '✓' : '…'} {u.emoji || '🍺'} {u.displayName || u.email?.split('@')[0]}
+            </span>
+          ))}
+        </div>
+        <button className={`ww-big-cta ${iAmDone ? '' : 'green'}`} style={{ marginTop: 10 }} onClick={toggleDone}>
+          {iAmDone ? <><RotateCcw size={18} /><span>DOCH NOCH NICHT FERTIG</span></> : <><Check size={20} /><span>ICH BIN FERTIG — ALLES EINGEREICHT</span></>}
+        </button>
+      </div>
 
       {showAdd && (
         <ModuleSettingsDrawer title="💰 Ausgabe eintragen" onClose={() => setShowAdd(false)}>
@@ -3304,30 +3359,52 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
           />
           <label className="ww-label">BEZAHLT VON</label>
           <div className="ww-kitty-pickers">
-            {users.map(u => (
+            {parties.map(p => (
               <button
-                key={u.id}
-                className={`ww-kitty-picker ${paidBy === u.id ? 'sel' : ''}`}
-                onClick={() => setPaidBy(u.id)}
+                key={p.id}
+                className={`ww-kitty-picker ${paidBy === p.id ? 'sel' : ''}`}
+                onClick={() => setPaidBy(p.id)}
               >
-                <span>{u.emoji || '🍺'}</span>
-                <span className="ww-kitty-picker-name">{u.displayName || u.email?.split('@')[0]}</span>
+                <span>{p.emoji}</span>
+                <span className="ww-kitty-picker-name">{p.name}</span>
               </button>
             ))}
           </div>
           <label className="ww-label">BETEILIGT</label>
           <div className="ww-kitty-pickers">
-            {users.map(u => (
+            {parties.map(p => (
               <button
-                key={u.id}
-                className={`ww-kitty-picker ${participants.includes(u.id) ? 'sel' : ''}`}
-                onClick={() => toggleParticipant(u.id)}
+                key={p.id}
+                className={`ww-kitty-picker ${participants.includes(p.id) ? 'sel' : ''}`}
+                onClick={() => toggleParticipant(p.id)}
               >
-                <span>{u.emoji || '🍺'}</span>
-                <span className="ww-kitty-picker-name">{u.displayName || u.email?.split('@')[0]}</span>
+                <span>{p.emoji}</span>
+                <span className="ww-kitty-picker-name">{p.name}</span>
               </button>
             ))}
           </div>
+
+          <label className="ww-label">EXTERNE PERSON (nicht in der App)</label>
+          {externals.length > 0 && (
+            <div className="ww-kitty-ext-list">
+              {externals.map(x => (
+                <span key={x.id} className="ww-kitty-ext-chip">
+                  👤 {x.name}
+                  <button onClick={() => removeExternal(x.id)} aria-label="Entfernen"><X size={11} /></button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="ww-kitty-ext-add">
+            <input
+              className="ww-input" placeholder="Name z.B. Tom (extern)"
+              value={extName} maxLength={30}
+              onChange={e => setExtName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && addExternal()}
+            />
+            <button className="ww-mini-btn" onClick={addExternal} disabled={!extName.trim()}><Plus size={13} /> Add</button>
+          </div>
+
           {participants.length > 0 && amount && !isNaN(parseFloat(amount.replace(',', '.'))) && (
             <div className="ww-muted" style={{ fontSize: 12, margin: '6px 0 10px', textAlign: 'center' }}>
               = {fmt(parseFloat(amount.replace(',', '.')) / participants.length)} € pro Person
