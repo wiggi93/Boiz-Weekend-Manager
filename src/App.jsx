@@ -370,7 +370,7 @@ export default function App() {
         if ((rec.beer || 0) === opt.beer && (rec.mische || 0) === opt.mische) return;
         myOptRef.current = { beer: rec.beer || 0, mische: rec.mische || 0 };
       }
-      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0 } }));
+      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0, log: Array.isArray(rec.log) ? rec.log : (m[rec.user]?.log || []) } }));
       return;
     }
 
@@ -573,7 +573,7 @@ export default function App() {
       // Optimistic stats wipe so the UI updates before realtime echo arrives.
       setStatsMap(prev => {
         const next = {};
-        for (const k of Object.keys(prev)) next[k] = { ...prev[k], beer: 0, mische: 0 };
+        for (const k of Object.keys(prev)) next[k] = { ...prev[k], beer: 0, mische: 0, log: [] };
         return next;
       });
       myOptRef.current = { beer: 0, mische: 0 };
@@ -2098,13 +2098,25 @@ function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSett
   const bump = (kind, delta) => {
     if (!active) return;
     const cur = statsMap[me.id]; if (!cur?.id) return;
-    const nextVal = Math.max(0, (cur[kind] || 0) + delta);
-    const next = { ...cur, [kind]: nextVal };
+    const curVal = cur[kind] || 0;
+    const nextVal = Math.max(0, curVal + delta);
+    if (nextVal === curVal) return; // nothing changed (e.g. minus at 0)
+    // Maintain the timestamped drink log alongside the counter: +1 appends a
+    // { t, k } entry, −1 removes the most recent entry of that kind.
+    let log = Array.isArray(cur.log) ? cur.log.slice() : [];
+    if (delta > 0) {
+      log.push({ t: Date.now(), k: kind });
+    } else {
+      for (let i = log.length - 1; i >= 0; i--) {
+        if (log[i]?.k === kind) { log.splice(i, 1); break; }
+      }
+    }
+    const next = { ...cur, [kind]: nextVal, log };
     setStatsMap(m => ({ ...m, [me.id]: next }));
     // Update the App-level ref so the realtime handler can recognise its
     // own echo and skip it (no flicker on rapid tapping).
     if (myOptRef) myOptRef.current = { beer: next.beer, mische: next.mische };
-    scheduleWrite(cur.id, { beer: next.beer, mische: next.mische });
+    scheduleWrite(cur.id, { beer: next.beer, mische: next.mische, log });
   };
 
   return (
@@ -4370,6 +4382,15 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
   const mischePts = (s.mische || 0) * (event.pointsPerMische ?? 1);
   const drinkPts = beerPts + mischePts;
 
+  // Timestamped drink history (newest first). Drinks logged before this
+  // feature shipped have no timestamp — show them as a count-only remainder.
+  const drinkLog = (Array.isArray(s.log) ? s.log : [])
+    .filter(e => e && (e.k === 'beer' || e.k === 'mische') && e.t)
+    .slice()
+    .sort((a, b) => (b.t || 0) - (a.t || 0));
+  const totalDrinks = (s.beer || 0) + (s.mische || 0);
+  const untrackedDrinks = Math.max(0, totalDrinks - drinkLog.length);
+
   const ppw = flunky?.pointsPerWin || 0;
   const allFinished = finishedGames(flunky);
   const playedGames = allFinished.filter(g => teamOfInGame(user.id, g) !== null);
@@ -4432,6 +4453,30 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
           <DetailRow label={`${event.drinkLabel || 'Mische'} × ${event.pointsPerMische ?? 1} pkt`} count={s.mische || 0} pts={mischePts} />
           <DetailRow label="Summe" pts={drinkPts} bold />
         </div>
+
+        {(drinkLog.length > 0 || untrackedDrinks > 0) && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🕓 GETRÄNKE-VERLAUF</div>
+            {drinkLog.length > 0 ? (
+              <div className="ww-drinklog">
+                {drinkLog.map((e, i) => (
+                  <div key={i} className="ww-drinklog-row">
+                    <span className="ww-drinklog-emoji">{e.k === 'beer' ? '🍺' : '🍷'}</span>
+                    <span className="ww-drinklog-label">{e.k === 'beer' ? (event.beerLabel || 'Bier') : (event.drinkLabel || 'Mische')}</span>
+                    <span className="ww-drinklog-time">{formatDrinkTime(e.t)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="ww-muted" style={{ fontSize: 12, padding: '8px 0' }}>Noch keine Getränke mit Zeitstempel.</div>
+            )}
+            {untrackedDrinks > 0 && (
+              <div className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+                + {untrackedDrinks} ohne Zeitstempel (vor dieser Funktion gezählt).
+              </div>
+            )}
+          </div>
+        )}
 
         {flunky && (
           <div className="ww-detail-section">
@@ -5153,6 +5198,18 @@ function formatDate(iso) {
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' }).toUpperCase();
   } catch { return iso; }
+}
+
+// Drink-log timestamp: weekday + time, plus the date only if it's not today.
+function formatDrinkTime(t) {
+  const d = new Date(t);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  if (sameDay) return `heute ${time}`;
+  const day = d.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' });
+  return `${day} ${time}`;
 }
 
 // Compact date used inside a range (no weekday/year noise).

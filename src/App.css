@@ -1891,3 +1891,18 @@
 .ww-chal-status { font-size: 12px; letter-spacing: 0.06em; font-family: 'IBM Plex Mono', monospace; }
 .ww-chal-status.done { color: var(--green); }
 .ww-chal-status.failed { color: var(--red); }
+
+/* ============ Drink history timeline (user detail) ============ */
+.ww-drinklog { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.ww-drinklog::-webkit-scrollbar { display: none; }
+.ww-drinklog-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 2px; border-bottom: 1px solid var(--border);
+}
+.ww-drinklog-row:last-child { border-bottom: none; }
+.ww-drinklog-emoji { font-size: 16px; flex-shrink: 0; }
+.ww-drinklog-label { flex: 1; font-size: 13px; }
+.ww-drinklog-time {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  color: var(--muted); letter-spacing: 0.04em; flex-shrink: 0;
+}
