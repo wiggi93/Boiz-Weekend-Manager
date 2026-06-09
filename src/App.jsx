@@ -480,6 +480,62 @@ export default function App() {
     return () => { if (unsub) unsub(); };
   }, [currentEventId, realtimeHandler]);
 
+  // Resilience: PocketBase's realtime (SSE) can silently die on mobile —
+  // backgrounding the app, a network blip, or a flaky connection — and then a
+  // tile someone else opened never arrives until the app is killed + reopened.
+  // Two safety nets:
+  //  (a) When the app returns to the foreground (or the network comes back),
+  //      proactively refresh the auth token (prevents random sign-outs from an
+  //      expired token) and re-pull the current event so any missed realtime
+  //      events are caught up.
+  //  (b) While a Jeopardy round is live, poll the jeopardy record every few
+  //      seconds as a backstop so the board self-heals within seconds even if
+  //      realtime is dead for one player.
+  useEffect(() => {
+    if (!me?.id) return;
+    let last = 0;
+    const onForeground = () => {
+      if (document.visibilityState && document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - last < 1500) return; // debounce focus/visibility/online storms
+      last = now;
+      if (pb.authStore.isValid) {
+        pb.collection('users').authRefresh().catch(() => {});
+      }
+      if (eventRef.current?.id) refreshCurrentEvent();
+    };
+    document.addEventListener('visibilitychange', onForeground);
+    window.addEventListener('focus', onForeground);
+    window.addEventListener('online', onForeground);
+    return () => {
+      document.removeEventListener('visibilitychange', onForeground);
+      window.removeEventListener('focus', onForeground);
+      window.removeEventListener('online', onForeground);
+    };
+  }, [me?.id, refreshCurrentEvent]);
+
+  // (b) Jeopardy poll backstop — only runs while a round is unfinished.
+  const jeopardyRoundLive = (() => {
+    const rs = jeopardy?.rounds || [];
+    const last = rs[rs.length - 1];
+    return !!(last && !last.finishedAt);
+  })();
+  useEffect(() => {
+    if (!currentEventId || !jeopardyRoundLive) return;
+    const id = setInterval(async () => {
+      if (document.visibilityState && document.visibilityState !== 'visible') return;
+      try {
+        const fresh = await getJeopardy(currentEventId);
+        if (!fresh) return;
+        // Only adopt the server copy when it's genuinely newer, so we don't
+        // clobber the actor's just-made optimistic move mid-flight.
+        const localUpd = jeopardyRef.current?.updated || '';
+        if ((fresh.updated || '') >= localUpd) { jeopardyRef.current = fresh; setJeopardy(fresh); }
+      } catch (_) {}
+    }, 5000);
+    return () => clearInterval(id);
+  }, [currentEventId, jeopardyRoundLive]);
+
   useEffect(() => { if (lobbyView === 'admin') refreshAllEvents(); }, [lobbyView, refreshAllEvents]);
 
   // Load global user list when admin opens the USER tab in the lobby
@@ -496,7 +552,23 @@ export default function App() {
   }, [currentEvent, moduleTab]);
 
   // ---- Handlers ----
-  const onLogin = async (email, password) => { await login(email, password); showToast('Eingeloggt 🍻'); };
+  const onLogin = async (email, password) => {
+    // Transient failures (network blip, 5xx, a still-closing realtime socket
+    // from a previous session) can make the first re-login attempt fail even
+    // with correct credentials. Retry a couple of times with a short backoff;
+    // only a genuine 400 (wrong credentials / not verified) fails fast.
+    let lastErr;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { await login(email, password); showToast('Eingeloggt 🍻'); return; }
+      catch (e) {
+        lastErr = e;
+        const status = e?.status || 0;
+        if (status === 400 || status === 403) throw e; // credential/verify error — don't retry
+        await new Promise(r => setTimeout(r, 600 * (attempt + 1)));
+      }
+    }
+    throw lastErr;
+  };
   const onRegister = async (data) => { await register(data); showToast('Fast fertig — bestätige deine E-Mail 📧'); };
   const onLogout = () => {
     logout(); setCurrentEventId(null); setMyMemberships([]);
