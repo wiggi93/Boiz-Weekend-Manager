@@ -23,6 +23,7 @@ import {
   getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
+  ensurePushSubscription,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
 import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
@@ -234,6 +235,48 @@ export default function App() {
   }, []);
 
   useEffect(() => pb.authStore.onChange(() => setMe(pb.authStore.record)), []);
+
+  // Web-Push: once logged in with notification permission granted, make sure
+  // this device has a push subscription registered (idempotent).
+  useEffect(() => {
+    if (!me?.id) return;
+    if ('Notification' in window && Notification.permission === 'granted') {
+      ensurePushSubscription();
+    }
+  }, [me?.id]);
+
+  // Deep links from push notifications: /?event=<id>&goto=challenges|jeopardy|kitty
+  // Applied once on boot (cold launch via notification tap) and whenever the
+  // already-running app gets a navigate message from the service worker.
+  const applyDeepLink = useCallback((urlOrSearch) => {
+    try {
+      const params = typeof urlOrSearch === 'string'
+        ? new URL(urlOrSearch, window.location.origin).searchParams
+        : urlOrSearch;
+      const evId = params.get('event');
+      if (!evId) return false;
+      const goto = params.get('goto');
+      setCurrentEventId(evId);
+      if (goto === 'kitty') { setView('tools'); setToolOpen('kitty'); }
+      else if (goto) { setView('home'); setModuleTab(goto); }
+      else { setView('home'); setModuleTab('overview'); }
+      return true;
+    } catch { return false; }
+  }, []);
+
+  useEffect(() => {
+    if (!me?.id) return;
+    // Cold launch: consume the deep link from the URL, then clean it up so a
+    // reload doesn't re-apply it.
+    if (applyDeepLink(new URLSearchParams(window.location.search))) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    const onMsg = (e) => {
+      if (e.data?.type === 'push-navigate' && e.data.url) applyDeepLink(e.data.url);
+    };
+    navigator.serviceWorker?.addEventListener?.('message', onMsg);
+    return () => navigator.serviceWorker?.removeEventListener?.('message', onMsg);
+  }, [me?.id, applyDeepLink]);
 
   // Refresh own auth record from server on boot so role changes made while
   // we were offline (e.g., admin promoted us to host) are picked up.
@@ -1752,6 +1795,7 @@ function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote,
   const requestPermission = async () => {
     const result = await Notification.requestPermission();
     setNotifPerm(result);
+    if (result === 'granted') ensurePushSubscription();
   };
   const openPolls = (polls || []).filter(p => !p.closed);
   return (
@@ -4772,7 +4816,11 @@ function ProfileView({ me, onSave, onLogout }) {
             <button
               className="ww-big-cta"
               style={{ marginTop: 8 }}
-              onClick={async () => { const r = await Notification.requestPermission(); setNotifPerm(r); }}
+              onClick={async () => {
+                const r = await Notification.requestPermission();
+                setNotifPerm(r);
+                if (r === 'granted') ensurePushSubscription();
+              }}
             >
               <Bell size={18} /><span>BENACHRICHTIGUNGEN ERLAUBEN</span>
             </button>
