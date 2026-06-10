@@ -341,6 +341,62 @@ export async function listPollVotes(eventId) {
   return pb.collection('poll_votes').getFullList({ filter: `poll.event="${eventId}"` });
 }
 
+// ---- Web Push ----
+// Real OS-level push notifications. iOS needs ≥16.4 AND the PWA installed to
+// the Home Screen; permission must already be granted (we piggyback on the
+// existing Notification permission flow). Idempotent — safe to call on every
+// boot once permission is granted.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+export async function ensurePushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
+  if (!pb.authStore.isValid || Notification.permission !== 'granted') return false;
+  try {
+    const res = await fetch(`${PB_URL}/api/push/pubkey`);
+    const { key } = await res.json();
+    if (!key) return false; // server not configured for push yet
+
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+    }
+
+    const json = sub.toJSON();
+    const meId = pb.authStore.record.id;
+    // Upsert by endpoint: the endpoint may already exist (re-login on the
+    // same device, possibly under another account) — claim/update it then.
+    try {
+      const existing = await pb.collection('push_subs')
+        .getFirstListItem(`endpoint = "${json.endpoint.replace(/"/g, '\\"')}"`);
+      if (existing.user !== meId || JSON.stringify(existing.keys) !== JSON.stringify(json.keys)) {
+        await pb.collection('push_subs').update(existing.id, { user: meId, keys: json.keys });
+      }
+    } catch {
+      await pb.collection('push_subs').create({
+        user: meId,
+        endpoint: json.endpoint,
+        keys: json.keys,
+        ua: navigator.userAgent.slice(0, 280),
+      });
+    }
+    return true;
+  } catch (e) {
+    console.warn('push subscribe failed', e);
+    return false;
+  }
+}
+
 // ---- Challenges (peer dares for points) ----
 export async function listChallenges(eventId) {
   return pb.collection('challenges').getFullList({ filter: `event="${eventId}"`, sort: '-created' });

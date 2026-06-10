@@ -34,6 +34,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        // Web-Push handlers (push + notificationclick) live in their own
+        // file and get pulled into the generated SW.
+        importScripts: ['sw-push.js'],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//, /^\/_/],
         // Intentionally NOT setting skipWaiting/clientsClaim here — let the
