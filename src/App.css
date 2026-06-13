@@ -1935,3 +1935,15 @@
 .ww-kitty-ext-add { display: flex; gap: 6px; align-items: stretch; }
 .ww-kitty-ext-add .ww-input { flex: 1; }
 .ww-kitty-ext-add .ww-mini-btn { flex-shrink: 0; white-space: nowrap; }
+
+/* ============ Jeopardy: per-category reshuffle row ============ */
+.ww-jeo-cat-row { display: flex; gap: 6px; align-items: stretch; }
+.ww-jeo-cat-row .ww-input { flex: 1; min-width: 0; }
+.ww-jeo-cat-roll {
+  flex-shrink: 0; width: 44px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card-2); border: 1px solid var(--border);
+  color: var(--amber); border-radius: 3px; cursor: pointer;
+}
+.ww-jeo-cat-roll:hover { border-color: var(--amber); background: rgba(245,165,36,0.1); }
+.ww-jeo-cat-roll:active { transform: scale(0.94); }
