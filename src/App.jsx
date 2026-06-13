@@ -179,6 +179,10 @@ export default function App() {
   const [jeopardy, setJeopardy] = useState(null);
   const jeopardyRef = useRef(null);
   useEffect(() => { jeopardyRef.current = jeopardy; }, [jeopardy]);
+  // Timestamp of the last LOCAL jeopardy write. The poll backstop uses this to
+  // avoid clobbering an optimistic move that hasn't round-tripped yet (which
+  // made tiles flash open→closed).
+  const jeopardyWriteRef = useRef(0);
   const [kitty, setKitty] = useState(null);
   const kittyRef = useRef(null);
   useEffect(() => { kittyRef.current = kitty; }, [kitty]);
@@ -565,15 +569,21 @@ export default function App() {
   })();
   useEffect(() => {
     if (!currentEventId || !jeopardyRoundLive) return;
+    const GRACE = 4000; // ms to trust local state after my own move
     const id = setInterval(async () => {
       if (document.visibilityState && document.visibilityState !== 'visible') return;
+      if (Date.now() - jeopardyWriteRef.current < GRACE) return; // I just acted — don't fight my optimistic state
       try {
         const fresh = await getJeopardy(currentEventId);
         if (!fresh) return;
-        // Only adopt the server copy when it's genuinely newer, so we don't
-        // clobber the actor's just-made optimistic move mid-flight.
-        const localUpd = jeopardyRef.current?.updated || '';
-        if ((fresh.updated || '') >= localUpd) { jeopardyRef.current = fresh; setJeopardy(fresh); }
+        if (Date.now() - jeopardyWriteRef.current < GRACE) return; // a move landed while fetching — bail
+        // Adopt only when the board actually differs, so we never re-render
+        // (and never revert) on a no-op poll.
+        const cur = jeopardyRef.current;
+        const changed = !cur
+          || JSON.stringify(fresh.rounds) !== JSON.stringify(cur.rounds)
+          || JSON.stringify(fresh.participants) !== JSON.stringify(cur.participants);
+        if (changed) { jeopardyRef.current = fresh; setJeopardy(fresh); }
       } catch (_) {}
     }, 5000);
     return () => clearInterval(id);
@@ -812,8 +822,9 @@ export default function App() {
       jeopardyRef.current = cur; setJeopardy(cur);
     }
     const nextJ = { ...cur, ...patch };
+    jeopardyWriteRef.current = Date.now(); // mark dirty so the poll backs off
     jeopardyRef.current = nextJ; setJeopardy(nextJ);
-    try { await updateJeopardy(cur.id, patch); }
+    try { await updateJeopardy(cur.id, patch); jeopardyWriteRef.current = Date.now(); }
     catch (e) { console.warn('jeopardy update', e); showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
@@ -3126,6 +3137,21 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
     onPatch({ categories: picked });
   };
 
+  // Re-roll a single slot — pick a fresh category from the pool that isn't
+  // already used in the other slots (and differs from the current one).
+  const rollOne = (i) => {
+    const used = cats.map((c, j) => j === i ? null : (c || '').trim().toLowerCase()).filter(Boolean);
+    const curLower = (cats[i] || '').trim().toLowerCase();
+    let avail = JEO_CATEGORY_POOL.filter(c => !used.includes(c.toLowerCase()) && c.toLowerCase() !== curLower);
+    if (avail.length === 0) avail = JEO_CATEGORY_POOL.filter(c => !used.includes(c.toLowerCase()));
+    if (avail.length === 0) return;
+    const pick = avail[Math.floor(Math.random() * avail.length)];
+    const next = [...cats]; while (next.length < 5) next.push('');
+    next[i] = pick;
+    setCats(next);
+    onPatch({ categories: next.map(c => (c || '').trim()).filter(Boolean) });
+  };
+
   const toggleParticipant = (uid) => {
     const has = participants.includes(uid);
     onPatch({ participants: has ? participants.filter(x => x !== uid) : [...participants, uid] });
@@ -3136,24 +3162,28 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
   return (
     <div>
       <button className="ww-big-cta" onClick={rollCategories} disabled={busy} type="button" style={{ marginTop: 0 }}>
-        <Dice5 size={20} /><span>🎲 ZUFÄLLIGE KATEGORIEN</span>
+        <Dice5 size={20} /><span>🎲 ALLE NEU WÜRFELN</span>
       </button>
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6, marginBottom: 16 }}>
-        Füllt 5 zufällige Kategorien vor — nochmal tippen zum neu würfeln. Du
-        kannst sie danach anpassen und dann unten die Runde starten.
+        Füllt 5 zufällige Kategorien vor — oder würfle einzelne mit dem 🎲 neben
+        dem Feld. Danach anpassen und unten die Runde starten.
       </p>
 
       <label className="ww-label">KATEGORIEN (5)</label>
       {Array.from({ length: 5 }).map((_, i) => (
-        <input
-          key={i} className="ww-input"
-          style={{ marginTop: i === 0 ? 0 : 6 }}
-          placeholder={`Kategorie ${i + 1}`}
-          value={cats[i] || ''}
-          onChange={(e) => updateCat(i, e.target.value)}
-          onBlur={saveCats}
-          maxLength={40}
-        />
+        <div key={i} className="ww-jeo-cat-row" style={{ marginTop: i === 0 ? 0 : 6 }}>
+          <input
+            className="ww-input"
+            placeholder={`Kategorie ${i + 1}`}
+            value={cats[i] || ''}
+            onChange={(e) => updateCat(i, e.target.value)}
+            onBlur={saveCats}
+            maxLength={40}
+          />
+          <button type="button" className="ww-jeo-cat-roll" onClick={() => rollOne(i)} title="Diese Kategorie neu würfeln" aria-label="Neu würfeln">
+            <Dice5 size={16} />
+          </button>
+        </div>
       ))}
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
         💡 Tipp: Kategorie <b>„Flaggen"</b> eintippen → zeigt offline Flaggen-Bilder
