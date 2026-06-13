@@ -397,6 +397,32 @@ export async function ensurePushSubscription() {
   }
 }
 
+// ---- Weinwanderung (wine rating) ----
+export async function listWines(eventId) {
+  return pb.collection('wines').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
+}
+export async function createWine({ eventId, name, note }) {
+  return pb.collection('wines').create({
+    event: eventId, name, note: note || '', addedBy: pb.authStore.record.id,
+  });
+}
+export async function deleteWine(id) {
+  return pb.collection('wines').delete(id);
+}
+export async function listWineRatings(eventId) {
+  return pb.collection('wine_ratings').getFullList({ filter: `wine.event="${eventId}"` });
+}
+// Upsert the current user's rating for a wine (one row per wine+user).
+export async function rateWine(wineId, rating) {
+  const meId = pb.authStore.record.id;
+  try {
+    const existing = await pb.collection('wine_ratings').getFirstListItem(`wine="${wineId}" && user="${meId}"`);
+    return pb.collection('wine_ratings').update(existing.id, { rating });
+  } catch {
+    return pb.collection('wine_ratings').create({ wine: wineId, user: meId, rating });
+  }
+}
+
 // ---- Challenges (peer dares for points) ----
 export async function listChallenges(eventId) {
   return pb.collection('challenges').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
@@ -454,6 +480,9 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('schedule').subscribe('*', wrap('schedule', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('wines').subscribe('*', wrap('wines', (ev) => ev.record?.event === eventId))),
+    // wine_ratings only carry the wine id — forward all, the consumer refetches.
+    safe(pb.collection('wine_ratings').subscribe('*', wrap('wine_ratings'))),
     // poll_votes records only carry the poll id, not the event — forward all
     // and let the consumer refetch (votes are low-frequency).
     safe(pb.collection('poll_votes').subscribe('*', wrap('poll_votes'))),

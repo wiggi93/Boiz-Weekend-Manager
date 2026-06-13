@@ -23,6 +23,7 @@ import {
   getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
+  listWines, createWine, deleteWine, listWineRatings, rateWine,
   ensurePushSubscription,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
@@ -196,6 +197,8 @@ export default function App() {
   const [polls, setPolls] = useState([]);
   const [pollVotes, setPollVotes] = useState([]);
   const [challenges, setChallenges] = useState([]);
+  const [wines, setWines] = useState([]);
+  const [wineRatings, setWineRatings] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
   // by DrinksBar on every bump; cleared on event switch.
@@ -312,7 +315,7 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setWines([]); setWineRatings([]);
       return;
     }
     // Fetch the event first. ONLY a genuinely missing event (404) kicks the
@@ -329,7 +332,7 @@ export default function App() {
     // Sub-fetches: each tolerates its own failure, never resets the event.
     const safe = (p, fallback) => p.catch(() => fallback);
     try {
-      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch] = await Promise.all([
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, wn, wr] = await Promise.all([
         safe(listEventMembers(currentEventId), []),
         safe(loadEventStats(currentEventId), {}),
         safe(getFlunky(currentEventId), null),
@@ -341,10 +344,13 @@ export default function App() {
         safe(listPolls(currentEventId), []),
         safe(listPollVotes(currentEventId), []),
         safe(listChallenges(currentEventId), []),
+        safe(listWines(currentEventId), []),
+        safe(listWineRatings(currentEventId), []),
       ]);
       setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
       setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch);
+      setWines(wn); setWineRatings(wr);
     } catch (e) {
       console.warn('refreshCurrentEvent sub-fetch', e);
     }
@@ -493,6 +499,23 @@ export default function App() {
         if (idx === -1) return [rec, ...prev];
         const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
       });
+      return;
+    }
+
+    if (collection === 'wines') {
+      setWines(prev => {
+        if (ev.action === 'delete') return prev.filter(w => w.id !== rec.id);
+        const idx = prev.findIndex(w => w.id === rec.id);
+        if (idx === -1) return [rec, ...prev];
+        const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
+      });
+      return;
+    }
+
+    if (collection === 'wine_ratings') {
+      // Ratings only carry the wine id; refetch all ratings for the event.
+      const eid = eventRef.current?.id;
+      if (eid) listWineRatings(eid).then(setWineRatings).catch(() => {});
       return;
     }
 
@@ -793,6 +816,32 @@ export default function App() {
     if (!(await appConfirm('Challenge wirklich löschen?'))) return;
     try { await deleteChallenge(id); setChallenges(prev => prev.filter(c => c.id !== id)); showToast('Challenge gelöscht'); }
     catch (e) { showToast('Fehler 😬'); }
+  };
+
+  // ---- Weinwanderung ----
+  const onWineCreate = async ({ name, note }) => {
+    const clean = (name || '').trim();
+    if (clean.length < 2) return;
+    if (wines.some(w => (w.name || '').trim().toLowerCase() === clean.toLowerCase())) {
+      showToast('Diesen Wein gibt es schon 🍷'); return;
+    }
+    try { await createWine({ eventId: currentEventId, name: clean, note }); showToast('Wein eingetragen 🍷'); }
+    catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
+  };
+  const onWineDelete = async (id) => {
+    if (!(await appConfirm('Wein wirklich löschen? Alle Bewertungen gehen verloren.', { title: 'Wein löschen?', destructive: true }))) return;
+    try { await deleteWine(id); setWines(prev => prev.filter(w => w.id !== id)); showToast('Wein gelöscht'); }
+    catch (e) { showToast('Fehler 😬'); }
+  };
+  const onWineRate = async (wineId, rating) => {
+    // optimistic upsert of my rating
+    setWineRatings(prev => {
+      const idx = prev.findIndex(r => r.wine === wineId && r.user === me.id);
+      if (idx === -1) return [...prev, { id: `tmp-${wineId}`, wine: wineId, user: me.id, rating }];
+      const copy = [...prev]; copy[idx] = { ...copy[idx], rating }; return copy;
+    });
+    try { await rateWine(wineId, rating); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
   };
 
   // Event-specific wishes saved on my membership row for the current event.
@@ -1143,6 +1192,8 @@ export default function App() {
             onChallengeCreate={onChallengeCreate}
             onChallengeResolve={onChallengeResolve}
             onChallengeDelete={onChallengeDelete}
+            wines={wines} wineRatings={wineRatings}
+            onWineCreate={onWineCreate} onWineDelete={onWineDelete} onWineRate={onWineRate}
             customModules={customModules}
             onCustomCreate={onCustomCreate}
             onCustomPatch={onCustomPatch}
@@ -1868,6 +1919,7 @@ function HomeView({
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
   challenges, onChallengeCreate, onChallengeResolve, onChallengeDelete,
+  wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef,
@@ -1963,6 +2015,12 @@ function HomeView({
         <ChallengesView
           me={me} admin={admin} members={members} challenges={challenges}
           onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete}
+        />
+      )}
+      {moduleTab === 'wine' && (
+        <WineView
+          me={me} admin={admin} members={members} wines={wines} ratings={wineRatings}
+          onCreate={onWineCreate} onDelete={onWineDelete} onRate={onWineRate}
         />
       )}
       {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
@@ -3993,6 +4051,161 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+// ============================================================
+// Weinwanderung — log wines, everyone rates 1–5 glasses
+// ============================================================
+
+function GlassRating({ value, onPick, size = 22 }) {
+  // Interactive 1–5 wine-glass rating. value=0 means not yet rated.
+  return (
+    <div className="ww-glasses" role="radiogroup" aria-label="Bewertung">
+      {[1, 2, 3, 4, 5].map(n => (
+        <button
+          key={n} type="button"
+          className={`ww-glass ${n <= value ? 'on' : ''}`}
+          style={{ fontSize: size }}
+          onClick={() => onPick(n === value ? 0 : n)}
+          aria-label={`${n} Gläser`}
+          aria-pressed={n <= value}
+        >🍷</button>
+      ))}
+    </div>
+  );
+}
+
+function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRate }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+
+  const [name, setName] = useState('');
+  const [note, setNote] = useState('');
+  const [sort, setSort] = useState('new'); // 'new' | 'best'
+  const [busy, setBusy] = useState(false);
+
+  // Aggregate ratings per wine.
+  const stats = useMemo(() => {
+    const byWine = {};
+    for (const r of ratings) {
+      if (!byWine[r.wine]) byWine[r.wine] = { sum: 0, count: 0, mine: 0 };
+      byWine[r.wine].sum += Number(r.rating) || 0;
+      byWine[r.wine].count += 1;
+      if (r.user === me.id) byWine[r.wine].mine = Number(r.rating) || 0;
+    }
+    return byWine;
+  }, [ratings, me.id]);
+
+  const enriched = wines.map(w => {
+    const s = stats[w.id] || { sum: 0, count: 0, mine: 0 };
+    return { ...w, avg: s.count ? s.sum / s.count : 0, count: s.count, mine: s.mine };
+  });
+
+  const ranked = [...enriched].filter(w => w.count > 0).sort((a, b) => b.avg - a.avg || b.count - a.count);
+  const list = sort === 'best'
+    ? [...enriched].sort((a, b) => b.avg - a.avg || b.count - a.count)
+    : enriched; // already -created (newest first) from the API
+  const rankOf = (id) => ranked.findIndex(w => w.id === id);
+
+  const totalWines = wines.length;
+  const overallAvg = ranked.length ? (ranked.reduce((s, w) => s + w.avg, 0) / ranked.length) : 0;
+  const fmt1 = (n) => n.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  const submit = async () => {
+    if (name.trim().length < 2) return;
+    setBusy(true);
+    try { await onCreate({ name, note }); setName(''); setNote(''); }
+    finally { setBusy(false); }
+  };
+
+  const medal = (id) => { const r = rankOf(id); return r === 0 ? '🥇' : r === 1 ? '🥈' : r === 2 ? '🥉' : null; };
+
+  return (
+    <div className="ww-wine">
+      <div className="ww-stats-row">
+        <StatPill label="Weine" value={totalWines} />
+        <StatPill label="Ø Wertung" value={overallAvg ? `${fmt1(overallAvg)}🍷` : '—'} accent />
+        <StatPill label="Bewertet" value={ranked.length} />
+      </div>
+
+      {/* Podium */}
+      {ranked.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><Trophy size={16} /><h3>RANGLISTE</h3></div>
+          <div className="ww-board">
+            {ranked.slice(0, 3).map((w, i) => (
+              <div key={w.id} className="ww-board-row">
+                <div className="ww-board-rank">{['🥇', '🥈', '🥉'][i]}</div>
+                <div className="ww-board-name">{w.name}</div>
+                <div className="ww-board-pts">{fmt1(w.avg)}<span>🍷 ({w.count})</span></div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Add wine */}
+      <section className="ww-section">
+        <div className="ww-section-head"><Plus size={16} /><h3>WEIN EINTRAGEN</h3></div>
+        <input className="ww-input" placeholder="Name, z.B. Riesling Spätlese 2021"
+          value={name} maxLength={120} onChange={e => setName(e.target.value)} />
+        <input className="ww-input" style={{ marginTop: 6 }} placeholder="Notiz (Winzer / Ort / optional)"
+          value={note} maxLength={200} onChange={e => setNote(e.target.value)} />
+        <button className={`ww-big-cta ${name.trim().length >= 2 && !busy ? '' : 'disabled'}`}
+          disabled={name.trim().length < 2 || busy} onClick={submit}>
+          {busy ? <span className="ww-spinner" /> : <Plus size={20} />}<span>WEIN HINZUFÜGEN</span>
+        </button>
+      </section>
+
+      {/* Wine list */}
+      <section className="ww-section">
+        <div className="ww-section-head" style={{ justifyContent: 'space-between' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Wine size={16} /><h3 style={{ display: 'inline' }}>ALLE WEINE</h3></span>
+          <div className="ww-auth-tabs" style={{ margin: 0, width: 'auto' }}>
+            <button className={`ww-auth-tab ${sort === 'new' ? 'active' : ''}`} onClick={() => setSort('new')}>NEUESTE</button>
+            <button className={`ww-auth-tab ${sort === 'best' ? 'active' : ''}`} onClick={() => setSort('best')}>BESTE</button>
+          </div>
+        </div>
+
+        {list.length === 0 && (
+          <div className="ww-empty">Noch keine Weine — trag den ersten ein! 🍷</div>
+        )}
+
+        <div className="ww-wine-list">
+          {list.map(w => {
+            const adder = usersById[w.addedBy];
+            const canDelete = admin || w.addedBy === me.id;
+            return (
+              <div key={w.id} className="ww-wine-card">
+                <div className="ww-wine-top">
+                  <div className="ww-wine-head">
+                    <div className="ww-wine-name">{medal(w.id) && <span className="ww-wine-medal">{medal(w.id)}</span>}{w.name}</div>
+                    <div className="ww-wine-meta">
+                      {adder ? `${adder.emoji || '🍺'} ${adder.displayName || adder.email?.split('@')[0]}` : '?'}
+                      {w.note ? ` · ${w.note}` : ''}
+                    </div>
+                  </div>
+                  <div className="ww-wine-avg">
+                    {w.count ? <><b>{fmt1(w.avg)}</b><span>🍷 · {w.count}</span></> : <span className="ww-wine-noavg">noch offen</span>}
+                  </div>
+                </div>
+                <div className="ww-wine-rate">
+                  <span className="ww-wine-rate-label">{w.mine ? 'Deine Wertung' : 'Bewerten:'}</span>
+                  <GlassRating value={w.mine} onPick={(n) => onRate(w.id, n)} />
+                </div>
+                {canDelete && (
+                  <button className="ww-wine-del" onClick={() => onDelete(w.id)} aria-label="Wein löschen"><Trash2 size={13} /></button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }

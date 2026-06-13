@@ -1947,3 +1947,36 @@
 }
 .ww-jeo-cat-roll:hover { border-color: var(--amber); background: rgba(245,165,36,0.1); }
 .ww-jeo-cat-roll:active { transform: scale(0.94); }
+
+/* ============ Weinwanderung module ============ */
+.ww-wine { display: flex; flex-direction: column; }
+.ww-wine-list { display: flex; flex-direction: column; gap: 8px; }
+.ww-wine-card {
+  position: relative;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px;
+}
+.ww-wine-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ww-wine-head { min-width: 0; flex: 1; }
+.ww-wine-name { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; padding-right: 18px; }
+.ww-wine-medal { margin-right: 4px; }
+.ww-wine-meta { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+.ww-wine-avg { flex-shrink: 0; text-align: right; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.ww-wine-avg b { font-family: 'Bebas Neue', sans-serif; font-size: 22px; color: var(--amber); letter-spacing: 0.03em; margin-right: 2px; }
+.ww-wine-noavg { font-style: italic; color: var(--muted-2); }
+.ww-wine-rate { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.ww-wine-rate-label { font-size: 11px; letter-spacing: 0.06em; color: var(--muted); font-family: 'IBM Plex Mono', monospace; text-transform: uppercase; }
+.ww-wine-del {
+  position: absolute; top: 8px; right: 8px;
+  background: none; border: none; color: var(--muted-2); cursor: pointer; padding: 4px;
+}
+.ww-wine-del:hover { color: var(--red); }
+
+.ww-glasses { display: inline-flex; gap: 2px; }
+.ww-glass {
+  background: none; border: none; cursor: pointer; padding: 2px;
+  line-height: 1; filter: grayscale(1) opacity(0.35);
+  transition: filter .1s, transform .06s;
+}
+.ww-glass.on { filter: none; }
+.ww-glass:active { transform: scale(1.2); }
