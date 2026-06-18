@@ -2001,3 +2001,38 @@
 .ww-mod-tab.active .ww-unread-dot { box-shadow: 0 0 0 2px var(--amber); }
 .ww-nav-icon-wrap { position: relative; display: inline-flex; }
 .ww-unread-dot.nav { top: -3px; right: -5px; width: 8px; height: 8px; box-shadow: 0 0 0 2px var(--bg); }
+
+/* ============ Jeopardy spicy-mode compliment overlay ============ */
+.ww-compliment {
+  position: fixed; inset: 0; z-index: 130;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px calc(20px + env(safe-area-inset-right)) 24px calc(20px + env(safe-area-inset-left));
+  background: rgba(10, 10, 11, 0.82); backdrop-filter: blur(6px);
+  animation: fadein 0.18s ease-out;
+}
+.ww-compliment-card {
+  width: 100%; max-width: 380px;
+  background: linear-gradient(160deg, #2a1020 0%, var(--bg-2) 70%);
+  border: 1px solid var(--amber); border-radius: 16px;
+  padding: 26px 22px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  animation: slideup 0.25s ease-out;
+}
+.ww-compliment-spark { font-size: 34px; }
+.ww-compliment-head {
+  font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+  letter-spacing: 0.18em; color: var(--amber); text-transform: uppercase;
+}
+.ww-compliment-text {
+  font-family: 'Bebas Neue', sans-serif; font-size: 26px; line-height: 1.15;
+  letter-spacing: 0.02em; color: var(--text);
+}
+.ww-compliment-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 4px; }
+.ww-compliment-btn {
+  background: var(--card-2); border: 1px solid var(--border-2); color: var(--text);
+  padding: 12px 14px; border-radius: 8px; cursor: pointer; font-size: 15px;
+}
+.ww-compliment-btn:hover { border-color: var(--amber); color: var(--amber); }
+.ww-compliment-btn:active { transform: scale(0.98); }
+.ww-compliment-hint { font-size: 11px; color: var(--muted); margin-top: 2px; }
