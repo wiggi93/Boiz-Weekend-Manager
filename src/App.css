@@ -768,6 +768,7 @@
 }
 .ww-mod-tabs-scroll::-webkit-scrollbar { display: none; }
 .ww-mod-tab {
+  position: relative;
   flex: 0 0 auto;
   display: flex; align-items: center; gap: 6px;
   background: var(--card); border: 1px solid var(--border);
@@ -1988,3 +1989,15 @@
   font-size: 15px; line-height: 1.35; overflow-wrap: anywhere;
 }
 .ww-jeo-typed b { color: var(--text); }
+
+/* ============ Unread / "something new" indicators ============ */
+.ww-unread-dot {
+  position: absolute; top: 4px; right: 6px;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--red);
+  box-shadow: 0 0 0 2px var(--bg);
+  pointer-events: none;
+}
+.ww-mod-tab.active .ww-unread-dot { box-shadow: 0 0 0 2px var(--amber); }
+.ww-nav-icon-wrap { position: relative; display: inline-flex; }
+.ww-unread-dot.nav { top: -3px; right: -5px; width: 8px; height: 8px; box-shadow: 0 0 0 2px var(--bg); }
