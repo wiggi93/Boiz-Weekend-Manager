@@ -23,10 +23,28 @@ function sendPushToUsers(app, userIds, payload) {
       try { records = app.findRecordsByFilter("push_subs", `user = "${uid}"`, "", 50, 0); }
       catch (err) { console.log("[push] subs lookup failed for", uid, err); continue; }
       for (const r of records) {
-        const keys = r.get("keys");
         const endpoint = r.get("endpoint");
-        if (!endpoint || !keys) continue;
-        subs.push({ endpoint: endpoint, keys: keys });
+        if (!endpoint) continue;
+        // PocketBase returns a json field in a form that doesn't always
+        // JSON.stringify back into a plain { p256dh, auth } object (it can
+        // come through as a string / JSONRaw), which left web-push without
+        // usable encryption keys → every send "failed". Normalise to a plain
+        // object with the two string keys it needs.
+        const raw = r.get("keys");
+        let parsed = null;
+        if (raw && typeof raw === "object" && (raw.p256dh || raw.auth)) {
+          parsed = { p256dh: raw.p256dh, auth: raw.auth };
+        } else {
+          // string / JSONRaw / []byte — coerce to text, then parse
+          try {
+            const s = typeof raw === "string" ? raw : String(raw);
+            if (s && s.indexOf("{") !== -1) parsed = JSON.parse(s);
+          } catch (_) {}
+        }
+        const p256dh = parsed && parsed.p256dh;
+        const auth = parsed && parsed.auth;
+        if (!p256dh || !auth) { console.log("[push] sub missing keys, skip"); continue; }
+        subs.push({ endpoint: endpoint, keys: { p256dh: String(p256dh), auth: String(auth) } });
         subIdByEndpoint[endpoint] = r.id;
       }
     }
