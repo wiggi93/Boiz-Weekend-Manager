@@ -1980,3 +1980,11 @@
 }
 .ww-glass.on { filter: none; }
 .ww-glass:active { transform: scale(1.2); }
+
+/* ============ Jeopardy remote-mode typed answer ============ */
+.ww-jeo-typed {
+  background: var(--card-2); border: 1px solid var(--border-2);
+  border-radius: 6px; padding: 10px 12px; margin: 8px 0;
+  font-size: 15px; line-height: 1.35; overflow-wrap: anywhere;
+}
+.ww-jeo-typed b { color: var(--text); }
