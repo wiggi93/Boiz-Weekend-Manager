@@ -90,4 +90,27 @@ function eventMemberIds(app, eventId, exceptId) {
   return ids;
 }
 
-module.exports = { sendPushToUsers, eventMemberIds };
+// Read a JSON-array field reliably. PocketBase's record.get() on a json field
+// can hand back a real array, a JSON string, OR a raw byte array (JSONRaw) —
+// the last one made `participants` iterate over bytes (target users came out
+// as [91,34,109,…] = the JSON text's char codes). Normalise to a JS array.
+function parseArr(record, field) {
+  try {
+    const s = record.getString(field);
+    if (s && s.charAt(0) === "[") { const v = JSON.parse(s); if (Array.isArray(v)) return v; }
+  } catch (_) {}
+  try {
+    const v = record.get(field);
+    if (Array.isArray(v)) {
+      if (v.length === 0) return v;
+      if (typeof v[0] !== "number") return v; // real array of strings/objects
+      let s = ""; for (let i = 0; i < v.length; i++) s += String.fromCharCode(v[i]);
+      const p = JSON.parse(s); return Array.isArray(p) ? p : [];
+    }
+    if (typeof v === "string") { const p = JSON.parse(v); return Array.isArray(p) ? p : []; }
+    const s = String(v); if (s && s.charAt(0) === "[") { const p = JSON.parse(s); return Array.isArray(p) ? p : []; }
+  } catch (_) {}
+  return [];
+}
+
+module.exports = { sendPushToUsers, eventMemberIds, parseArr };
