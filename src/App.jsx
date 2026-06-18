@@ -2697,6 +2697,31 @@ function JeoPrompt({ q }) {
   return <div className="ww-jeo-question">{q.q}</div>;
 }
 
+// Remote mode: the dran player types their answer here; it's broadcast to the
+// others to judge.
+function JeoTypeAnswer({ onSubmit }) {
+  const [text, setText] = useState('');
+  const valid = text.trim().length >= 1;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <label className="ww-label">🤫 DEINE ANTWORT (tippen)</label>
+      <input
+        className="ww-input" value={text} maxLength={200} autoFocus
+        placeholder="Antwort eingeben…"
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' && valid) onSubmit(text.trim()); }}
+      />
+      <button className={`ww-big-cta green ${valid ? '' : 'disabled'}`} disabled={!valid}
+        onClick={() => onSubmit(text.trim())}>
+        <Check size={20} /><span>ANTWORT ABSCHICKEN</span>
+      </button>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6, textAlign: 'center' }}>
+        Die anderen sehen deine Antwort erst nach dem Abschicken.
+      </p>
+    </div>
+  );
+}
+
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
   const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
 
@@ -2712,6 +2737,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const participants = (jeopardy?.participants || []).map(uid => usersById[uid]).filter(Boolean);
   const positionPts = jeopardy?.pointsPerPosition || [];
   const hostPlays = !!jeopardy?.hostPlays;
+  const remote = !!jeopardy?.remoteMode;
 
   // The "active question" is always data-driven now (both modes are shared,
   // turn-based): any question flagged `opened` and not yet won shows on
@@ -2773,6 +2799,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [] }, false);
   };
   const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId }, false);
+  // Remote mode: the dran player types their answer; it's stored on the
+  // question and shown to everyone so the others can judge it.
+  const submitTypedAnswer = (ri, qi, text) => resolveQuestion(ri, qi, { typedAnswer: String(text || '').slice(0, 200) }, false);
   // markRight does NOT clear triedUsers — those users tried wrong and keep
   // their −half penalty in the round scoring.
   const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, resolved: true, opened: false, currentlyAnswering: null }, true);
@@ -3037,12 +3066,16 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         //  hostPlays OFF → quizmaster: ONLY the host sees the answer and
         //                  judges; players (incl. dran) just answer aloud.
         //  soloMode      → the dran player self-judges (no one else there).
-        const seesAnswer = hostPlays ? (!iAmDran || soloMode) : admin;
+        //  remote        → the dran player TYPES their answer; once submitted
+        //                  everyone sees it + the solution and the others judge.
+        const seesAnswer = remote ? !!q.typedAnswer : (hostPlays ? (!iAmDran || soloMode) : admin);
         // Interaction is gated by the round being live (activeOpen only exists
         // within an unfinished round), NOT by the event's global active flag —
         // otherwise a host playing solo without flipping the event live can
         // open a tile but never judge it.
-        const canJudge = hostPlays ? (iAmParticipant && (!iAmDran || soloMode)) : admin;
+        const canJudge = remote
+          ? (!!q.typedAnswer && (admin || soloMode || (iAmParticipant && !iAmDran)))
+          : (hostPlays ? (iAmParticipant && (!iAmDran || soloMode)) : admin);
 
         // Step 1: no one assigned yet (rare — e.g. host re-opened). Host picks.
         if (!q.currentlyAnswering) {
@@ -3086,7 +3119,20 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               🎯 dran: <b>{dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
             </div>
             <JeoPrompt q={q} />
-            {seesAnswer ? (
+            {remote ? (
+              q.typedAnswer ? (
+                <>
+                  <div className="ww-jeo-typed">✍️ {dran?.displayName || 'Antwort'}: <b>{q.typedAnswer}</b></div>
+                  <div className="ww-jeo-answer">💡 Richtig: {q.a}</div>
+                </>
+              ) : iAmDran ? (
+                <JeoTypeAnswer onSubmit={(txt) => submitTypedAnswer(activeOpen.ri, activeOpen.qi, txt)} />
+              ) : (
+                <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
+                  ✍️ {dran ? (dran.displayName || dran.email) : 'Der Spieler'} tippt gerade die Antwort…
+                </div>
+              )
+            ) : seesAnswer ? (
               <div className="ww-jeo-answer">💡 {q.a}</div>
             ) : iAmDran ? (
               <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
@@ -3266,6 +3312,22 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
             : 'AUS — Host sieht Antwort sofort'}
         </span>
         {jeopardy?.hostPlays ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
+
+      <label className="ww-label" style={{ marginTop: 14 }}>REMOTE-MODUS (getrennt spielen)</label>
+      <button
+        type="button"
+        className={`ww-module-toggle ${jeopardy?.remoteMode ? 'on' : ''}`}
+        onClick={() => onPatch({ remoteMode: !jeopardy?.remoteMode })}
+        style={{ width: '100%' }}
+      >
+        <span className="ww-mod-icon">{jeopardy?.remoteMode ? '📱' : '🎙️'}</span>
+        <span className="ww-mod-name">
+          {jeopardy?.remoteMode
+            ? 'AN — Dran tippt Antwort, die anderen werten'
+            : 'AUS — Antwort wird laut gesagt'}
+        </span>
+        {jeopardy?.remoteMode ? <Check size={14} /> : <X size={14} />}
       </button>
 
       <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
