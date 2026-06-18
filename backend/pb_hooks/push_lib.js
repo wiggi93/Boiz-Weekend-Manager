@@ -12,7 +12,8 @@
 function sendPushToUsers(app, userIds, payload) {
   try {
     const url = $os.getenv("PUSH_SENDER_URL");
-    if (!url || !Array.isArray(userIds) || userIds.length === 0) return;
+    if (!url) { console.log("[push] PUSH_SENDER_URL not set — skip"); return; }
+    if (!Array.isArray(userIds) || userIds.length === 0) { console.log("[push] no target users"); return; }
 
     const subs = [];
     const subIdByEndpoint = {};
@@ -20,7 +21,7 @@ function sendPushToUsers(app, userIds, payload) {
       if (!uid) continue;
       let records = [];
       try { records = app.findRecordsByFilter("push_subs", `user = "${uid}"`, "", 50, 0); }
-      catch (_) { continue; }
+      catch (err) { console.log("[push] subs lookup failed for", uid, err); continue; }
       for (const r of records) {
         const keys = r.get("keys");
         const endpoint = r.get("endpoint");
@@ -29,6 +30,7 @@ function sendPushToUsers(app, userIds, payload) {
         subIdByEndpoint[endpoint] = r.id;
       }
     }
+    console.log("[push] target users " + JSON.stringify(userIds) + " -> " + subs.length + " subscription(s)");
     if (subs.length === 0) return;
 
     const res = $http.send({
@@ -42,8 +44,10 @@ function sendPushToUsers(app, userIds, payload) {
       timeout: 20,
     });
 
+    const bodyStr = typeof res.body === "string" ? res.body : toString(res.body);
+    console.log("[push] sidecar status " + res.statusCode + " body " + (bodyStr || "").slice(0, 120));
     try {
-      const out = JSON.parse(typeof res.body === "string" ? res.body : toString(res.body));
+      const out = JSON.parse(bodyStr);
       for (const ep of out.gone || []) {
         const id = subIdByEndpoint[ep];
         if (!id) continue;

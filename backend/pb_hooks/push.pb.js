@@ -25,6 +25,7 @@ routerAdd("GET", "/api/push/pubkey", (e) => {
 // ---- Trigger 1: new challenge → push to the challenged player -------------
 onRecordAfterCreateSuccess((e) => {
   try {
+    console.log("[push] challenge created hook fired");
     const { sendPushToUsers } = require(`${__hooks}/push_lib.js`);
     const toUser = e.record.get("toUser");
     const fromUser = e.record.get("fromUser");
