@@ -30,6 +30,7 @@ import {
 import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
 import { SCHNELLE_FRAGEN } from './schnelleFragenBank.js';
 import { flagEmoji, isFlagsCategory, pickFlagRound } from './flagsBank.js';
+import { pickCompliment } from './compliments.js';
 import './App.css';
 
 // ---- Confirm singleton (no prop drilling) ----
@@ -2787,6 +2788,8 @@ function JeoTypeAnswer({ onSubmit }) {
 
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
   const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
+  const [compliment, setCompliment] = useState(null); // spicy-mode popup text
+  const celebratedRef = useRef(null); // question keys I've already been complimented for
 
   const usersById = useMemo(() => {
     const m = {};
@@ -2801,6 +2804,24 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const positionPts = jeopardy?.pointsPerPosition || [];
   const hostPlays = !!jeopardy?.hostPlays;
   const remote = !!jeopardy?.remoteMode;
+  const spicy = !!jeopardy?.spicyMode;
+
+  // Spicy mode: pop a cheeky compliment on MY screen whenever a question I
+  // just won appears (detected via realtime). Seed the "already celebrated"
+  // set on first run so opening the app mid-game doesn't replay old wins.
+  useEffect(() => {
+    const mineNow = [];
+    for (const r of rounds) {
+      (r.questions || []).forEach((q, qi) => {
+        if (q.winnerUserId === me.id) mineNow.push(`${r.id || '?'}:${qi}`);
+      });
+    }
+    if (celebratedRef.current === null) { celebratedRef.current = new Set(mineNow); return; }
+    if (!spicy) { celebratedRef.current = new Set(mineNow); return; }
+    const fresh = mineNow.find(k => !celebratedRef.current.has(k));
+    celebratedRef.current = new Set(mineNow);
+    if (fresh) setCompliment(pickCompliment());
+  }, [rounds, spicy, me.id]);
 
   // The "active question" is always data-driven now (both modes are shared,
   // turn-based): any question flagged `opened` and not yet won shows on
@@ -3228,7 +3249,30 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
           </ModuleSettingsDrawer>
         );
       })()}
+
+      {compliment && <ComplimentOverlay text={compliment} onClose={() => setCompliment(null)} />}
     </>
+  );
+}
+
+// Spicy-mode: full-screen compliment the winner must "accept" to play on.
+function ComplimentOverlay({ text, onClose }) {
+  const reactions = ['😳 Erröten & annehmen', '😏 Selbstbewusst genießen', '💋 Zurückzwinkern', '💪 Verdient angenommen'];
+  return createPortal(
+    <div className="ww-compliment" role="alertdialog" aria-modal="true">
+      <div className="ww-compliment-card">
+        <div className="ww-compliment-spark">🌶️🔥</div>
+        <div className="ww-compliment-head">RICHTIG! Für dich:</div>
+        <div className="ww-compliment-text">{text}</div>
+        <div className="ww-compliment-actions">
+          {reactions.map(r => (
+            <button key={r} className="ww-compliment-btn" onClick={onClose}>{r}</button>
+          ))}
+        </div>
+        <div className="ww-compliment-hint">Nimm das Kompliment an, um weiterzuspielen 😏</div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -3391,6 +3435,22 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
             : 'AUS — Antwort wird laut gesagt'}
         </span>
         {jeopardy?.remoteMode ? <Check size={14} /> : <X size={14} />}
+      </button>
+
+      <label className="ww-label" style={{ marginTop: 14 }}>🌶️ KOMPLIMENTE-MODUS (spicy)</label>
+      <button
+        type="button"
+        className={`ww-module-toggle ${jeopardy?.spicyMode ? 'on' : ''}`}
+        onClick={() => onPatch({ spicyMode: !jeopardy?.spicyMode })}
+        style={{ width: '100%' }}
+      >
+        <span className="ww-mod-icon">{jeopardy?.spicyMode ? '🌶️' : '😇'}</span>
+        <span className="ww-mod-name">
+          {jeopardy?.spicyMode
+            ? 'AN — bei richtiger Antwort gibt es ein spicy Kompliment'
+            : 'AUS — keine Komplimente'}
+        </span>
+        {jeopardy?.spicyMode ? <Check size={14} /> : <X size={14} />}
       </button>
 
       <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
