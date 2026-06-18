@@ -73,23 +73,22 @@ onRecordUpdateRequest((e) => {
 
 // ---- Trigger 3: jeopardy round started → push to participants -------------
 onRecordUpdateRequest((e) => {
+  const lib = require(`${__hooks}/push_lib.js`);
   let prevCount = -1;
   try {
     const original = e.app.findRecordById("jeopardy", e.record.id);
-    const prev = original.get("rounds");
-    prevCount = Array.isArray(prev) ? prev.length : 0;
+    prevCount = lib.parseArr(original, "rounds").length;
   } catch (_) {}
-  const next = e.record.get("rounds");
-  const nextCount = Array.isArray(next) ? next.length : 0;
+  const next = lib.parseArr(e.record, "rounds");
+  const nextCount = next.length;
   const actor = e.auth ? e.auth.id : null;
   const eventId = e.record.get("event");
   e.next();
   try {
     const lastUnfinished = nextCount > 0 && !(next[nextCount - 1] || {}).finishedAt;
     if (prevCount >= 0 && nextCount > prevCount && lastUnfinished) {
-      const { sendPushToUsers } = require(`${__hooks}/push_lib.js`);
-      const parts = (e.record.get("participants") || []).filter((id) => id && id !== actor);
-      sendPushToUsers(e.app, parts, {
+      const parts = lib.parseArr(e.record, "participants").filter((id) => id && id !== actor);
+      lib.sendPushToUsers(e.app, parts, {
         title: "🎤 Jeopardy-Runde gestartet!",
         body: "Eine neue Runde läuft — du bist dabei. Handy raus!",
         url: `/?event=${eventId}&goto=jeopardy`,
@@ -101,18 +100,17 @@ onRecordUpdateRequest((e) => {
 
 // ---- Trigger 4: kitty — everyone marked done → push to all members --------
 onRecordUpdateRequest((e) => {
+  const lib = require(`${__hooks}/push_lib.js`);
   let prevDone = [];
   try {
     const original = e.app.findRecordById("kitty", e.record.id);
-    const d = original.get("done");
-    prevDone = Array.isArray(d) ? d : [];
+    prevDone = lib.parseArr(original, "done");
   } catch (_) {}
-  const nextDoneRaw = e.record.get("done");
-  const nextDone = Array.isArray(nextDoneRaw) ? nextDoneRaw : [];
+  const nextDone = lib.parseArr(e.record, "done");
   const eventId = e.record.get("event");
   e.next();
   try {
-    const { sendPushToUsers, eventMemberIds } = require(`${__hooks}/push_lib.js`);
+    const { sendPushToUsers, eventMemberIds } = lib;
     const memberIds = eventMemberIds(e.app, eventId, null);
     const wasComplete = memberIds.length > 0 && memberIds.every((id) => prevDone.includes(id));
     const isComplete = memberIds.length > 0 && memberIds.every((id) => nextDone.includes(id));
