@@ -627,6 +627,66 @@ export default function App() {
     if (!mods.includes(moduleTab)) setModuleTab('overview');
   }, [currentEvent, moduleTab]);
 
+  // ---- Unread / "something new" indicators ----------------------------
+  // Per-module latest-activity timestamp (from each record's `updated`), vs a
+  // per-device "last seen" map in localStorage. A module shows a red dot when
+  // it changed since you last looked; opening it clears the dot.
+  const moduleActivity = useMemo(() => {
+    const maxUpd = (arr) => (Array.isArray(arr) ? arr : []).reduce((m, x) => (x && x.updated && x.updated > m ? x.updated : m), '');
+    const act = {
+      flunky: flunky?.updated || '',
+      jeopardy: jeopardy?.updated || '',
+      schnelle_fragen: schnelleFragen?.updated || '',
+      schedule: schedule?.updated || '',
+      challenges: maxUpd(challenges),
+      wine: [maxUpd(wines), maxUpd(wineRatings)].sort().pop() || '',
+      kitty: kitty?.updated || '',
+      polls: maxUpd(polls),
+    };
+    for (const cm of (customModules || [])) act[`cm-${cm.id}`] = cm.updated || '';
+    return act;
+  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, wines, wineRatings, kitty, polls, customModules]);
+  const moduleActivityRef = useRef(moduleActivity);
+  useEffect(() => { moduleActivityRef.current = moduleActivity; }, [moduleActivity]);
+
+  const [seenMap, setSeenMap] = useState({});
+  const seenKey = currentEventId && me?.id ? `boiz_seen_${currentEventId}_${me.id}` : null;
+  useEffect(() => {
+    if (!seenKey) { setSeenMap({}); return; }
+    try { setSeenMap(JSON.parse(localStorage.getItem(seenKey) || '{}')); } catch { setSeenMap({}); }
+  }, [seenKey]);
+
+  const markSeen = useCallback((id) => {
+    if (!id || !seenKey) return;
+    const a = moduleActivityRef.current[id] || new Date().toISOString();
+    setSeenMap(prev => {
+      if (prev[id] === a) return prev;
+      const next = { ...prev, [id]: a };
+      try { localStorage.setItem(seenKey, JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  }, [seenKey]);
+
+  const isUnread = useCallback((id) => {
+    const a = moduleActivity[id];
+    return !!a && (!seenMap[id] || seenMap[id] < a);
+  }, [moduleActivity, seenMap]);
+
+  // The tab/tool you're currently looking at counts as seen (and keeps being
+  // marked seen as fresh activity streams in while you watch).
+  useEffect(() => {
+    if (view === 'home' && moduleTab && moduleTab !== 'overview') markSeen(moduleTab);
+  }, [view, moduleTab, moduleActivity, markSeen]);
+  useEffect(() => {
+    if (view === 'tools' && toolOpen) markSeen(toolOpen);
+  }, [view, toolOpen, moduleActivity, markSeen]);
+
+  // Roll-ups for the bottom nav (when you're NOT on that section).
+  const gameModuleIds = ['flunky', 'jeopardy', 'schnelle_fragen', 'schedule', 'challenges', 'wine',
+    ...(customModules || []).map(cm => `cm-${cm.id}`)];
+  const homeUnread = gameModuleIds.some(id => id !== moduleTab && isUnread(id));
+  const toolsUnread = ['kitty', 'polls'].some(id => isUnread(id) && !(view === 'tools' && toolOpen === id));
+
   // ---- Handlers ----
   const onLogin = async (email, password) => {
     // Transient failures (network blip, 5xx, a still-closing realtime socket
@@ -1205,6 +1265,7 @@ export default function App() {
             onSaveEvent={onSaveEvent}
             onShowUserDetail={setDetailUserId}
             myOptRef={myOptRef}
+            isUnread={isUnread}
           />
         )}
         {view === 'crew' && (
@@ -1219,10 +1280,11 @@ export default function App() {
             onPollCreate={onPollCreate} onPollUpdate={onPollUpdate}
             onPollDelete={onPollDelete} onVote={onVote}
             open={toolOpen} setOpen={setToolOpen}
+            isUnread={isUnread}
           />
         )}
       </main>
-      <BottomNav view={view} setView={(v) => { setToolOpen(null); setView(v); }} />
+      <BottomNav view={view} setView={(v) => { setToolOpen(null); setView(v); }} homeUnread={homeUnread} toolsUnread={toolsUnread} />
       {settingsOpen && (
         <ModuleSettingsDrawer title="⚙️ Event-Settings" onClose={() => setSettingsOpen(false)}>
           {admin
@@ -1922,7 +1984,7 @@ function HomeView({
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
-  onSaveEvent, onShowUserDetail, myOptRef,
+  onSaveEvent, onShowUserDetail, myOptRef, isUnread = () => false,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   // Games are opt-in per event (modules array); tools are ALWAYS available.
@@ -1973,6 +2035,7 @@ function HomeView({
             <button key={t.id} className={`ww-mod-tab ${moduleTab === t.id ? 'active' : ''}`} onClick={() => setModuleTab(t.id)}>
               <span className="ww-mod-tab-icon">{t.icon}</span>
               <span className="ww-mod-tab-name">{t.name}</span>
+              {moduleTab !== t.id && isUnread(t.id) && <span className="ww-unread-dot" aria-label="Neu" />}
             </button>
           ))}
         </div>
@@ -5466,7 +5529,7 @@ function PollCard({ poll, me, admin, members, votes, onVote, onUpdate, onDelete 
 }
 
 function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent,
-  polls, pollVotes, onPollCreate, onPollUpdate, onPollDelete, onVote, open, setOpen }) {
+  polls, pollVotes, onPollCreate, onPollUpdate, onPollDelete, onVote, open, setOpen, isUnread = () => false }) {
   if (open) {
     const tool = moduleById(open);
     return (
@@ -5503,6 +5566,7 @@ function ToolsView({ me, admin, event, members, kitty, onKittyPatch, onSaveEvent
           <button key={t.id} className="ww-tools-item" onClick={() => setOpen(t.id)}>
             <span className="ww-tools-item-icon">{t.icon}</span>
             <span className="ww-tools-item-name">{t.name}</span>
+            {isUnread(t.id) && <span className="ww-unread-dot" style={{ position: 'static', marginRight: 4 }} aria-label="Neu" />}
             <ChevronRight size={16} />
           </button>
         ))}
@@ -5638,17 +5702,18 @@ function ChessClockView() {
   );
 }
 
-function BottomNav({ view, setView }) {
+function BottomNav({ view, setView, homeUnread, toolsUnread }) {
   const items = [
-    { k: 'home', icon: <Home size={20} />, label: 'Home' },
-    { k: 'crew', icon: <Users size={20} />, label: 'Crew' },
-    { k: 'tools', icon: <Wrench size={20} />, label: 'Tools' },
+    { k: 'home', icon: <Home size={20} />, label: 'Home', unread: homeUnread },
+    { k: 'crew', icon: <Users size={20} />, label: 'Crew', unread: false },
+    { k: 'tools', icon: <Wrench size={20} />, label: 'Tools', unread: toolsUnread },
   ];
   return (
     <nav className="ww-bottomnav">
       {items.map(it => (
         <button key={it.k} className={`ww-nav-btn ${view === it.k ? 'active' : ''}`} onClick={() => setView(it.k)}>
-          {it.icon}<span>{it.label}</span>
+          <span className="ww-nav-icon-wrap">{it.icon}{view !== it.k && it.unread && <span className="ww-unread-dot nav" aria-label="Neu" />}</span>
+          <span>{it.label}</span>
         </button>
       ))}
     </nav>
