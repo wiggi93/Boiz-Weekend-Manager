@@ -1036,6 +1036,52 @@ export default function App() {
     }
   };
 
+  // Regenerate a single bad/wrong question on demand. Reuses the existing
+  // generator for that one category and swaps the q/a in place (resetting the
+  // attempt state) so play can continue with a fresh question.
+  const onJeopardyRegenerate = async (ri, qi) => {
+    const cur = jeopardyRef.current;
+    const rounds = cur?.rounds || [];
+    const q = rounds[ri]?.questions?.[qi];
+    if (!q) return;
+    // Collect everything used so the replacement doesn't repeat.
+    const usedQA = []; const usedFlagCodes = [];
+    for (const r of rounds) {
+      for (const qq of (r.questions || [])) {
+        if (qq.type === 'flag') { if (qq.flagCode) usedFlagCodes.push(qq.flagCode); }
+        else { if (qq.q) usedQA.push(qq.q); if (qq.a) usedQA.push(qq.a); }
+      }
+    }
+    let patchFields;
+    try {
+      if (q.type === 'flag') {
+        const pick = pickFlagRound(usedFlagCodes).find(f => f.level === q.level) || pickFlagRound(usedFlagCodes)[0];
+        if (!pick) throw new Error('keine Flagge');
+        patchFields = { type: 'flag', flagCode: pick.code, q: 'Welches Land zeigt diese Flagge?', a: pick.name };
+      } else {
+        const board = await generateJeopardyBoard(currentEventId, [q.category], usedQA);
+        const qs = board.questions || [];
+        const chosen = qs.find(x => (Number(x.level) || 1) === q.level) || qs[0];
+        if (!chosen) throw new Error('keine Frage');
+        patchFields = { q: String(chosen.q || ''), a: String(chosen.a || ''), type: undefined, flagCode: undefined };
+      }
+    } catch (e) {
+      showToast(`Neu-Generieren fehlgeschlagen: ${e?.message?.slice?.(0, 60) || e}`);
+      throw e;
+    }
+    // Swap the question, reset its attempt state, keep it open + same dran.
+    const latest = jeopardyRef.current?.rounds || rounds;
+    const next = latest.map((r, i) => i !== ri ? r : {
+      ...r,
+      questions: r.questions.map((x, j) => j !== qi ? x : {
+        ...x, ...patchFields,
+        winnerUserId: null, revealed: false, resolved: false, triedUsers: [], typedAnswer: '',
+      }),
+    });
+    await onJeopardyPatch({ rounds: next });
+    showToast('Neue Frage generiert 🔄');
+  };
+
   const onKittyPatch = async (patch) => {
     let cur = kittyRef.current;
     if (!cur) {
@@ -1250,7 +1296,7 @@ export default function App() {
             me={me} admin={admin} event={currentEvent}
             members={eventMembers} statsMap={statsMap} setStatsMap={setStatsMap}
             flunky={flunky} onFlunkyPatch={onFlunkyPatch}
-            jeopardy={jeopardy} onJeopardyPatch={onJeopardyPatch} onJeopardyGenerate={onJeopardyGenerate}
+            jeopardy={jeopardy} onJeopardyPatch={onJeopardyPatch} onJeopardyGenerate={onJeopardyGenerate} onJeopardyRegenerate={onJeopardyRegenerate}
             kitty={kitty} onKittyPatch={onKittyPatch}
             schnelleFragen={schnelleFragen} onSchnellePatch={onSchnellePatch}
             schedule={schedule} onSchedulePatch={onSchedulePatch}
@@ -2791,9 +2837,10 @@ function JeoTypeAnswer({ onSubmit }) {
   );
 }
 
-function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings }) {
+function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings, onJeopardyRegenerate }) {
   const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
   const [compliment, setCompliment] = useState(null); // spicy-mode popup text
+  const [regenBusy, setRegenBusy] = useState(false); // regenerating the open question
   const celebratedRef = useRef(null); // question keys I've already been complimented for
 
   const usersById = useMemo(() => {
@@ -3245,6 +3292,16 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 </button>
               </div>
             )}
+            {(admin || ((hostPlays || remote) && iAmParticipant)) && onJeopardyRegenerate && (
+              <button className="ww-mini-btn" style={{ marginTop: 10 }} disabled={regenBusy}
+                onClick={async () => {
+                  setRegenBusy(true);
+                  try { await onJeopardyRegenerate(activeOpen.ri, activeOpen.qi); } catch (_) {}
+                  finally { setRegenBusy(false); }
+                }}>
+                <RotateCcw size={12} /> {regenBusy ? 'Generiere…' : 'Frage taugt nicht — neu generieren'}
+              </button>
+            )}
             {admin && (
               <button className="ww-mini-btn red" style={{ marginTop: 10 }}
                 onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>
@@ -3256,6 +3313,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
       })()}
 
       {compliment && <ComplimentOverlay text={compliment} onClose={() => setCompliment(null)} />}
+      {regenBusy && <JeoGeneratingOverlay />}
     </>
   );
 }
