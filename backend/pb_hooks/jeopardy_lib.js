@@ -223,4 +223,22 @@ Insgesamt ${catCount * 5} Einträge.`;
   return { ok: true, board: board };
 }
 
-module.exports = { generateBoard, parseArr };
+// Auth gate: only site admin / event creator / event-host may generate.
+// Takes the request event `e` (so it works inside an isolated route handler).
+function jeoAuthOk(e, eventId) {
+  const auth = e.auth;
+  if (!auth) return { err: e.unauthorizedError("auth required", null) };
+  let ev;
+  try { ev = e.app.findRecordById("events", eventId); }
+  catch (_) { return { err: e.notFoundError("event not found", null) }; }
+  const isAdmin = auth.get("role") === "admin";
+  const isCreator = ev.get("createdBy") === auth.id;
+  const hostUsers = ev.get("hostUsers") || [];
+  const isEventHost = Array.isArray(hostUsers) && hostUsers.includes(auth.id);
+  if (!isAdmin && !isCreator && !isEventHost) {
+    return { err: e.forbiddenError("event host privileges required", null) };
+  }
+  return { ev: ev, auth: auth };
+}
+
+module.exports = { generateBoard, parseArr, jeoAuthOk };

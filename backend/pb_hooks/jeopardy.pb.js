@@ -1,35 +1,21 @@
 /// <reference path="../pb_data/types.d.ts" />
 
-// Jeopardy board generation. The heavy lifting (Anthropic call + parsing)
-// lives in jeopardy_lib.js and is require()d inside each handler.
-
-function jeoAuthOk(e, eventId) {
-  const auth = e.auth;
-  if (!auth) return { err: e.unauthorizedError("auth required", null) };
-  let ev;
-  try { ev = e.app.findRecordById("events", eventId); }
-  catch (_) { return { err: e.notFoundError("event not found", null) }; }
-  const isAdmin = auth.get("role") === "admin";
-  const isCreator = ev.get("createdBy") === auth.id;
-  const hostUsers = ev.get("hostUsers") || [];
-  const isEventHost = Array.isArray(hostUsers) && hostUsers.includes(auth.id);
-  if (!isAdmin && !isCreator && !isEventHost) {
-    return { err: e.forbiddenError("event host privileges required", null) };
-  }
-  return { ev: ev, auth: auth };
-}
+// Jeopardy board generation. The heavy lifting + the auth gate live in
+// jeopardy_lib.js and are require()d INSIDE each handler — PocketBase runs
+// route handlers in an isolated JSVM scope, so file-level functions here are
+// NOT visible inside them (that caused "jeoAuthOk is not defined").
 
 // POST /api/jeopardy/generate { eventId, categories, avoid, surprise }
 // Returns the raw board { questions:[...] }. Used for single-question
 // regeneration (the full round flow uses /start-round below).
 routerAdd("POST", "/api/jeopardy/generate", (e) => {
+  const lib = require(`${__hooks}/jeopardy_lib.js`);
   const data = new DynamicModel({ eventId: "", categories: [], avoid: [], surprise: false });
   e.bindBody(data);
   if (!data.eventId) return e.badRequestError("eventId required", null);
-  const gate = jeoAuthOk(e, data.eventId);
+  const gate = lib.jeoAuthOk(e, data.eventId);
   if (gate.err) return gate.err;
 
-  const lib = require(`${__hooks}/jeopardy_lib.js`);
   const r = lib.generateBoard({ cats: data.categories, surprise: data.surprise, avoid: data.avoid });
   if (!r.ok) return e.internalServerError(r.error, null);
   return e.json(200, r.board);
@@ -42,16 +28,15 @@ routerAdd("POST", "/api/jeopardy/generate", (e) => {
 // pushes the participants — all server-side. So the client can fire this and
 // background/lock the phone; the round shows up via realtime when it returns.
 routerAdd("POST", "/api/jeopardy/start-round", (e) => {
+  const lib = require(`${__hooks}/jeopardy_lib.js`);
   // flagQuestions is an array of objects → passed as a JSON string to avoid
   // DynamicModel nested-binding quirks; parsed below.
   const data = new DynamicModel({ eventId: "", categories: [], aiCategories: [], flagQuestions: "", surprise: false });
   e.bindBody(data);
   if (!data.eventId) return e.badRequestError("eventId required", null);
-  const gate = jeoAuthOk(e, data.eventId);
+  const gate = lib.jeoAuthOk(e, data.eventId);
   if (gate.err) return gate.err;
   const actor = gate.auth.id;
-
-  const lib = require(`${__hooks}/jeopardy_lib.js`);
 
   // The per-event jeopardy row.
   let jrec;
