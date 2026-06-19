@@ -141,7 +141,8 @@ routerAdd("POST", "/api/jeopardy/start-round", (e) => {
   } catch (_) {}
 
   // Notify the participants (server-side save doesn't fire the request hook,
-  // so push directly here).
+  // so push directly here). Plus a "your round is ready" ping to the host who
+  // kicked it off — they may have locked the phone during the long generation.
   try {
     const push = require(`${__hooks}/push_lib.js`);
     const targets = participants.filter(id => id && id !== actor);
@@ -150,6 +151,12 @@ routerAdd("POST", "/api/jeopardy/start-round", (e) => {
       body: "Eine neue Runde läuft — du bist dabei. Handy raus!",
       url: `/?event=${data.eventId}&goto=jeopardy`,
       tag: `jeo-${jrec.id}-${nextRounds.length}`,
+    });
+    push.sendPushToUsers(e.app, [actor], {
+      title: "✅ Deine Jeopardy-Runde ist fertig!",
+      body: "Die Fragen sind generiert — los geht's! 🎤",
+      url: `/?event=${data.eventId}&goto=jeopardy`,
+      tag: `jeo-ready-${jrec.id}-${nextRounds.length}`,
     });
   } catch (err) { console.log("[push] start-round:", err); }
 
