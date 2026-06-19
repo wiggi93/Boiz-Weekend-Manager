@@ -2811,20 +2811,20 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const remote = !!jeopardy?.remoteMode;
   const spicy = !!jeopardy?.spicyMode;
 
-  // Spicy mode: pop a cheeky compliment on MY screen whenever a question I
-  // just won appears (detected via realtime). Seed the "already celebrated"
-  // set on first run so opening the app mid-game doesn't replay old wins.
+  // Spicy mode: pop a dirty compliment on MY screen when I just won a
+  // HIGH-VALUE question (≥400 pts). Detected via realtime; seed the
+  // "already celebrated" set on first run so old wins don't replay.
   useEffect(() => {
-    const mineNow = [];
+    const mineHigh = [];
     for (const r of rounds) {
       (r.questions || []).forEach((q, qi) => {
-        if (q.winnerUserId === me.id) mineNow.push(`${r.id || '?'}:${qi}`);
+        if (q.winnerUserId === me.id && levelPoints(q.level) >= 400) mineHigh.push(`${r.id || '?'}:${qi}`);
       });
     }
-    if (celebratedRef.current === null) { celebratedRef.current = new Set(mineNow); return; }
-    if (!spicy) { celebratedRef.current = new Set(mineNow); return; }
-    const fresh = mineNow.find(k => !celebratedRef.current.has(k));
-    celebratedRef.current = new Set(mineNow);
+    if (celebratedRef.current === null) { celebratedRef.current = new Set(mineHigh); return; }
+    if (!spicy) { celebratedRef.current = new Set(mineHigh); return; }
+    const fresh = mineHigh.find(k => !celebratedRef.current.has(k));
+    celebratedRef.current = new Set(mineHigh);
     if (fresh) setCompliment(pickCompliment());
   }, [rounds, spicy, me.id]);
 
@@ -3260,22 +3260,56 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   );
 }
 
-// Spicy-mode: full-screen compliment the winner must "accept" to play on.
+// Spicy-mode: full-screen compliment you SWIPE away to keep playing.
 function ComplimentOverlay({ text, onClose }) {
-  const reactions = ['😳 Erröten & annehmen', '😏 Selbstbewusst genießen', '💋 Zurückzwinkern', '💪 Verdient angenommen'];
+  const [dx, setDx] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const startX = useRef(null);
+  const THRESHOLD = 110;
+
+  const down = (e) => { startX.current = (e.touches ? e.touches[0].clientX : e.clientX); };
+  const move = (e) => {
+    if (startX.current == null) return;
+    const x = (e.touches ? e.touches[0].clientX : e.clientX);
+    setDx(x - startX.current);
+  };
+  const up = () => {
+    if (startX.current == null) return;
+    const d = dx;
+    startX.current = null;
+    if (Math.abs(d) > THRESHOLD) {
+      // fling off in the swipe direction, then close
+      setLeaving(true);
+      setDx((d < 0 ? -1 : 1) * 600);
+      setTimeout(onClose, 180);
+    } else {
+      setDx(0); // snap back
+    }
+  };
+
+  const rot = Math.max(-12, Math.min(12, dx / 12));
+  const opacity = leaving ? 0 : Math.max(0.25, 1 - Math.abs(dx) / 320);
+
   return createPortal(
     <div className="ww-compliment" role="alertdialog" aria-modal="true">
-      <div className="ww-compliment-card">
+      <div
+        className="ww-compliment-card"
+        style={{
+          transform: `translateX(${dx}px) rotate(${rot}deg)`,
+          opacity,
+          transition: startX.current == null ? 'transform .18s ease, opacity .18s ease' : 'none',
+          touchAction: 'pan-y',
+        }}
+        onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
+        onTouchStart={down} onTouchMove={move} onTouchEnd={up}
+      >
         <div className="ww-compliment-spark">🌶️🔥</div>
-        <div className="ww-compliment-head">RICHTIG! Für dich:</div>
         <div className="ww-compliment-text">{text}</div>
-        <div className="ww-compliment-actions">
-          {reactions.map(r => (
-            <button key={r} className="ww-compliment-btn" onClick={onClose}>{r}</button>
-          ))}
+        <div className="ww-compliment-swipe">
+          <span>👈 wegwischen 👉</span>
         </div>
-        <div className="ww-compliment-hint">Nimm das Kompliment an, um weiterzuspielen 😏</div>
       </div>
+      <div className="ww-compliment-hint">Wisch das Kompliment weg, um weiterzuspielen 😏</div>
     </div>,
     document.body
   );
@@ -3488,7 +3522,24 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
         💡 Einzelne Runden löschst du jetzt direkt unter „Vergangene Runden".
       </p>
+      {busy && <JeoGeneratingOverlay />}
     </div>
+  );
+}
+
+// Full-screen blocking spinner while the board is being generated, so nobody
+// taps something else mid-generation.
+function JeoGeneratingOverlay() {
+  return createPortal(
+    <div className="ww-jeo-gen" role="alertdialog" aria-modal="true" aria-label="Fragen werden generiert">
+      <div className="ww-jeo-gen-inner">
+        <div className="ww-jeo-gen-spinner" />
+        <div className="ww-jeo-gen-emoji">🎤</div>
+        <div className="ww-jeo-gen-title">Fragen werden generiert…</div>
+        <div className="ww-jeo-gen-sub">Claude tüftelt gerade dein Brett aus. Kurz Geduld — nicht wegtippen 😉</div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
