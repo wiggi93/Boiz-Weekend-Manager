@@ -86,8 +86,11 @@ onRecordUpdateRequest((e) => {
   e.next();
   try {
     const lastUnfinished = nextCount > 0 && !(next[nextCount - 1] || {}).finishedAt;
+    const allParts = lib.parseArr(e.record, "participants");
+    console.log("[push] jeopardy update: prev=" + prevCount + " next=" + nextCount +
+      " unfinished=" + lastUnfinished + " participants=" + JSON.stringify(allParts) + " actor=" + actor);
     if (prevCount >= 0 && nextCount > prevCount && lastUnfinished) {
-      const parts = lib.parseArr(e.record, "participants").filter((id) => id && id !== actor);
+      const parts = allParts.filter((id) => id && id !== actor);
       lib.sendPushToUsers(e.app, parts, {
         title: "🎤 Jeopardy-Runde gestartet!",
         body: "Eine neue Runde läuft — du bist dabei. Handy raus!",

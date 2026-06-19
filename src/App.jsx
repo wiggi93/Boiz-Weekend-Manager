@@ -439,6 +439,10 @@ export default function App() {
 
     if (collection === 'jeopardy') {
       setJeopardy(prev => {
+        // Ignore out-of-order/stale events: never apply a record older than
+        // what we already show (server `updated` is monotonic per record).
+        // This stops a late echo from reverting a fresher state.
+        if (prev && prev.updated && rec.updated && rec.updated < prev.updated) return prev;
         const next = prev ? { ...prev, ...rec } : rec;
         jeopardyRef.current = next;
         return next;
@@ -593,23 +597,24 @@ export default function App() {
   })();
   useEffect(() => {
     if (!currentEventId || !jeopardyRoundLive) return;
-    const GRACE = 4000; // ms to trust local state after my own move
+    // Backstop for when realtime (SSE) is slow/dropping. Apply the server copy
+    // ONLY when it's strictly newer than what we already show (by the record's
+    // monotonic `updated`). Optimistic local moves don't bump `updated`, so an
+    // in-flight move is NEVER reverted by the poll (that was the "tile closes
+    // again" / "Richtig does nothing" bug). Poll fast so others see moves
+    // within ~2s even if realtime is dead.
     const id = setInterval(async () => {
       if (document.visibilityState && document.visibilityState !== 'visible') return;
-      if (Date.now() - jeopardyWriteRef.current < GRACE) return; // I just acted — don't fight my optimistic state
       try {
         const fresh = await getJeopardy(currentEventId);
         if (!fresh) return;
-        if (Date.now() - jeopardyWriteRef.current < GRACE) return; // a move landed while fetching — bail
-        // Adopt only when the board actually differs, so we never re-render
-        // (and never revert) on a no-op poll.
         const cur = jeopardyRef.current;
-        const changed = !cur
-          || JSON.stringify(fresh.rounds) !== JSON.stringify(cur.rounds)
-          || JSON.stringify(fresh.participants) !== JSON.stringify(cur.participants);
-        if (changed) { jeopardyRef.current = fresh; setJeopardy(fresh); }
+        const curUpd = cur?.updated || '';
+        if (!curUpd || (fresh.updated && fresh.updated > curUpd)) {
+          jeopardyRef.current = fresh; setJeopardy(fresh);
+        }
       } catch (_) {}
-    }, 5000);
+    }, 2000);
     return () => clearInterval(id);
   }, [currentEventId, jeopardyRoundLive]);
 
