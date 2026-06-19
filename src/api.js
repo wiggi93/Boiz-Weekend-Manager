@@ -242,6 +242,37 @@ export async function generateJeopardyBoard(eventId, categories, avoid = [], sur
   return res.json();
 }
 
+// Start a full round server-side: the backend generates the board, builds the
+// round, SAVES it on the jeopardy record and pushes the participants. The
+// client just fires this — it can then background/lock the phone; the round
+// arrives via realtime when it lands. Flag questions are pre-built offline by
+// the client and passed in (no flag bank on the server).
+export async function startJeopardyRound(eventId, { categories, aiCategories, flagQuestions = [], surprise = false }) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 115000);
+  let res;
+  try {
+    res = await fetch(`${PB_URL}/api/jeopardy/start-round`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+      body: JSON.stringify({ eventId, categories, aiCategories, flagQuestions: JSON.stringify(flagQuestions), surprise }),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    // The request may drop (timeout / backgrounded), but the server still
+    // finishes + saves the round. Signal "pending" rather than a hard error.
+    if (e?.name === 'AbortError') { const err = new Error('pending'); err.pending = true; throw err; }
+    const err = new Error('pending'); err.pending = true; throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`start-round failed (${res.status}): ${text.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
 // ---- Kitty Split ----
 export async function getKitty(eventId) {
   try {

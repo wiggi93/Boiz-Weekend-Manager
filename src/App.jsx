@@ -16,7 +16,7 @@ import {
   loadEventStats, setMyCount, resetEventStats,
   updateMyProfile, setUserRole, setUserApproved, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
-  getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard,
+  getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard, startJeopardyRound,
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
   getKitty, updateKitty, ensureKitty,
   getSchnelleFragen, updateSchnelleFragen, ensureSchnelleFragen,
@@ -185,6 +185,11 @@ export default function App() {
   // avoid clobbering an optimistic move that hasn't round-tripped yet (which
   // made tiles flash open→closed).
   const jeopardyWriteRef = useRef(0);
+  // Server-side round generation in progress (shows a blocking overlay). The
+  // round is built + saved on the backend, so this can clear when the new
+  // round lands via realtime even if the request itself dropped.
+  const [jeoGenerating, setJeoGenerating] = useState(false);
+  const jeoGenRoundsRef = useRef(0); // rounds count when generation started
   const [kitty, setKitty] = useState(null);
   const kittyRef = useRef(null);
   useEffect(() => { kittyRef.current = kitty; }, [kitty]);
@@ -618,6 +623,27 @@ export default function App() {
     return () => clearInterval(id);
   }, [currentEventId, jeopardyRoundLive]);
 
+  // While a round is being generated server-side, poll for it to appear (works
+  // even before any round exists, and even if the start-round request dropped
+  // because the phone was locked). Clears the blocking overlay on arrival, with
+  // a timeout fallback so it never hangs forever.
+  useEffect(() => {
+    if (!jeoGenerating || !currentEventId) return;
+    let done = false;
+    const check = async () => {
+      try {
+        const fresh = await getJeopardy(currentEventId);
+        if (fresh && (fresh.rounds || []).length > jeoGenRoundsRef.current) {
+          jeopardyRef.current = fresh; setJeopardy(fresh);
+          done = true; setJeoGenerating(false);
+        }
+      } catch (_) {}
+    };
+    const id = setInterval(check, 3000);
+    const timeout = setTimeout(() => { if (!done) setJeoGenerating(false); }, 140000);
+    return () => { clearInterval(id); clearTimeout(timeout); };
+  }, [jeoGenerating, currentEventId]);
+
   useEffect(() => { if (lobbyView === 'admin') refreshAllEvents(); }, [lobbyView, refreshAllEvents]);
 
   // Load global user list when admin opens the USER tab in the lobby
@@ -945,93 +971,51 @@ export default function App() {
 
   const onJeopardyGenerate = async (categories, opts = {}) => {
     const surprise = !!opts.surprise;
+    // Flag questions are built offline (the server has no flag bank) and sent
+    // along; the slow AI generation + round creation + save happens server-side.
+    const usedFlagCodes = [];
+    for (const r of (jeopardyRef.current?.rounds || [])) {
+      for (const q of (r.questions || [])) {
+        if (q.type === 'flag' && q.flagCode) usedFlagCodes.push(q.flagCode);
+      }
+    }
+    let flagQuestions = [];
+    let aiCategories = [];
+    if (!surprise) {
+      const flagCats = categories.filter(isFlagsCategory);
+      aiCategories = categories.filter(c => !isFlagsCategory(c));
+      for (const cat of flagCats) {
+        for (const f of pickFlagRound(usedFlagCodes)) {
+          usedFlagCodes.push(f.code);
+          flagQuestions.push({ category: cat, level: f.level, flagCode: f.code, q: 'Welches Land zeigt diese Flagge?', a: f.name });
+        }
+      }
+    }
+
+    // Fire and let it run server-side. Close the drawer + show a blocking
+    // overlay; the round lands via realtime/poll even if this request drops
+    // (phone locked/backgrounded) — the backend saves it regardless.
+    jeoGenRoundsRef.current = (jeopardyRef.current?.rounds || []).length;
+    setModuleSettingsOpen(null);
+    setJeoGenerating(true);
+    // Optimistically reflect the event going live for the host.
+    const curEv = eventRef.current;
+    if (curEv && !curEv.active) { const nextEv = { ...curEv, active: true }; eventRef.current = nextEv; setCurrentEvent(nextEv); }
+
     try {
-      // Collect everything already used in PREVIOUS rounds of this event so
-      // the generator avoids repeats. AI: question + answer texts. Flags:
-      // already-shown country codes.
-      const prevRounds = jeopardyRef.current?.rounds || [];
-      const usedQA = [];
-      const usedFlagCodes = [];
-      for (const r of prevRounds) {
-        for (const q of (r.questions || [])) {
-          if (q.type === 'flag') { if (q.flagCode) usedFlagCodes.push(q.flagCode); }
-          else { if (q.q) usedQA.push(q.q); if (q.a) usedQA.push(q.a); }
-        }
-      }
-
-      let questions = [];
-      let roundCategories = categories;
-
-      if (surprise) {
-        // The model picks 5 popular quiz categories itself; we derive the
-        // category list from the returned board (order of first appearance).
-        const board = await generateJeopardyBoard(currentEventId, [], usedQA, true);
-        questions = (board.questions || []).map(q => ({
-          category: q.category, level: Number(q.level) || 1,
-          q: String(q.q || ''), a: String(q.a || ''),
-          winnerUserId: null, revealed: false,
-        }));
-        roundCategories = [];
-        for (const q of questions) {
-          if (q.category && !roundCategories.includes(q.category)) roundCategories.push(q.category);
-        }
-      } else {
-        // "Flaggen" is built offline from the local flag pool; only the other
-        // categories are sent to the LLM. Avoids a network call (and cost) for
-        // flags and guarantees correct answers.
-        const flagCats = categories.filter(isFlagsCategory);
-        const aiCats = categories.filter(c => !isFlagsCategory(c));
-
-        if (aiCats.length > 0) {
-          const board = await generateJeopardyBoard(currentEventId, aiCats, usedQA);
-          questions = (board.questions || []).map(q => ({
-            category: q.category, level: Number(q.level) || 1,
-            q: String(q.q || ''), a: String(q.a || ''),
-            winnerUserId: null, revealed: false,
-          }));
-        }
-
-        for (const cat of flagCats) {
-          for (const f of pickFlagRound(usedFlagCodes)) {
-            usedFlagCodes.push(f.code); // avoid dupes across multiple flag cats too
-            questions.push({
-              category: cat, level: f.level,
-              type: 'flag', flagCode: f.code,
-              q: 'Welches Land zeigt diese Flagge?', a: f.name,
-              winnerUserId: null, revealed: false,
-            });
-          }
-        }
-      }
-
-      // Random pick order for this round so players take turns tapping tiles
-      const parts = [...(jeopardyRef.current?.participants || [])];
-      const shuffled = parts.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
-      const round = {
-        id: String(Date.now()),
-        startedAt: new Date().toISOString(),
-        finishedAt: null,
-        categories: roundCategories,
-        pickerOrder: shuffled,
-        pickerIdx: 0,
-        questions,
-      };
-      const rounds = [...(jeopardyRef.current?.rounds || []), round];
-      await onJeopardyPatch({ rounds, categories: roundCategories });
-      // Starting a round means group play has begun — make sure the event is
-      // live. Otherwise non-host players are stuck on the "noch nicht
-      // gestartet" waiting screen and never see the board (it's gated on
-      // event.active), which looks like "the game only started for the host".
-      const curEv = eventRef.current;
-      if (curEv && !curEv.active) {
-        const nextEv = { ...curEv, active: true };
-        eventRef.current = nextEv; setCurrentEvent(nextEv);
-        try { await updateEvent(curEv.id, { active: true }); } catch (_) {}
-      }
-      // Close the settings drawer so the host lands directly on the board.
-      setModuleSettingsOpen(null);
+      await startJeopardyRound(currentEventId, { categories, aiCategories, flagQuestions, surprise });
+      await refreshCurrentEvent();
+      setJeoGenerating(false);
       showToast('Neue Runde mit frischen Fragen 🎤');
     } catch (e) {
+      if (e?.pending) {
+        // Request dropped, but the server keeps generating + saving. Leave the
+        // overlay up; the effect below clears it when the round arrives (or a
+        // timeout fallback fires).
+        showToast('Generierung läuft weiter — du kannst das Handy weglegen 😌');
+        return;
+      }
+      setJeoGenerating(false);
       showToast(`Frage-Gen Fehler: ${e?.message?.slice?.(0, 80) || e}`);
     }
   };
@@ -1401,6 +1385,7 @@ export default function App() {
           onClose={() => setDetailUserId(null)}
         />
       )}
+      {jeoGenerating && <JeoGeneratingOverlay />}
       {toast && <Toast toast={toast} />}
       {confirmDlg && <ConfirmDialog {...confirmDlg} />}
     </div>
@@ -3572,15 +3557,15 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
       </div>
 
       <button className="ww-big-cta green" onClick={startRound} disabled={busy} style={{ marginTop: 14 }}>
-        <Play size={20} /><span>{busy ? 'GENERIERE FRAGEN…' : 'NEUE RUNDE STARTEN'}</span>
+        <Play size={20} /><span>{busy ? 'STARTE…' : 'NEUE RUNDE STARTEN'}</span>
       </button>
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
-        Anthropic generiert 5 Fragen pro Kategorie. Dauert ca. 5–15 Sek.
+        Wird im Hintergrund generiert (ca. 15–40 Sek) — du kannst das Handy
+        weglegen, die Runde erscheint von selbst, sobald sie fertig ist.
       </p>
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
         💡 Einzelne Runden löschst du jetzt direkt unter „Vergangene Runden".
       </p>
-      {busy && <JeoGeneratingOverlay />}
     </div>
   );
 }
