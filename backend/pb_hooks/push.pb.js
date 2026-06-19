@@ -71,35 +71,9 @@ onRecordUpdateRequest((e) => {
   } catch (err) { console.log("[push] event trigger:", err); }
 }, "events");
 
-// ---- Trigger 3: jeopardy round started → push to participants -------------
-onRecordUpdateRequest((e) => {
-  const lib = require(`${__hooks}/push_lib.js`);
-  let prevCount = -1;
-  try {
-    const original = e.app.findRecordById("jeopardy", e.record.id);
-    prevCount = lib.parseArr(original, "rounds").length;
-  } catch (_) {}
-  const next = lib.parseArr(e.record, "rounds");
-  const nextCount = next.length;
-  const actor = e.auth ? e.auth.id : null;
-  const eventId = e.record.get("event");
-  e.next();
-  try {
-    const lastUnfinished = nextCount > 0 && !(next[nextCount - 1] || {}).finishedAt;
-    const allParts = lib.parseArr(e.record, "participants");
-    console.log("[push] jeopardy update: prev=" + prevCount + " next=" + nextCount +
-      " unfinished=" + lastUnfinished + " participants=" + JSON.stringify(allParts) + " actor=" + actor);
-    if (prevCount >= 0 && nextCount > prevCount && lastUnfinished) {
-      const parts = allParts.filter((id) => id && id !== actor);
-      lib.sendPushToUsers(e.app, parts, {
-        title: "🎤 Jeopardy-Runde gestartet!",
-        body: "Eine neue Runde läuft — du bist dabei. Handy raus!",
-        url: `/?event=${eventId}&goto=jeopardy`,
-        tag: `jeo-${e.record.id}-${nextCount}`,
-      });
-    }
-  } catch (err) { console.log("[push] jeopardy trigger:", err); }
-}, "jeopardy");
+// ---- Trigger 3 (jeopardy round) is handled directly in the /start-round
+//      route (jeopardy.pb.js): the round is built + saved server-side, so a
+//      request hook wouldn't fire — it pushes the participants itself there.
 
 // ---- Trigger 4: kitty — everyone marked done → push to all members --------
 onRecordUpdateRequest((e) => {
