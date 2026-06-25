@@ -49,8 +49,32 @@ const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','
 // Pickable icons for custom competition modules. Bias toward sport / game / bar themes.
 const MODULE_ICONS = ['🎯','🎳','🎱','🏓','🏐','🏀','⚽','🎾','🏈','🥏','🥅','🏑','🏏','🏌️','🎮','🎲','🃏','🧠','🚣','🧗','🏇','🏎️','🛹','🚴','🏹','🪁','🥊','🥋','🍻','🍺','🥃','🔥'];
 
+// Configurable drinks: an event defines a list of drinks (emoji/label/points).
+// Falls back to the legacy beer/mische config for events created before this.
+const eventDrinks = (ev) => {
+  if (Array.isArray(ev?.drinks) && ev.drinks.length) return ev.drinks;
+  return [
+    { id: 'beer', emoji: '🍺', label: ev?.beerLabel || 'Bier', points: ev?.pointsPerBeer ?? 1 },
+    { id: 'mische', emoji: '🍷', label: ev?.drinkLabel || 'Mische', points: ev?.pointsPerMische ?? 1 },
+  ];
+};
+// Count for a given drink id on a stats row (with legacy beer/mische fallback).
+const drinkCount = (s, id) => {
+  if (s?.counts && typeof s.counts === 'object' && s.counts[id] != null) return s.counts[id] || 0;
+  if (id === 'beer') return s?.beer || 0;
+  if (id === 'mische') return s?.mische || 0;
+  return 0;
+};
+// Normalised counts map for a stats row.
+const drinkCounts = (s, ev) => {
+  const out = {};
+  for (const d of eventDrinks(ev)) out[d.id] = drinkCount(s, d.id);
+  return out;
+};
+const totalDrinkCount = (s, ev) => eventDrinks(ev).reduce((n, d) => n + drinkCount(s, d.id), 0);
+
 const computeDrinkPoints = (s, ev) =>
-  (s?.beer || 0) * (ev?.pointsPerBeer ?? 1) + (s?.mische || 0) * (ev?.pointsPerMische ?? 1);
+  eventDrinks(ev).reduce((total, d) => total + drinkCount(s, d.id) * (Number(d.points) || 0), 0);
 
 const finishedGames = (flunky) => (flunky?.games || []).filter(g => g.winner === 'A' || g.winner === 'B');
 const currentGame = (flunky) => {
@@ -208,7 +232,7 @@ export default function App() {
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
   // by DrinksBar on every bump; cleared on event switch.
-  const myOptRef = useRef({ beer: 0, mische: 0 });
+  const myOptRef = useRef({ counts: {} });
   const [allEvents, setAllEvents] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [view, setView] = useState('home');
@@ -388,13 +412,13 @@ export default function App() {
   useEffect(() => {
     refreshCurrentEvent();
     // reset own-optimistic baseline on event switch
-    myOptRef.current = { beer: 0, mische: 0 };
+    myOptRef.current = { counts: {} };
   }, [refreshCurrentEvent]);
 
   // Sync own-optimistic baseline from initial / refreshed stats
   useEffect(() => {
     const mine = statsMap[me?.id];
-    if (mine) myOptRef.current = { beer: mine.beer || 0, mische: mine.mische || 0 };
+    if (mine) myOptRef.current = { counts: { ...drinkCounts(mine, eventRef.current) } };
   }, [statsMap, me?.id]);
 
   // Stable realtime handler — applies records incrementally, no refetch storm.
@@ -424,12 +448,13 @@ export default function App() {
       }
       // Skip our own write echo if the broadcast matches what we optimistically already show.
       // Different values would mean an external change (e.g., admin reset) — accept those.
+      const recCounts = (rec.counts && typeof rec.counts === 'object') ? rec.counts : { beer: rec.beer || 0, mische: rec.mische || 0 };
       if (rec.user === myId) {
-        const opt = myOptRef.current;
-        if ((rec.beer || 0) === opt.beer && (rec.mische || 0) === opt.mische) return;
-        myOptRef.current = { beer: rec.beer || 0, mische: rec.mische || 0 };
+        const opt = myOptRef.current?.counts || {};
+        if (JSON.stringify(recCounts) === JSON.stringify(opt)) return;
+        myOptRef.current = { counts: { ...recCounts } };
       }
-      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0, log: Array.isArray(rec.log) ? rec.log : (m[rec.user]?.log || []) } }));
+      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0, counts: recCounts, log: Array.isArray(rec.log) ? rec.log : (m[rec.user]?.log || []) } }));
       return;
     }
 
@@ -813,10 +838,10 @@ export default function App() {
       // Optimistic stats wipe so the UI updates before realtime echo arrives.
       setStatsMap(prev => {
         const next = {};
-        for (const k of Object.keys(prev)) next[k] = { ...prev[k], beer: 0, mische: 0, log: [] };
+        for (const k of Object.keys(prev)) next[k] = { ...prev[k], beer: 0, mische: 0, counts: {}, log: [] };
         return next;
       });
-      myOptRef.current = { beer: 0, mische: 0 };
+      myOptRef.current = { counts: {} };
 
       const flunkyCur = flunkyRef.current;
       if (flunkyCur?.id && (flunkyCur.games?.length || 0) > 0) {
@@ -2367,7 +2392,8 @@ function TeamSplitView({ event, members, admin, onSaveEvent }) {
 // ============================================================
 
 function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSettings, myOptRef }) {
-  const myStats = statsMap[me.id] || { id: null, beer: 0, mische: 0 };
+  const myStats = statsMap[me.id] || { id: null, counts: {} };
+  const drinks = eventDrinks(event);
   const pendingWrite = useRef(null);
   const flushTimer = useRef(null);
 
@@ -2382,42 +2408,41 @@ function DrinksBar({ me, event, statsMap, setStatsMap, admin, active, onOpenSett
     }, 350);
   };
 
-  const bump = (kind, delta) => {
+  const bump = (drinkId, delta) => {
     if (!active) return;
     const cur = statsMap[me.id]; if (!cur?.id) return;
-    const curVal = cur[kind] || 0;
+    const counts = { ...drinkCounts(cur, event) };
+    const curVal = counts[drinkId] || 0;
     const nextVal = Math.max(0, curVal + delta);
     if (nextVal === curVal) return; // nothing changed (e.g. minus at 0)
+    counts[drinkId] = nextVal;
     // Maintain the timestamped drink log alongside the counter: +1 appends a
-    // { t, k } entry, −1 removes the most recent entry of that kind.
+    // { t, k } entry (k = drink id), −1 removes the most recent of that kind.
     let log = Array.isArray(cur.log) ? cur.log.slice() : [];
     if (delta > 0) {
-      log.push({ t: Date.now(), k: kind });
+      log.push({ t: Date.now(), k: drinkId });
     } else {
       for (let i = log.length - 1; i >= 0; i--) {
-        if (log[i]?.k === kind) { log.splice(i, 1); break; }
+        if (log[i]?.k === drinkId) { log.splice(i, 1); break; }
       }
     }
-    const next = { ...cur, [kind]: nextVal, log };
+    const next = { ...cur, counts, log };
     setStatsMap(m => ({ ...m, [me.id]: next }));
     // Update the App-level ref so the realtime handler can recognise its
     // own echo and skip it (no flicker on rapid tapping).
-    if (myOptRef) myOptRef.current = { beer: next.beer, mische: next.mische };
-    scheduleWrite(cur.id, { beer: next.beer, mische: next.mische, log });
+    if (myOptRef) myOptRef.current = { counts: { ...counts } };
+    scheduleWrite(cur.id, { counts, log });
   };
 
   return (
-    <div className={`ww-drinks-bar ${!active ? 'paused' : ''}`}>
-      <DrinkPill
-        emoji="🍺" label={event.beerLabel} count={myStats.beer || 0}
-        disabled={!active}
-        onInc={() => bump('beer', +1)} onDec={() => bump('beer', -1)}
-      />
-      <DrinkPill
-        emoji="🍷" label={event.drinkLabel} count={myStats.mische || 0}
-        disabled={!active}
-        onInc={() => bump('mische', +1)} onDec={() => bump('mische', -1)}
-      />
+    <div className={`ww-drinks-bar ${!active ? 'paused' : ''} ${drinks.length > 2 ? 'multi' : ''}`}>
+      {drinks.map(d => (
+        <DrinkPill
+          key={d.id} emoji={d.emoji || '🍺'} label={d.label} count={drinkCount(myStats, d.id)}
+          disabled={!active}
+          onInc={() => bump(d.id, +1)} onDec={() => bump(d.id, -1)}
+        />
+      ))}
       {admin && (
         <button className="ww-icon-btn ww-icon-btn-sm" onClick={onOpenSettings} aria-label="Drinks Settings">
           <Settings size={14} />
@@ -2453,8 +2478,8 @@ function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customMo
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
-      const s = statsMap[u.id] || { beer: 0, mische: 0 };
-      return { ...u, beer: s.beer, mische: s.mische, points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges) };
+      const s = statsMap[u.id] || {};
+      return { ...u, drinkTotal: totalDrinkCount(s, event), points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges) };
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points),
@@ -2467,7 +2492,7 @@ function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customMo
   return (
     <>
       <div className="ww-stats-row">
-        <StatPill label="Drinks" value={(myEntry?.beer || 0) + (myEntry?.mische || 0)} />
+        <StatPill label="Drinks" value={myEntry?.drinkTotal || 0} />
         <StatPill label="Punkte" value={myEntry?.points || 0} accent />
         <StatPill label="Rang" value={myRank ? `#${myRank}` : '–'} />
       </div>
@@ -4995,38 +5020,71 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
   );
 }
 
+const DRINK_EMOJI_CHOICES = ['🍺','🍻','🍷','🥂','🍾','🥃','🍸','🍹','🍶','🧉','🍵','☕','🥤','🧃','🧊','🔥','🍫','🌶️','🍾','🥛'];
+
 function DrinksLiveSettings({ event, onSave }) {
-  const [beerLabel, setBeerLabel] = useState(event.beerLabel || 'Bier');
-  const [drinkLabel, setDrinkLabel] = useState(event.drinkLabel || 'Mische');
-  const [pb_, setPb] = useState(event.pointsPerBeer ?? 1);
-  const [pm, setPm] = useState(event.pointsPerMische ?? 1);
-  const save = () => onSave({
-    beerLabel: beerLabel.trim(), drinkLabel: drinkLabel.trim(),
-    pointsPerBeer: Number(pb_), pointsPerMische: Number(pm),
-  });
+  const [drinks, setDrinks] = useState(() => eventDrinks(event).map(d => ({
+    id: d.id || `dr-${Math.random().toString(36).slice(2, 8)}`,
+    emoji: d.emoji || '🍺', label: d.label || '', points: d.points ?? 1,
+  })));
+  const [emojiPickerFor, setEmojiPickerFor] = useState(null);
+
+  const update = (i, field, val) => setDrinks(arr => arr.map((d, j) => j === i ? { ...d, [field]: val } : d));
+  const addDrink = () => setDrinks(arr => [...arr, { id: `dr-${Date.now()}`, emoji: '🥤', label: '', points: 1 }]);
+  const removeDrink = (i) => setDrinks(arr => arr.filter((_, j) => j !== i));
+
+  const save = () => {
+    const cleaned = drinks
+      .map(d => ({ id: d.id, emoji: d.emoji || '🍺', label: (d.label || '').trim() || 'Drink', points: Math.max(0, Number(d.points) || 0) }))
+      .slice(0, 8);
+    if (cleaned.length === 0) return;
+    // Keep legacy fields roughly in sync for any old code paths.
+    onSave({
+      drinks: cleaned,
+      beerLabel: cleaned[0]?.label || 'Bier',
+      drinkLabel: cleaned[1]?.label || 'Mische',
+      pointsPerBeer: cleaned[0]?.points ?? 1,
+      pointsPerMische: cleaned[1]?.points ?? 1,
+    });
+  };
+
   return (
     <div>
-      <div className="ww-grid2">
-        <div>
-          <label className="ww-label">BIER-LABEL</label>
-          <input className="ww-input" value={beerLabel} onChange={e => setBeerLabel(e.target.value)} maxLength={12} />
-        </div>
-        <div>
-          <label className="ww-label">MISCHE-LABEL</label>
-          <input className="ww-input" value={drinkLabel} onChange={e => setDrinkLabel(e.target.value)} maxLength={12} />
-        </div>
+      <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
+        Lege fest, womit man punktet — Emoji, Name und Punkte pro Getränk.
+        z.B. „🍷 Großer Wein" = 2 Pkt, „🥃 Kleiner Wein" = 1 Pkt.
+      </p>
+      <div className="ww-drinkcfg-list">
+        {drinks.map((d, i) => (
+          <div key={d.id} className="ww-drinkcfg-row">
+            <button type="button" className="ww-drinkcfg-emoji" onClick={() => setEmojiPickerFor(emojiPickerFor === i ? null : i)}>
+              {d.emoji}
+            </button>
+            <input className="ww-input ww-drinkcfg-name" placeholder="Name" maxLength={18}
+              value={d.label} onChange={e => update(i, 'label', e.target.value)} />
+            <input className="ww-input ww-drinkcfg-pts" type="number" inputMode="numeric" min={0} max={20}
+              value={d.points} onChange={e => update(i, 'points', e.target.value)} aria-label="Punkte" />
+            <span className="ww-drinkcfg-pkt">Pkt</span>
+            <button type="button" className="ww-mini-btn red" onClick={() => removeDrink(i)} disabled={drinks.length <= 1} aria-label="Entfernen"><X size={12} /></button>
+            {emojiPickerFor === i && (
+              <div className="ww-drinkcfg-emojis">
+                {DRINK_EMOJI_CHOICES.map(em => (
+                  <button key={em} type="button" className={`ww-emoji-btn ${d.emoji === em ? 'sel' : ''}`}
+                    onClick={() => { update(i, 'emoji', em); setEmojiPickerFor(null); }}>{em}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
-      <div className="ww-grid2">
-        <div>
-          <label className="ww-label">PKT / BIER</label>
-          <input className="ww-input" type="number" min={0} max={10} value={pb_} onChange={e => setPb(e.target.value)} />
-        </div>
-        <div>
-          <label className="ww-label">PKT / MISCHE</label>
-          <input className="ww-input" type="number" min={0} max={10} value={pm} onChange={e => setPm(e.target.value)} />
-        </div>
-      </div>
-      <button className="ww-big-cta" onClick={save}><Check size={20} /><span>SPEICHERN</span></button>
+      {drinks.length < 8 && (
+        <button className="ww-mini-btn" onClick={addDrink} style={{ marginTop: 8 }}><Plus size={12} /> Getränk hinzufügen</button>
+      )}
+      <button className="ww-big-cta" onClick={save} style={{ marginTop: 14 }}><Check size={20} /><span>SPEICHERN</span></button>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>
+        💡 Bestehende Zähler bleiben erhalten. Löschst du ein Getränk, zählen
+        seine bisherigen Punkte nicht mehr mit (Zähler bleiben aber gespeichert).
+      </p>
     </div>
   );
 }
@@ -5079,8 +5137,9 @@ function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, c
                 <div className="ww-crew-pts">{points} pkt</div>
               </button>
               <div className="ww-crew-mini">
-                <span><Beer size={11} /> {s.beer || 0}</span>
-                <span><Wine size={11} /> {s.mische || 0}</span>
+                {eventDrinks(event).map(d => (
+                  <span key={d.id}>{d.emoji || '🍺'} {drinkCount(s, d.id)}</span>
+                ))}
               </div>
               {food && <div className="ww-crew-line"><b>Essen:</b> {food}</div>}
               {drink && <div className="ww-crew-line"><b>Trinken:</b> {drink}</div>}
@@ -5148,18 +5207,19 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
   if (!user) return null;
   const evFood = membership?.foodWishes || '';
   const evDrink = membership?.drinkWishes || '';
-  const s = stats || { beer: 0, mische: 0 };
-  const beerPts = (s.beer || 0) * (event.pointsPerBeer ?? 1);
-  const mischePts = (s.mische || 0) * (event.pointsPerMische ?? 1);
-  const drinkPts = beerPts + mischePts;
+  const s = stats || {};
+  const drinks = eventDrinks(event);
+  const drinkById = {}; for (const d of drinks) drinkById[d.id] = d;
+  const drinkBreakdown = drinks.map(d => ({ d, count: drinkCount(s, d.id), pts: drinkCount(s, d.id) * (Number(d.points) || 0) }));
+  const drinkPts = drinkBreakdown.reduce((n, x) => n + x.pts, 0);
 
   // Timestamped drink history (newest first). Drinks logged before this
   // feature shipped have no timestamp — show them as a count-only remainder.
   const drinkLog = (Array.isArray(s.log) ? s.log : [])
-    .filter(e => e && (e.k === 'beer' || e.k === 'mische') && e.t)
+    .filter(e => e && e.k && e.t)
     .slice()
     .sort((a, b) => (b.t || 0) - (a.t || 0));
-  const totalDrinks = (s.beer || 0) + (s.mische || 0);
+  const totalDrinks = totalDrinkCount(s, event);
   const untrackedDrinks = Math.max(0, totalDrinks - drinkLog.length);
 
   const ppw = flunky?.pointsPerWin || 0;
@@ -5219,9 +5279,10 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
         </div>
 
         <div className="ww-detail-section">
-          <div className="ww-detail-section-head">🍺 BIER & MISCHE</div>
-          <DetailRow label={`${event.beerLabel || 'Bier'} × ${event.pointsPerBeer ?? 1} pkt`} count={s.beer || 0} pts={beerPts} />
-          <DetailRow label={`${event.drinkLabel || 'Mische'} × ${event.pointsPerMische ?? 1} pkt`} count={s.mische || 0} pts={mischePts} />
+          <div className="ww-detail-section-head">🍺 GETRÄNKE</div>
+          {drinkBreakdown.map(({ d, count, pts }) => (
+            <DetailRow key={d.id} label={`${d.emoji || '🍺'} ${d.label} × ${Number(d.points) || 0} pkt`} count={count} pts={pts} />
+          ))}
           <DetailRow label="Summe" pts={drinkPts} bold />
         </div>
 
@@ -5232,8 +5293,8 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
               <div className="ww-drinklog">
                 {drinkLog.map((e, i) => (
                   <div key={i} className="ww-drinklog-row">
-                    <span className="ww-drinklog-emoji">{e.k === 'beer' ? '🍺' : '🍷'}</span>
-                    <span className="ww-drinklog-label">{e.k === 'beer' ? (event.beerLabel || 'Bier') : (event.drinkLabel || 'Mische')}</span>
+                    <span className="ww-drinklog-emoji">{drinkById[e.k]?.emoji || '🍺'}</span>
+                    <span className="ww-drinklog-label">{drinkById[e.k]?.label || e.k}</span>
                     <span className="ww-drinklog-time">{formatDrinkTime(e.t)}</span>
                   </div>
                 ))}
