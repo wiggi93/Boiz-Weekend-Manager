@@ -2056,3 +2056,15 @@
 .ww-jeo-gen-sub { font-size: 13px; color: var(--muted); line-height: 1.4; }
 @keyframes ww-spin { to { transform: rotate(360deg); } }
 @keyframes ww-gen-pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.18); } }
+
+/* ============ Jeopardy: regenerate-question button ============ */
+.ww-jeo-regen {
+  width: 100%; margin-top: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 14px; border-radius: 8px; cursor: pointer;
+  background: rgba(245,165,36,0.12); border: 1px solid var(--amber);
+  color: var(--amber); font-size: 13px; font-weight: 600;
+}
+.ww-jeo-regen:hover:not(:disabled) { background: rgba(245,165,36,0.2); }
+.ww-jeo-regen:active:not(:disabled) { transform: scale(0.99); }
+.ww-jeo-regen:disabled { opacity: 0.6; cursor: default; }
