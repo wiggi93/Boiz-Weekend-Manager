@@ -2242,9 +2242,9 @@ function HomeView({
       )}
       {moduleTab === 'wine' && (
         <WineView
-          me={me} admin={admin} eventId={event.id} members={members} wines={wines} ratings={wineRatings}
+          me={me} admin={admin} eventId={event.id} event={event} members={members} wines={wines} ratings={wineRatings}
           onCreate={onWineCreate} onDelete={onWineDelete} onRate={onWineRate}
-          factJump={wineFactJump} onFactJumpDone={onWineFactJumpDone}
+          factJump={wineFactJump} onFactJumpDone={onWineFactJumpDone} onSaveEvent={onSaveEvent}
         />
       )}
       {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
@@ -4687,7 +4687,7 @@ function GlassRating({ value, onPick, size = 22 }) {
   );
 }
 
-function WineView({ me, admin, eventId, members, wines, ratings, onCreate, onDelete, onRate, factJump, onFactJumpDone }) {
+function WineView({ me, admin, eventId, event, members, wines, ratings, onCreate, onDelete, onRate, factJump, onFactJumpDone, onSaveEvent }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4700,13 +4700,20 @@ function WineView({ me, admin, eventId, members, wines, ratings, onCreate, onDel
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(null); // wine id whose raters are shown
 
-  // Fun facts (loaded from the backend catalogue).
+  // Fun facts: the full catalogue is loaded, but only facts that have actually
+  // popped up in THIS event (indices in event.wineFactsSeen) are shown.
   const [facts, setFacts] = useState([]);
   const [factsOpen, setFactsOpen] = useState(false);
-  const [openFact, setOpenFact] = useState(null); // index of the expanded fact
+  const [openFact, setOpenFact] = useState(null); // global index of the expanded fact
   const [factPushBusy, setFactPushBusy] = useState(false);
   const [factPushed, setFactPushed] = useState(false);
   useEffect(() => { getWineFacts().then(setFacts).catch(() => {}); }, []);
+
+  const seenSet = useMemo(() => new Set((Array.isArray(event?.wineFactsSeen) ? event.wineFactsSeen : []).map(Number)), [event?.wineFactsSeen]);
+  // Facts unlocked in this event, newest first, each keeping its global index.
+  const seenFacts = useMemo(() => facts.map((f, i) => ({ f, i })).filter(x => seenSet.has(x.i)).reverse(), [facts, seenSet]);
+  const factEnabled = event?.wineFactEnabled !== false; // default on
+  const factIntervalH = Number(event?.wineFactIntervalH) || 1;
   // A fun-fact push deep-links here with a fact index → open it.
   useEffect(() => {
     if (factJump == null) return;
@@ -4794,22 +4801,41 @@ function WineView({ me, admin, eventId, members, wines, ratings, onCreate, onDel
         </section>
       )}
 
-      {/* Wein-Wissen: fun facts (pushed hourly + on demand, read here) */}
+      {/* Wein-Wissen: only facts that have actually popped up here are readable */}
       <section className="ww-section">
         <button className="ww-funfact-head" onClick={() => setFactsOpen(o => !o)}>
           <span className="ww-funfact-title"><Sparkles size={16} /> WEIN-WISSEN</span>
-          <span className="ww-funfact-sub">{facts.length} Fun Facts</span>
+          <span className="ww-funfact-sub">{seenFacts.length} freigeschaltet</span>
           <ChevronRight size={16} style={{ transform: factsOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
         </button>
         {admin && (
-          <button className={`ww-funfact-send ${factPushed ? 'done' : ''}`} onClick={sendFact} disabled={factPushBusy || factPushed}>
-            {factPushed ? <><Check size={15} /> Fun-Fact verschickt!</> : <>{factPushBusy ? <span className="ww-spinner" /> : <Send size={15} />} Fun-Fact jetzt an alle pushen</>}
-          </button>
+          <>
+            <div className="ww-funfact-cfg">
+              <button type="button" className={`ww-chal-toggle solo ${factEnabled ? 'on' : ''}`}
+                onClick={() => onSaveEvent?.({ wineFactEnabled: !factEnabled })}>
+                {factEnabled ? <Bell size={14} /> : <BellOff size={14} />} Auto-Fun-Facts {factEnabled ? 'an' : 'aus'}
+              </button>
+              {factEnabled && (
+                <div className="ww-funfact-interval">
+                  <span className="ww-muted" style={{ fontSize: 12 }}>Alle</span>
+                  <select className="ww-input" value={factIntervalH}
+                    onChange={e => onSaveEvent?.({ wineFactIntervalH: Number(e.target.value) })}>
+                    {[1, 2, 3, 4, 6, 8, 12, 24].map(h => <option key={h} value={h}>{h} {h === 1 ? 'Stunde' : 'Stunden'}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <button className={`ww-funfact-send ${factPushed ? 'done' : ''}`} onClick={sendFact} disabled={factPushBusy || factPushed}>
+              {factPushed ? <><Check size={15} /> Fun-Fact verschickt!</> : <>{factPushBusy ? <span className="ww-spinner" /> : <Send size={15} />} Fun-Fact jetzt an alle pushen</>}
+            </button>
+          </>
         )}
         {factsOpen && (
           <div className="ww-funfact-list">
-            {facts.length === 0 && <div className="ww-empty">Lade Fun Facts… 🍷</div>}
-            {facts.map((f, i) => (
+            {seenFacts.length === 0 && (
+              <div className="ww-empty">Noch keine Fun-Facts aufgepoppt — der erste kommt automatisch 🍷</div>
+            )}
+            {seenFacts.map(({ f, i }) => (
               <div key={i} id={`fact-${i}`} className={`ww-funfact-item ${openFact === i ? 'open' : ''}`}>
                 <button className="ww-funfact-item-head" onClick={() => setOpenFact(openFact === i ? null : i)}>
                   <span className="ww-funfact-item-title">🍷 {f.title}</span>
