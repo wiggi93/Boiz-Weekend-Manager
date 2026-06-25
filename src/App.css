@@ -2068,3 +2068,23 @@
 .ww-jeo-regen:hover:not(:disabled) { background: rgba(245,165,36,0.2); }
 .ww-jeo-regen:active:not(:disabled) { transform: scale(0.99); }
 .ww-jeo-regen:disabled { opacity: 0.6; cursor: default; }
+
+/* ============ Configurable drinks settings ============ */
+.ww-drinkcfg-list { display: flex; flex-direction: column; gap: 8px; }
+.ww-drinkcfg-row { position: relative; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ww-drinkcfg-emoji {
+  flex-shrink: 0; width: 44px; height: 40px; font-size: 22px;
+  background: var(--card-2); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+}
+.ww-drinkcfg-emoji:hover { border-color: var(--amber); }
+.ww-drinkcfg-name { flex: 1; min-width: 90px; }
+.ww-drinkcfg-pts { width: 56px; flex-shrink: 0; text-align: center; }
+.ww-drinkcfg-pkt { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+.ww-drinkcfg-emojis {
+  width: 100%; display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 6px;
+}
+
+/* Drinks bar wraps to a grid when there are more than two drinks. */
+.ww-drinks-bar.multi { flex-wrap: wrap; }
+.ww-drinks-bar.multi .ww-drink-pill { flex: 1 1 calc(50% - 8px); }

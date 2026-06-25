@@ -77,6 +77,10 @@ export async function createEvent({ name, date = '', endDate = '', modules = ['d
     active: false,
     beerLabel: 'Bier', drinkLabel: 'Mische',
     pointsPerBeer: 1, pointsPerMische: 1,
+    drinks: [
+      { id: 'beer', emoji: '🍺', label: 'Bier', points: 1 },
+      { id: 'mische', emoji: '🍷', label: 'Mische', points: 1 },
+    ],
     createdBy: pb.authStore.record.id,
   });
 }
@@ -138,7 +142,7 @@ export async function updateMembership(memberRecordId, patch) {
 export async function loadEventStats(eventId) {
   const list = await pb.collection('stats').getFullList({ filter: `event="${eventId}"` });
   const map = {};
-  for (const s of list) map[s.user] = { id: s.id, beer: s.beer || 0, mische: s.mische || 0, log: Array.isArray(s.log) ? s.log : [] };
+  for (const s of list) map[s.user] = { id: s.id, beer: s.beer || 0, mische: s.mische || 0, counts: (s.counts && typeof s.counts === 'object') ? s.counts : {}, log: Array.isArray(s.log) ? s.log : [] };
   return map;
 }
 
@@ -148,7 +152,7 @@ export async function setMyCount(statsId, vals) {
 
 export async function resetEventStats(eventId) {
   const all = await pb.collection('stats').getFullList({ filter: `event="${eventId}"` });
-  await Promise.all(all.map(s => pb.collection('stats').update(s.id, { beer: 0, mische: 0, log: [] })));
+  await Promise.all(all.map(s => pb.collection('stats').update(s.id, { beer: 0, mische: 0, counts: {}, log: [] })));
 }
 
 // ---- Users ----
