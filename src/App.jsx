@@ -32,6 +32,7 @@ import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
 import { SCHNELLE_FRAGEN } from './schnelleFragenBank.js';
 import { flagEmoji, isFlagsCategory, pickFlagRound } from './flagsBank.js';
 import { pickCompliment } from './compliments.js';
+import { randomChallenge } from './challengeBank.js';
 import './App.css';
 
 // ---- Confirm singleton (no prop drilling) ----
@@ -172,9 +173,14 @@ const computeChallengePoints = (userId, challenges) => {
   if (!Array.isArray(challenges)) return 0;
   let total = 0;
   for (const c of challenges) {
-    if (c.toUser !== userId) continue;
-    if (c.status === 'done') total += Number(c.reward) || 0;
-    else if (c.status === 'failed') total -= Number(c.penalty) || 0;
+    const reward = Number(c.reward) || 0;
+    if (c.status === 'done') {
+      if (c.toUser === userId) total += reward;
+      // Secret challenge: the proposer pays the reward out of their own points.
+      if (c.secret && c.fromUser === userId) total -= reward;
+    } else if (c.status === 'failed') {
+      if (c.toUser === userId) total -= Number(c.penalty) || 0;
+    }
   }
   return total;
 };
@@ -926,12 +932,12 @@ export default function App() {
   // toUsers is an array: 1 entry for a single/random target, N for a group
   // challenge (one row per targeted member — reuses the normal per-target
   // scoring + resolution).
-  const onChallengeCreate = async ({ toUsers, text, reward }) => {
+  const onChallengeCreate = async ({ toUsers, text, reward, secret = false, isPhoto = false }) => {
     const targets = (toUsers || []).filter(Boolean);
     if (targets.length === 0) return;
     try {
-      await Promise.all(targets.map(t => createChallenge({ eventId: currentEventId, toUser: t, text, reward })));
-      showToast(targets.length > 1 ? `Gruppen-Challenge an ${targets.length} 🎯` : 'Challenge gestellt 🎯');
+      await Promise.all(targets.map(t => createChallenge({ eventId: currentEventId, toUser: t, text, reward, secret, isPhoto })));
+      showToast(secret ? '🤫 Geheime Challenge gestellt' : (targets.length > 1 ? `Gruppen-Challenge an ${targets.length} 🎯` : 'Challenge gestellt 🎯'));
     } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
   };
   const onChallengeResolve = async (id, patch) => {
@@ -4251,6 +4257,8 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
   const [toUser, setToUser] = useState('');
   const [text, setText] = useState('');
   const [reward, setReward] = useState(3);
+  const [secret, setSecret] = useState(false);
+  const [isPhoto, setIsPhoto] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failingId, setFailingId] = useState(null); // challenge being marked failed
   const [penalty, setPenalty] = useState(3);
@@ -4258,21 +4266,30 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
   const open = challenges.filter(c => !c.status || c.status === 'open');
   const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
   const textOk = text.trim().length >= 2 && Number(reward) > 0;
-  const valid = textOk && others.length > 0 && (mode !== 'single' || toUser);
+  // Secret challenges are 1:1 (a private dare) → force single mode.
+  const effMode = secret ? 'single' : mode;
+  const valid = textOk && others.length > 0 && (effMode !== 'single' || toUser);
   const canResolve = (c) => c.fromUser === me.id || admin;
+  // Who may read a secret challenge's text: the two involved + host/admin.
+  const canSeeSecret = (c) => !c.secret || c.fromUser === me.id || c.toUser === me.id || admin;
 
   const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
+
+  const rollRandom = () => {
+    const c = randomChallenge(text.trim());
+    setText(c.text); setReward(c.reward || 3); setIsPhoto(!!c.photo);
+  };
 
   const submit = async () => {
     if (!valid) return;
     let toUsers = [];
-    if (mode === 'group') toUsers = others.map(u => u.id);
-    else if (mode === 'random') toUsers = [others[Math.floor(Math.random() * others.length)].id];
+    if (effMode === 'group') toUsers = others.map(u => u.id);
+    else if (effMode === 'random') toUsers = [others[Math.floor(Math.random() * others.length)].id];
     else toUsers = [toUser];
     setBusy(true);
     try {
-      await onCreate({ toUsers, text: text.trim(), reward: Number(reward) });
-      setText(''); setToUser(''); setReward(3); setMode('single');
+      await onCreate({ toUsers, text: text.trim(), reward: Number(reward), secret, isPhoto });
+      setText(''); setToUser(''); setReward(3); setMode('single'); setSecret(false); setIsPhoto(false);
     } finally { setBusy(false); }
   };
   const markDone = (c) => onResolve(c.id, { status: 'done' });
@@ -4294,32 +4311,51 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
             { k: 'random', label: '🎲 Zufällig' },
             { k: 'group', label: '👥 Gruppe' },
           ].map(m => (
-            <button key={m.k} type="button"
-              className={`ww-auth-tab ${mode === m.k ? 'active' : ''}`}
+            <button key={m.k} type="button" disabled={secret && m.k !== 'single'}
+              className={`ww-auth-tab ${effMode === m.k ? 'active' : ''}`}
               onClick={() => setMode(m.k)}>{m.label}</button>
           ))}
         </div>
-        {mode === 'single' && (
+        {effMode === 'single' && (
           <select className="ww-input" style={{ marginTop: 8 }} value={toUser} onChange={e => setToUser(e.target.value)}>
             <option value="">— Spieler wählen —</option>
             {others.map(u => <option key={u.id} value={u.id}>{u.displayName || u.email}</option>)}
           </select>
         )}
-        {mode === 'random' && (
+        {effMode === 'random' && (
           <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
             🎲 Ein zufälliger Mitspieler wird beim Stellen ausgelost.
           </p>
         )}
-        {mode === 'group' && (
+        {effMode === 'group' && (
           <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
             👥 Alle {others.length} Mitspieler bekommen die Challenge — jeder
             wird einzeln aufgelöst.
           </p>
         )}
-        <label className="ww-label">CHALLENGE</label>
+        <div className="ww-chal-toggles">
+          <button type="button" className={`ww-chal-toggle ${secret ? 'on' : ''}`}
+            onClick={() => setSecret(s => !s)}>
+            {secret ? <EyeOff size={14} /> : <Eye size={14} />} Geheim
+          </button>
+          <button type="button" className={`ww-chal-toggle ${isPhoto ? 'on' : ''}`}
+            onClick={() => setIsPhoto(p => !p)}>
+            📸 Foto-Challenge
+          </button>
+        </div>
+        {secret && (
+          <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+            🤫 Nur du & {toUser ? (usersById[toUser]?.displayName || 'der Spieler') : 'der Spieler'} seht den Text.
+            Du allein entscheidest, ob bestanden — und zahlst die Punkte aus deinem eigenen Konto.
+          </p>
+        )}
+        <div className="ww-chal-label-row">
+          <label className="ww-label">CHALLENGE</label>
+          <button type="button" className="ww-chal-roll" onClick={rollRandom}><Dice5 size={13} /> Zufall</button>
+        </div>
         <textarea className="ww-textarea" rows={2} maxLength={280} value={text}
           onChange={e => setText(e.target.value)} placeholder="z.B. Trink ein Bier in unter 10 Sekunden" />
-        <label className="ww-label">PUNKTE BEI ERFOLG</label>
+        <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : 'PUNKTE BEI ERFOLG'}</label>
         <input className="ww-input" type="number" inputMode="numeric" min={1} max={100}
           value={reward} onChange={e => setReward(e.target.value)} />
         <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
@@ -4337,7 +4373,15 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
                   <span className="ww-chal-who">{uname(c.fromUser)} → <b>{uname(c.toUser)}</b></span>
                   <span className="ww-chal-reward">+{c.reward}</span>
                 </div>
-                <div className="ww-chal-text">{c.text}</div>
+                {(c.secret || c.isPhoto) && (
+                  <div className="ww-chal-badges">
+                    {c.secret && <span className="ww-chal-badge secret">🤫 Geheim</span>}
+                    {c.isPhoto && <span className="ww-chal-badge photo">📸 Foto-Beweis</span>}
+                  </div>
+                )}
+                <div className="ww-chal-text">
+                  {canSeeSecret(c) ? c.text : <span className="ww-muted">🤫 Geheime Challenge — nur für {uname(c.toUser)} sichtbar</span>}
+                </div>
                 {canResolve(c) && failingId !== c.id && (
                   <div className="ww-chal-actions">
                     <button className="ww-mini-btn green" onClick={() => markDone(c)}><Check size={12} /> Erfüllt</button>
@@ -4370,12 +4414,14 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
             {resolved.map(c => (
               <div key={c.id} className={`ww-chal-card ${c.status === 'done' ? 'done' : 'failed'}`}>
                 <div className="ww-chal-top">
-                  <span className="ww-chal-who"><b>{uname(c.toUser)}</b></span>
+                  <span className="ww-chal-who"><b>{uname(c.toUser)}</b>{c.secret && ' 🤫'}</span>
                   <span className={c.status === 'done' ? 'ww-chal-reward' : 'ww-chal-penalty-badge'}>
                     {c.status === 'done' ? `+${c.reward}` : `−${c.penalty || 0}`}
                   </span>
                 </div>
-                <div className="ww-chal-text">{c.text}</div>
+                <div className="ww-chal-text">
+                  {canSeeSecret(c) ? c.text : <span className="ww-muted">🤫 Geheime Challenge</span>}
+                </div>
                 <div className="ww-chal-bottom">
                   <span className={`ww-chal-status ${c.status}`}>{c.status === 'done' ? '✓ erfüllt' : '✗ nicht erfüllt'}</span>
                   {canResolve(c) && <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>}
