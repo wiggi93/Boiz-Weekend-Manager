@@ -6,7 +6,7 @@ import {
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
   Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
-  ChevronRight, Bell, BellOff, Wrench, Target,
+  ChevronRight, Bell, BellOff, Wrench, Target, Sparkles, Send,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
@@ -24,6 +24,7 @@ import {
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
+  getWineFacts, pushWineFact,
   ensurePushSubscription,
   subscribeEvent, subscribeMyMemberships,
 } from './api.js';
@@ -240,6 +241,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [moduleTab, setModuleTab] = useState('overview');
   const [moduleSettingsOpen, setModuleSettingsOpen] = useState(null); // module id or null
+  const [wineFactJump, setWineFactJump] = useState(null); // fact index from a fun-fact push
   const [detailUserId, setDetailUserId] = useState(null);
   const [authView, setAuthView] = useState('login');
   const [lobbyView, setLobbyView] = useState('list');
@@ -295,7 +297,11 @@ export default function App() {
       const goto = params.get('goto');
       setCurrentEventId(evId);
       if (goto === 'kitty') { setView('tools'); setToolOpen('kitty'); }
-      else if (goto) { setView('home'); setModuleTab(goto); }
+      else if (goto) {
+        setView('home'); setModuleTab(goto);
+        // Fun-fact push deep-links straight to a specific fact in the wine module.
+        if (goto === 'wine' && params.get('fact') != null) setWineFactJump(Number(params.get('fact')));
+      }
       else { setView('home'); setModuleTab('overview'); }
       return true;
     } catch { return false; }
@@ -1329,6 +1335,8 @@ export default function App() {
             onShowUserDetail={setDetailUserId}
             myOptRef={myOptRef}
             isUnread={isUnread}
+            wineFactJump={wineFactJump}
+            onWineFactJumpDone={() => setWineFactJump(null)}
           />
         )}
         {view === 'crew' && (
@@ -2049,6 +2057,7 @@ function HomeView({
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef, isUnread = () => false,
+  wineFactJump, onWineFactJumpDone,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   // Games are opt-in per event (modules array); tools are ALWAYS available.
@@ -2146,8 +2155,9 @@ function HomeView({
       )}
       {moduleTab === 'wine' && (
         <WineView
-          me={me} admin={admin} members={members} wines={wines} ratings={wineRatings}
+          me={me} admin={admin} eventId={event.id} members={members} wines={wines} ratings={wineRatings}
           onCreate={onWineCreate} onDelete={onWineDelete} onRate={onWineRate}
+          factJump={wineFactJump} onFactJumpDone={onWineFactJumpDone}
         />
       )}
       {/* Tools (team_split, kitty) live in their own bottom-nav "Tools"
@@ -4396,7 +4406,7 @@ function GlassRating({ value, onPick, size = 22 }) {
   );
 }
 
-function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRate }) {
+function WineView({ me, admin, eventId, members, wines, ratings, onCreate, onDelete, onRate, factJump, onFactJumpDone }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4407,8 +4417,32 @@ function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRa
   const [note, setNote] = useState('');
   const [sort, setSort] = useState('new'); // 'new' | 'best'
   const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(null); // wine id whose raters are shown
 
-  // Aggregate ratings per wine.
+  // Fun facts (loaded from the backend catalogue).
+  const [facts, setFacts] = useState([]);
+  const [factsOpen, setFactsOpen] = useState(false);
+  const [openFact, setOpenFact] = useState(null); // index of the expanded fact
+  const [factPushBusy, setFactPushBusy] = useState(false);
+  const [factPushed, setFactPushed] = useState(false);
+  useEffect(() => { getWineFacts().then(setFacts).catch(() => {}); }, []);
+  // A fun-fact push deep-links here with a fact index → open it.
+  useEffect(() => {
+    if (factJump == null) return;
+    setFactsOpen(true);
+    setOpenFact(factJump);
+    setTimeout(() => { document.getElementById(`fact-${factJump}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120);
+    onFactJumpDone?.();
+  }, [factJump]);
+
+  const sendFact = async () => {
+    setFactPushBusy(true);
+    try { await pushWineFact(eventId); setFactPushed(true); setTimeout(() => setFactPushed(false), 2500); }
+    catch (_) {}
+    finally { setFactPushBusy(false); }
+  };
+
+  // Aggregate ratings per wine + the individual ratings grouped per wine.
   const stats = useMemo(() => {
     const byWine = {};
     for (const r of ratings) {
@@ -4419,6 +4453,14 @@ function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRa
     }
     return byWine;
   }, [ratings, me.id]);
+  const ratingsByWine = useMemo(() => {
+    const m = {};
+    for (const r of ratings) { (m[r.wine] = m[r.wine] || []).push(r); }
+    for (const k of Object.keys(m)) m[k].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    return m;
+  }, [ratings]);
+
+  const openWine = (id) => { setExpanded(id); setSort('best'); setTimeout(() => { document.getElementById(`wine-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60); };
 
   const enriched = wines.map(w => {
     const s = stats[w.id] || { sum: 0, count: 0, mine: 0 };
@@ -4452,21 +4494,52 @@ function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRa
         <StatPill label="Bewertet" value={ranked.length} />
       </div>
 
-      {/* Podium */}
+      {/* Podium — tap a wine to jump to it + see who rated it. */}
       {ranked.length > 0 && (
         <section className="ww-section">
-          <div className="ww-section-head"><Trophy size={16} /><h3>RANGLISTE</h3></div>
+          <div className="ww-section-head"><Trophy size={16} /><h3>TOP 3 — LIVE</h3></div>
           <div className="ww-board">
             {ranked.slice(0, 3).map((w, i) => (
-              <div key={w.id} className="ww-board-row">
+              <button key={w.id} className="ww-board-row clickable" style={{ width: '100%', border: 'none', background: 'none', color: 'inherit', cursor: 'pointer' }} onClick={() => openWine(w.id)}>
                 <div className="ww-board-rank">{['🥇', '🥈', '🥉'][i]}</div>
                 <div className="ww-board-name">{w.name}</div>
                 <div className="ww-board-pts">{fmt1(w.avg)}<span>🍷 ({w.count})</span></div>
-              </div>
+              </button>
             ))}
+          </div>
+          <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 6 }}>
+            Tipp auf einen Wein → springt hin & zeigt, wer wie bewertet hat
           </div>
         </section>
       )}
+
+      {/* Wein-Wissen: fun facts (pushed hourly + on demand, read here) */}
+      <section className="ww-section">
+        <button className="ww-funfact-head" onClick={() => setFactsOpen(o => !o)}>
+          <span className="ww-funfact-title"><Sparkles size={16} /> WEIN-WISSEN</span>
+          <span className="ww-funfact-sub">{facts.length} Fun Facts</span>
+          <ChevronRight size={16} style={{ transform: factsOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+        </button>
+        {admin && (
+          <button className={`ww-funfact-send ${factPushed ? 'done' : ''}`} onClick={sendFact} disabled={factPushBusy || factPushed}>
+            {factPushed ? <><Check size={15} /> Fun-Fact verschickt!</> : <>{factPushBusy ? <span className="ww-spinner" /> : <Send size={15} />} Fun-Fact jetzt an alle pushen</>}
+          </button>
+        )}
+        {factsOpen && (
+          <div className="ww-funfact-list">
+            {facts.length === 0 && <div className="ww-empty">Lade Fun Facts… 🍷</div>}
+            {facts.map((f, i) => (
+              <div key={i} id={`fact-${i}`} className={`ww-funfact-item ${openFact === i ? 'open' : ''}`}>
+                <button className="ww-funfact-item-head" onClick={() => setOpenFact(openFact === i ? null : i)}>
+                  <span className="ww-funfact-item-title">🍷 {f.title}</span>
+                  <ChevronRight size={14} style={{ transform: openFact === i ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
+                </button>
+                {openFact === i && <div className="ww-funfact-item-text">{f.text}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Add wine */}
       <section className="ww-section">
@@ -4499,8 +4572,10 @@ function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRa
           {list.map(w => {
             const adder = usersById[w.addedBy];
             const canDelete = admin || w.addedBy === me.id;
+            const raters = ratingsByWine[w.id] || [];
+            const isOpen = expanded === w.id;
             return (
-              <div key={w.id} className="ww-wine-card">
+              <div key={w.id} id={`wine-${w.id}`} className={`ww-wine-card ${isOpen ? 'open' : ''}`}>
                 <div className="ww-wine-top">
                   <div className="ww-wine-head">
                     <div className="ww-wine-name">{medal(w.id) && <span className="ww-wine-medal">{medal(w.id)}</span>}{w.name}</div>
@@ -4517,6 +4592,25 @@ function WineView({ me, admin, members, wines, ratings, onCreate, onDelete, onRa
                   <span className="ww-wine-rate-label">{w.mine ? 'Deine Wertung' : 'Bewerten:'}</span>
                   <GlassRating value={w.mine} onPick={(n) => onRate(w.id, n)} />
                 </div>
+                {w.count > 0 && (
+                  <button className="ww-wine-raters-toggle" onClick={() => setExpanded(isOpen ? null : w.id)}>
+                    👥 {w.count} {w.count === 1 ? 'Bewertung' : 'Bewertungen'}
+                    <ChevronRight size={14} style={{ transform: isOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                  </button>
+                )}
+                {isOpen && (
+                  <div className="ww-wine-raters">
+                    {raters.map(r => {
+                      const u = usersById[r.user];
+                      return (
+                        <div key={r.id} className="ww-wine-rater">
+                          <span className="ww-wine-rater-name">{u?.emoji || '🍺'} {u?.displayName || u?.email?.split('@')[0] || '?'}{r.user === me.id ? ' (du)' : ''}</span>
+                          <span className="ww-wine-rater-glasses">{'🍷'.repeat(Math.max(0, Math.min(5, r.rating || 0)))}<span className="ww-wine-rater-num"> {r.rating}</span></span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 {canDelete && (
                   <button className="ww-wine-del" onClick={() => onDelete(w.id)} aria-label="Wein löschen"><Trash2 size={13} /></button>
                 )}
