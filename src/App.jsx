@@ -292,9 +292,13 @@ export default function App() {
       const params = typeof urlOrSearch === 'string'
         ? new URL(urlOrSearch, window.location.origin).searchParams
         : urlOrSearch;
-      const evId = params.get('event');
-      if (!evId) return false;
       const goto = params.get('goto');
+      const evId = params.get('event');
+      // Event-less admin deep-link (e.g. new-signup push → user management).
+      if (!evId) {
+        if (goto === 'users') { setView('users'); return true; }
+        return false;
+      }
       setCurrentEventId(evId);
       if (goto === 'kitty') { setView('tools'); setToolOpen('kitty'); }
       else if (goto) {
