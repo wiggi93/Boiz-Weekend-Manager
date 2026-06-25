@@ -2088,3 +2088,47 @@
 /* Drinks bar wraps to a grid when there are more than two drinks. */
 .ww-drinks-bar.multi { flex-wrap: wrap; }
 .ww-drinks-bar.multi .ww-drink-pill { flex: 1 1 calc(50% - 8px); }
+
+/* ============ Wine: who-rated-what ============ */
+.ww-wine-card.open { border-color: var(--amber); }
+.ww-wine-raters-toggle {
+  width: 100%; margin-top: 10px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--card-2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--muted); padding: 7px; font-size: 12px; cursor: pointer;
+}
+.ww-wine-raters-toggle:hover { border-color: var(--border-2); color: var(--text); }
+.ww-wine-raters { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.ww-wine-rater {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 5px 2px; border-bottom: 1px solid var(--border); font-size: 13px;
+}
+.ww-wine-rater:last-child { border-bottom: none; }
+.ww-wine-rater-name { min-width: 0; overflow-wrap: anywhere; }
+.ww-wine-rater-glasses { flex-shrink: 0; white-space: nowrap; font-size: 12px; }
+.ww-wine-rater-num { color: var(--muted); font-family: 'IBM Plex Mono', monospace; }
+
+/* ============ Wine: fun facts ("Wein-Wissen") ============ */
+.ww-funfact-head {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  background: none; border: none; color: var(--text); cursor: pointer; padding: 2px 0;
+}
+.ww-funfact-title { display: inline-flex; align-items: center; gap: 6px; font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.05em; font-size: 16px; color: var(--amber); }
+.ww-funfact-sub { margin-left: auto; font-size: 12px; color: var(--muted); }
+.ww-funfact-send {
+  width: 100%; margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+  background: rgba(245,165,36,0.12); border: 1px solid var(--amber); color: var(--amber);
+}
+.ww-funfact-send:hover:not(:disabled) { background: rgba(245,165,36,0.2); }
+.ww-funfact-send:disabled { opacity: 0.7; cursor: default; }
+.ww-funfact-send.done { background: rgba(34,197,94,0.15); border-color: var(--green, #22c55e); color: var(--green, #22c55e); }
+.ww-funfact-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.ww-funfact-item { background: var(--card-2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.ww-funfact-item.open { border-color: var(--amber); }
+.ww-funfact-item-head {
+  width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  background: none; border: none; color: var(--text); cursor: pointer; padding: 11px 12px; text-align: left;
+}
+.ww-funfact-item-title { font-size: 14px; font-weight: 600; }
+.ww-funfact-item-text { padding: 0 12px 12px; font-size: 13px; line-height: 1.5; color: var(--muted); }

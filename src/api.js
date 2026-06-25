@@ -277,6 +277,29 @@ export async function startJeopardyRound(eventId, { categories, aiCategories, fl
   return res.json();
 }
 
+// ---- Wine fun facts ----
+let _wineFactsCache = null;
+export async function getWineFacts() {
+  if (_wineFactsCache) return _wineFactsCache;
+  const res = await fetch(`${PB_URL}/api/wine/facts`, {
+    headers: { Authorization: pb.authStore.token },
+  });
+  if (!res.ok) throw new Error('facts failed');
+  const data = await res.json();
+  _wineFactsCache = Array.isArray(data.facts) ? data.facts : [];
+  return _wineFactsCache;
+}
+// Host triggers a random fun-fact push to all event members.
+export async function pushWineFact(eventId) {
+  const res = await fetch(`${PB_URL}/api/wine/fact-push`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ eventId }),
+  });
+  if (!res.ok) throw new Error(`fact-push failed (${res.status})`);
+  return res.json();
+}
+
 // ---- Kitty Split ----
 export async function getKitty(eventId) {
   try {
