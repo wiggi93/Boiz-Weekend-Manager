@@ -12,6 +12,7 @@ export const MODULES = [
   { id: 'schedule',        name: 'Programm',         icon: '🗓️', available: true,  kind: 'game' },
   { id: 'challenges',      name: 'Challenges',       icon: '🎯',  available: true,  kind: 'game' },
   { id: 'wine',            name: 'Weinwanderung',    icon: '🍷',  available: true,  kind: 'game' },
+  { id: 'mostlikely',      name: 'Wer würde eher',   icon: '🤔',  available: true,  kind: 'game' },
   // --- Tools (Helpers, kein Scoring, immer verfügbar, NICHT in der Modulauswahl) ---
   { id: 'polls',           name: 'Umfragen',         icon: '📊',  available: true,  kind: 'tool' },
   { id: 'team_split',      name: 'Team Aufteilung',  icon: '🎲',  available: true,  kind: 'tool' },

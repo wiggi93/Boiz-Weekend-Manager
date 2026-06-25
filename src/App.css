@@ -2152,3 +2152,29 @@
 .ww-chal-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .ww-chal-badge.secret { background: rgba(168,85,247,0.18); color: #c084fc; }
 .ww-chal-badge.photo { background: rgba(6,182,212,0.18); color: #22d3ee; }
+
+/* ============ Wer würde eher (Most-Likely-To) ============ */
+.ww-ml-q { font-size: 16px; font-weight: 700; line-height: 1.3; }
+.ww-ml-meta { font-size: 11px; color: var(--muted); margin: 4px 0 10px; }
+.ww-ml-options { display: flex; flex-direction: column; gap: 6px; }
+.ww-ml-opt {
+  position: relative; display: flex; align-items: center; gap: 8px; overflow: hidden;
+  width: 100%; padding: 11px 12px; border-radius: 8px; cursor: pointer; text-align: left;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--text); font-size: 14px;
+}
+.ww-ml-opt:disabled { cursor: default; opacity: 0.7; }
+.ww-ml-opt.sel { border-color: var(--amber); }
+.ww-ml-opt-bar {
+  position: absolute; left: 0; top: 0; bottom: 0; z-index: 0;
+  background: rgba(245,165,36,0.16); transition: width .25s ease;
+}
+.ww-ml-opt.sel .ww-ml-opt-bar { background: rgba(245,165,36,0.28); }
+.ww-ml-opt-name { position: relative; z-index: 1; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ww-ml-opt-n { position: relative; z-index: 1; font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: var(--amber); }
+.ww-ml-actions { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.ww-ml-closed { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.ww-ml-closed:last-child { border-bottom: none; }
+.ww-ml-closed-q { font-size: 14px; font-weight: 600; }
+.ww-ml-winner { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; font-size: 14px; }
+.ww-ml-winner-pts { color: var(--amber); font-weight: 700; }
+.ww-ml-override { margin-top: 8px; font-size: 12px; padding: 6px 8px; }

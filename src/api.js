@@ -508,6 +508,41 @@ export async function deleteChallenge(id) {
   return pb.collection('challenges').delete(id);
 }
 
+// ---- Wer würde eher (Most-Likely-To) ----
+export async function listMlQuestions(eventId) {
+  return pb.collection('ml_questions').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
+}
+export async function createMlQuestion({ eventId, text, points }) {
+  return pb.collection('ml_questions').create({
+    event: eventId,
+    createdBy: pb.authStore.record.id,
+    text,
+    points: Number(points) || 2,
+    closed: false,
+    winnerId: '',
+  });
+}
+export async function updateMlQuestion(id, patch) {
+  return pb.collection('ml_questions').update(id, patch);
+}
+export async function deleteMlQuestion(id) {
+  return pb.collection('ml_questions').delete(id);
+}
+export async function listMlVotes(eventId) {
+  return pb.collection('ml_votes').getFullList({ filter: `event="${eventId}"` });
+}
+// Upsert the current user's vote for a question (one row per question+voter).
+export async function castMlVote(questionId, eventId, targetId) {
+  const meId = pb.authStore.record?.id;
+  if (!meId) throw new Error('Not authenticated');
+  try {
+    const existing = await pb.collection('ml_votes').getFirstListItem(`question="${questionId}" && voter="${meId}"`);
+    return pb.collection('ml_votes').update(existing.id, { target: targetId });
+  } catch (_) {
+    return pb.collection('ml_votes').create({ question: questionId, event: eventId, voter: meId, target: targetId });
+  }
+}
+
 // Upsert the current user's vote for a poll (one row per poll+user).
 export async function castVote(pollId, { optionId, text }) {
   const meId = pb.authStore.record?.id;
@@ -540,6 +575,8 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('schedule').subscribe('*', wrap('schedule', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('ml_questions').subscribe('*', wrap('ml_questions', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('ml_votes').subscribe('*', wrap('ml_votes', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('wines').subscribe('*', wrap('wines', (ev) => ev.record?.event === eventId))),
     // wine_ratings only carry the wine id — forward all, the consumer refetches.
     safe(pb.collection('wine_ratings').subscribe('*', wrap('wine_ratings'))),

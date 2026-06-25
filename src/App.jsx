@@ -24,6 +24,7 @@ import {
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
+  listMlQuestions, createMlQuestion, updateMlQuestion, deleteMlQuestion, listMlVotes, castMlVote,
   getWineFacts, pushWineFact,
   ensurePushSubscription,
   subscribeEvent, subscribeMyMemberships,
@@ -185,12 +186,23 @@ const computeChallengePoints = (userId, challenges) => {
   return total;
 };
 
-const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, challenges) =>
+// "Wer würde eher": each closed question awards its points to the frozen winner.
+const computeMostLikelyPoints = (userId, mlQuestions) => {
+  if (!Array.isArray(mlQuestions)) return 0;
+  let total = 0;
+  for (const q of mlQuestions) {
+    if (q.closed && q.winnerId === userId) total += Number(q.points) || 0;
+  }
+  return total;
+};
+
+const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, challenges, mlQuestions) =>
   computeDrinkPoints(s, ev)
   + computeFlunkyPoints(userId, flunky)
   + computeCustomPoints(userId, customModules)
   + computeJeopardyPoints(userId, jeopardy)
-  + computeChallengePoints(userId, challenges);
+  + computeChallengePoints(userId, challenges)
+  + computeMostLikelyPoints(userId, mlQuestions);
 
 // ============================================================
 // Root
@@ -236,6 +248,8 @@ export default function App() {
   const [challenges, setChallenges] = useState([]);
   const [wines, setWines] = useState([]);
   const [wineRatings, setWineRatings] = useState([]);
+  const [mlQuestions, setMlQuestions] = useState([]);
+  const [mlVotes, setMlVotes] = useState([]);
   // Tracks the latest optimistic values for my own drink stats so realtime
   // echoes (PB broadcasts our own writes back) don't cause flicker. Updated
   // by DrinksBar on every bump; cleared on event switch.
@@ -361,7 +375,7 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setWines([]); setWineRatings([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]);
       return;
     }
     // Fetch the event first. ONLY a genuinely missing event (404) kicks the
@@ -378,7 +392,7 @@ export default function App() {
     // Sub-fetches: each tolerates its own failure, never resets the event.
     const safe = (p, fallback) => p.catch(() => fallback);
     try {
-      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, wn, wr] = await Promise.all([
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, wn, wr, mq, mv] = await Promise.all([
         safe(listEventMembers(currentEventId), []),
         safe(loadEventStats(currentEventId), {}),
         safe(getFlunky(currentEventId), null),
@@ -392,11 +406,13 @@ export default function App() {
         safe(listChallenges(currentEventId), []),
         safe(listWines(currentEventId), []),
         safe(listWineRatings(currentEventId), []),
+        safe(listMlQuestions(currentEventId), []),
+        safe(listMlVotes(currentEventId), []),
       ]);
       setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
       setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch);
-      setWines(wn); setWineRatings(wr);
+      setWines(wn); setWineRatings(wr); setMlQuestions(mq); setMlVotes(mv);
     } catch (e) {
       console.warn('refreshCurrentEvent sub-fetch', e);
     }
@@ -563,6 +579,23 @@ export default function App() {
       return;
     }
 
+    if (collection === 'ml_questions') {
+      setMlQuestions(prev => {
+        if (ev.action === 'delete') return prev.filter(q => q.id !== rec.id);
+        const idx = prev.findIndex(q => q.id === rec.id);
+        if (idx === -1) return [rec, ...prev];
+        const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
+      });
+      return;
+    }
+
+    if (collection === 'ml_votes') {
+      // Votes are event-scoped; refetch all for the event (low frequency).
+      const eid = eventRef.current?.id;
+      if (eid) listMlVotes(eid).then(setMlVotes).catch(() => {});
+      return;
+    }
+
     if (collection === 'wine_ratings') {
       // Ratings only carry the wine id; refetch all ratings for the event.
       const eid = eventRef.current?.id;
@@ -712,13 +745,14 @@ export default function App() {
       schnelle_fragen: schnelleFragen?.updated || '',
       schedule: schedule?.updated || '',
       challenges: maxUpd(challenges),
+      mostlikely: [maxUpd(mlQuestions), maxUpd(mlVotes)].sort().pop() || '',
       wine: [maxUpd(wines), maxUpd(wineRatings)].sort().pop() || '',
       kitty: kitty?.updated || '',
       polls: maxUpd(polls),
     };
     for (const cm of (customModules || [])) act[`cm-${cm.id}`] = cm.updated || '';
     return act;
-  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, wines, wineRatings, kitty, polls, customModules]);
+  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, mlQuestions, mlVotes, wines, wineRatings, kitty, polls, customModules]);
   const moduleActivityRef = useRef(moduleActivity);
   useEffect(() => { moduleActivityRef.current = moduleActivity; }, [moduleActivity]);
 
@@ -948,6 +982,36 @@ export default function App() {
   const onChallengeDelete = async (id) => {
     if (!(await appConfirm('Challenge wirklich löschen?'))) return;
     try { await deleteChallenge(id); setChallenges(prev => prev.filter(c => c.id !== id)); showToast('Challenge gelöscht'); }
+    catch (e) { showToast('Fehler 😬'); }
+  };
+
+  // ---- Wer würde eher ----
+  const onMlCreate = async ({ text, points }) => {
+    try {
+      const rec = await createMlQuestion({ eventId: currentEventId, text, points });
+      setMlQuestions(prev => [rec, ...prev]);
+      showToast('Frage gestellt 🤔');
+    } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
+  };
+  const onMlVote = async (questionId, targetId) => {
+    const meId = me.id;
+    // Optimistic: reflect my vote immediately.
+    setMlVotes(prev => {
+      const idx = prev.findIndex(v => v.question === questionId && v.voter === meId);
+      if (idx === -1) return [...prev, { id: `tmp-${questionId}`, question: questionId, event: currentEventId, voter: meId, target: targetId }];
+      const copy = [...prev]; copy[idx] = { ...copy[idx], target: targetId }; return copy;
+    });
+    try { await castMlVote(questionId, currentEventId, targetId); }
+    catch (e) { showToast('Vote fehlgeschlagen 😬'); listMlVotes(currentEventId).then(setMlVotes).catch(() => {}); }
+  };
+  const onMlPatch = async (id, patch) => {
+    setMlQuestions(prev => prev.map(q => q.id === id ? { ...q, ...patch } : q));
+    try { await updateMlQuestion(id, patch); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+  const onMlDelete = async (id) => {
+    if (!(await appConfirm('Frage wirklich löschen?'))) return;
+    try { await deleteMlQuestion(id); setMlQuestions(prev => prev.filter(q => q.id !== id)); showToast('Frage gelöscht'); }
     catch (e) { showToast('Fehler 😬'); }
   };
 
@@ -1331,6 +1395,8 @@ export default function App() {
             onChallengeCreate={onChallengeCreate}
             onChallengeResolve={onChallengeResolve}
             onChallengeDelete={onChallengeDelete}
+            mlQuestions={mlQuestions} mlVotes={mlVotes}
+            onMlCreate={onMlCreate} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
             wines={wines} wineRatings={wineRatings}
             onWineCreate={onWineCreate} onWineDelete={onWineDelete} onWineRate={onWineRate}
             customModules={customModules}
@@ -1350,7 +1416,7 @@ export default function App() {
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} mlQuestions={mlQuestions} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
         )}
         {view === 'tools' && (
           <ToolsView
@@ -1426,6 +1492,8 @@ export default function App() {
           flunky={flunky}
           jeopardy={jeopardy}
           customModules={customModules}
+          challenges={challenges}
+          mlQuestions={mlQuestions}
           isMe={detailUserId === me.id}
           onClose={() => setDetailUserId(null)}
         />
@@ -2063,6 +2131,7 @@ function HomeView({
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
   challenges, onChallengeCreate, onChallengeResolve, onChallengeDelete,
+  mlQuestions, mlVotes, onMlCreate, onMlVote, onMlPatch, onMlDelete,
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
@@ -2135,7 +2204,7 @@ function HomeView({
       </div>
 
       {moduleTab === 'overview' && (
-        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} onShowUserDetail={onShowUserDetail} />
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} mlQuestions={mlQuestions} onShowUserDetail={onShowUserDetail} />
       )}
       {moduleTab === 'flunky' && flunky && (
         <FlunkyView
@@ -2162,6 +2231,13 @@ function HomeView({
         <ChallengesView
           me={me} admin={admin} members={members} challenges={challenges}
           onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete}
+        />
+      )}
+      {moduleTab === 'mostlikely' && (
+        <MostLikelyView
+          me={me} admin={admin} active={event.active} members={members}
+          questions={mlQuestions} votes={mlVotes}
+          onCreate={onMlCreate} onVote={onMlVote} onPatch={onMlPatch} onDelete={onMlDelete}
         />
       )}
       {moduleTab === 'wine' && (
@@ -2495,16 +2571,16 @@ function DrinkPill({ emoji, label, count, disabled, onInc, onDec }) {
 // Overview (leaderboard / standings)
 // ============================================================
 
-function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, challenges, onShowUserDetail }) {
+function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, challenges, mlQuestions, onShowUserDetail }) {
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
       const s = statsMap[u.id] || {};
-      return { ...u, drinkTotal: totalDrinkCount(s, event), points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges) };
+      return { ...u, drinkTotal: totalDrinkCount(s, event), points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges, mlQuestions) };
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points),
-    [members, statsMap, event, flunky, customModules, jeopardy]);
+    [members, statsMap, event, flunky, customModules, jeopardy, challenges, mlQuestions]);
 
   const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
   const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
@@ -4452,6 +4528,144 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
 }
 
 // ============================================================
+// Wer würde eher — pose questions, everyone votes, most votes wins points
+// ============================================================
+
+function MostLikelyView({ me, admin, active, members, questions, votes, onCreate, onVote, onPatch, onDelete }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+  const participants = members.map(m => m.expand?.user).filter(Boolean);
+
+  const [text, setText] = useState('');
+  const [points, setPoints] = useState(2);
+  const [busy, setBusy] = useState(false);
+
+  const votesByQ = useMemo(() => {
+    const m = {};
+    for (const v of votes) (m[v.question] = m[v.question] || []).push(v);
+    return m;
+  }, [votes]);
+
+  const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email?.split('@')[0]}` : '?'; };
+  const myVote = (qId) => (votesByQ[qId] || []).find(v => v.voter === me.id)?.target || '';
+  const tallyOf = (qId) => { const c = {}; for (const v of votesByQ[qId] || []) c[v.target] = (c[v.target] || 0) + 1; return c; };
+  // Current leader (unique max). Returns { id, n, tie }.
+  const leaderOf = (qId) => {
+    const c = tallyOf(qId); let id = '', n = 0, tie = false;
+    for (const k of Object.keys(c)) { if (c[k] > n) { id = k; n = c[k]; tie = false; } else if (c[k] === n && n > 0) tie = true; }
+    return { id, n, tie };
+  };
+
+  const submit = async () => {
+    if (text.trim().length < 4) return;
+    setBusy(true);
+    try { await onCreate({ text: text.trim(), points: Number(points) || 2 }); setText(''); setPoints(2); }
+    finally { setBusy(false); }
+  };
+  const closeQ = (q) => { const l = leaderOf(q.id); onPatch(q.id, { closed: true, winnerId: l.tie ? '' : (l.id || '') }); };
+
+  const open = questions.filter(q => !q.closed);
+  const closed = questions.filter(q => q.closed);
+  const valid = text.trim().length >= 4 && Number(points) > 0;
+
+  return (
+    <div className="ww-ml">
+      <section className="ww-section">
+        <div className="ww-section-head"><span style={{ fontSize: 16 }}>🤔</span><h3>WER WÜRDE EHER…?</h3></div>
+        <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
+          Stell eine Frage — alle stimmen für eine Person ab. Wer die meisten
+          Stimmen kriegt, gewinnt die Punkte.
+        </p>
+        <textarea className="ww-textarea" rows={2} maxLength={200} value={text}
+          onChange={e => setText(e.target.value)} placeholder="z.B. Wer würde am ehesten im Knast landen?" />
+        <label className="ww-label">PUNKTE FÜR DEN GEWINNER</label>
+        <input className="ww-input" type="number" inputMode="numeric" min={1} max={50}
+          value={points} onChange={e => setPoints(e.target.value)} />
+        <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
+          {busy ? <span className="ww-spinner" /> : <span style={{ fontSize: 18 }}>🤔</span>}<span>FRAGE STELLEN</span>
+        </button>
+      </section>
+
+      {open.length === 0 && closed.length === 0 && (
+        <div className="ww-empty">Noch keine Fragen — stell die erste! 🤔</div>
+      )}
+
+      {open.map(q => {
+        const counts = tallyOf(q.id);
+        const total = (votesByQ[q.id] || []).length;
+        const mine = myVote(q.id);
+        const lead = leaderOf(q.id);
+        const canClose = admin || q.createdBy === me.id;
+        return (
+          <section className="ww-section" key={q.id}>
+            <div className="ww-ml-q">{q.text}</div>
+            <div className="ww-ml-meta">{uname(q.createdBy)} · {q.points} Pkt · {total} {total === 1 ? 'Stimme' : 'Stimmen'}</div>
+            <div className="ww-ml-options">
+              {participants.map(u => {
+                const n = counts[u.id] || 0;
+                const pct = total ? Math.round((n / total) * 100) : 0;
+                const sel = mine === u.id;
+                return (
+                  <button key={u.id} className={`ww-ml-opt ${sel ? 'sel' : ''}`} disabled={!active} onClick={() => onVote(q.id, u.id)}>
+                    <span className="ww-ml-opt-bar" style={{ width: `${pct}%` }} />
+                    <span className="ww-ml-opt-name">{u.emoji || '🍺'} {u.displayName || u.email?.split('@')[0]}{sel && ' ✓'}</span>
+                    <span className="ww-ml-opt-n">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {canClose && (
+              <div className="ww-ml-actions">
+                <button className="ww-mini-btn green" disabled={!lead.id} onClick={() => closeQ(q)}>
+                  <Check size={12} /> {lead.tie ? 'Beenden (unentschieden)' : (lead.id ? `Beenden → ${usersById[lead.id]?.displayName || '?'}` : 'Noch keine Stimmen')}
+                </button>
+                <button className="ww-mini-btn" onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
+              </div>
+            )}
+            {!active && <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>Event pausiert — Abstimmen geht wieder, wenn's aktiv ist.</div>}
+          </section>
+        );
+      })}
+
+      {closed.length > 0 && (
+        <section className="ww-section">
+          <div className="ww-section-head"><Trophy size={16} /><h3>ENTSCHIEDEN</h3></div>
+          <div className="ww-board">
+            {closed.map(q => {
+              const canEdit = admin || q.createdBy === me.id;
+              return (
+                <div key={q.id} className="ww-ml-closed">
+                  <div className="ww-ml-closed-q">{q.text}</div>
+                  <div className="ww-ml-winner">
+                    <span>🏆 {q.winnerId ? uname(q.winnerId) : 'Unentschieden'}</span>
+                    {q.winnerId && <span className="ww-ml-winner-pts">+{q.points}</span>}
+                  </div>
+                  {admin && (
+                    <select className="ww-input ww-ml-override" value={q.winnerId || ''} onChange={e => onPatch(q.id, { winnerId: e.target.value })}>
+                      <option value="">— Unentschieden —</option>
+                      {participants.map(u => <option key={u.id} value={u.id}>Gewinner: {u.displayName || u.email}</option>)}
+                    </select>
+                  )}
+                  {canEdit && (
+                    <div className="ww-ml-actions">
+                      <button className="ww-mini-btn" onClick={() => onPatch(q.id, { closed: false, winnerId: '' })}><RotateCcw size={12} /> Wieder öffnen</button>
+                      <button className="ww-mini-btn" onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // Weinwanderung — log wines, everyone rates 1–5 glasses
 // ============================================================
 
@@ -5274,7 +5488,7 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, challenges, myId, onShowUserDetail, onSaveMyWishes }) {
+function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, challenges, mlQuestions, myId, onShowUserDetail, onSaveMyWishes }) {
   const myMembership = members.find(m => (m.expand?.user?.id || m.user) === myId);
   return (
     <div className="ww-crew">
@@ -5286,7 +5500,7 @@ function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, c
         {members.map(m => {
           const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
-          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges);
+          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges, mlQuestions);
           // Event-specific wishes live on the membership row.
           const food = m.foodWishes || '';
           const drink = m.drinkWishes || '';
@@ -5364,7 +5578,7 @@ function MyEventWishes({ membership, onSave, eventName }) {
 // User detail drawer (point breakdown)
 // ============================================================
 
-function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, isMe, onClose }) {
+function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, challenges, mlQuestions, isMe, onClose }) {
   if (!user) return null;
   const evFood = membership?.foodWishes || '';
   const evDrink = membership?.drinkWishes || '';
@@ -5425,8 +5639,10 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
     });
   }
   const jeopardyPts = jeopardyBreakdown.reduce((s, x) => s + x.pts, 0);
+  const challengePts = computeChallengePoints(user.id, challenges);
+  const mlPts = computeMostLikelyPoints(user.id, mlQuestions);
 
-  const total = drinkPts + flunkyPts + customPts + jeopardyPts;
+  const total = drinkPts + flunkyPts + customPts + jeopardyPts + challengePts + mlPts;
 
   return (
     <ModuleSettingsDrawer
@@ -5503,6 +5719,32 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
               <DetailRow key={roundNo} label={`Runde ${roundNo} · Platz ${place} (${roundScore} Frage-Pkt)`} pts={pts} />
             ))}
             <DetailRow label="Summe" pts={jeopardyPts} bold />
+          </div>
+        )}
+
+        {challengePts !== 0 && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🎯 CHALLENGES</div>
+            {(challenges || []).filter(c => c.status === 'done' && c.toUser === user.id).map(c => (
+              <DetailRow key={c.id} label={c.secret ? '🤫 Geheime Challenge' : (c.text || 'Challenge')} pts={Number(c.reward) || 0} />
+            ))}
+            {(challenges || []).filter(c => c.status === 'done' && c.secret && c.fromUser === user.id).map(c => (
+              <DetailRow key={`${c.id}-paid`} label="🤫 Geheime Challenge bezahlt" pts={-(Number(c.reward) || 0)} />
+            ))}
+            {(challenges || []).filter(c => c.status === 'failed' && c.toUser === user.id).map(c => (
+              <DetailRow key={`${c.id}-f`} label={`✗ ${c.secret ? 'Geheime Challenge' : (c.text || 'Challenge')}`} pts={-(Number(c.penalty) || 0)} />
+            ))}
+            <DetailRow label="Summe" pts={challengePts} bold />
+          </div>
+        )}
+
+        {mlPts !== 0 && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">🤔 WER WÜRDE EHER</div>
+            {(mlQuestions || []).filter(q => q.closed && q.winnerId === user.id).map(q => (
+              <DetailRow key={q.id} label={`🏆 ${q.text || 'Frage'}`} pts={Number(q.points) || 0} />
+            ))}
+            <DetailRow label="Summe" pts={mlPts} bold />
           </div>
         )}
 
