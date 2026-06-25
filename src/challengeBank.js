@@ -36,6 +36,44 @@ export const CHALLENGE_BANK = [
   { text: 'Erfinde einen Handshake und bring zwei Leuten bei, ihn mit dir zu machen', reward: 4 },
   { text: 'Lauf 30 Sekunden wie ein Model über einen imaginären Laufsteg', reward: 2 },
   { text: 'Halte deinem Sitznachbarn eine 30-Sek-Lobrede, warum er der Beste ist', reward: 3 },
+
+  // --- Mehr Foto-Challenges ---
+  { text: 'Mach ein Foto mit einem Fremden, der eine Sonnenbrille trägt', reward: 3, photo: true },
+  { text: 'Foto-Beweis: imitiere ein Werbeplakat so genau wie möglich', reward: 4, photo: true },
+  { text: 'Mach ein Foto, auf dem du so tust, als hieltest du ein riesiges Gebäude in der Hand', reward: 3, photo: true },
+  { text: 'Finde drei Dinge in derselben Farbe und mach ein Foto davon', reward: 2, photo: true },
+  { text: 'Mach ein Selfie mit einem Tier (egal welches)', reward: 4, photo: true },
+  { text: 'Foto mit dem skurrilsten Gegenstand, den du in der Nähe findest', reward: 3, photo: true },
+  { text: 'Mach ein Gruppenfoto, auf dem alle dieselbe dumme Grimasse ziehen', reward: 3, photo: true },
+  { text: 'Foto-Beweis: balanciere etwas auf dem Kopf und geh 10 Schritte', reward: 4, photo: true },
+  { text: 'Mach ein dramatisches „Albumcover"-Foto von deinem Sitznachbarn', reward: 3, photo: true },
+  { text: 'Foto mit einer Speisekarte, auf der du auf dein „Henkersmahl" zeigst', reward: 2, photo: true },
+
+  // --- Mehr „Für X Minuten…" / Verhalten ---
+  { text: 'Sprich die nächsten 20 Minuten mit einem erfundenen Akzent', reward: 5 },
+  { text: 'Nenne dich für eine halbe Stunde nur bei einem ausgedachten Künstlernamen', reward: 4 },
+  { text: 'Klatsche die nächsten 15 Minuten nach jedem deiner eigenen Sätze', reward: 3 },
+  { text: 'Behaupte 20 Minuten lang, du seist ein berühmter Promi auf der Flucht', reward: 5 },
+  { text: 'Beginne 15 Minuten lang jeden Satz mit „Ehrlich gesagt…"', reward: 3 },
+  { text: 'Mach für 20 Minuten zu jeder Bewegung passende Soundeffekte', reward: 4 },
+  { text: 'Sei die nächste halbe Stunde dein eigener Hype-Man und kündige dich an', reward: 4 },
+  { text: 'Reagiere 15 Minuten lang auf alles mit übertriebenem Erstaunen', reward: 3 },
+
+  // --- Mehr Aktion / Mutprobe ---
+  { text: 'Halte eine flammende 1-Min-Rede für ein völlig banales Alltagsobjekt', reward: 4 },
+  { text: 'Bring eine fremde Gruppe dazu, dir „Happy Birthday" zu singen', reward: 7, photo: true },
+  { text: 'Erzähle einem Fremden überzeugend, du hättest heute Geburtstag', reward: 5 },
+  { text: 'Mach eine spontane Stand-up-Nummer von 30 Sekunden', reward: 5 },
+  { text: 'Überrede die Gruppe zu einer 15-Sekunden-La-Ola-Welle', reward: 3 },
+  { text: 'Tausche für eine Runde komplett die Rolle/Stimme mit jemandem am Tisch', reward: 4 },
+  { text: 'Frag den Barkeeper nach seinem absoluten Lieblingsgetränk und bestell es', reward: 4 },
+  { text: 'Mach eine 20-Sekunden-Robotertanz-Einlage', reward: 3 },
+  { text: 'Halte eine ernste TED-Talk-Intro über das Thema „Socken"', reward: 5 },
+  { text: 'Geh zu einem Fremden und mach ihm ein ehrliches, nettes Kompliment', reward: 4 },
+  { text: 'Erfinde einen Trinkspruch und bring die ganze Gruppe zum Anstoßen', reward: 3 },
+  { text: 'Imitiere 30 Sekunden lang jemanden aus der Gruppe – die anderen raten wen', reward: 4 },
+  { text: 'Bestell beim nächsten Mal etwas, das du noch nie probiert hast', reward: 3 },
+  { text: 'Mach 15 Hampelmänner und zähl laut auf einer Fremdsprache mit', reward: 3 },
 ];
 
 export const randomChallenge = (avoid = '') => {
