@@ -2048,7 +2048,7 @@ function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote,
 
 function HomeView({
   me, admin, event, members, statsMap, setStatsMap, flunky, onFlunkyPatch,
-  jeopardy, onJeopardyPatch, onJeopardyGenerate,
+  jeopardy, onJeopardyPatch, onJeopardyGenerate, onJeopardyRegenerate,
   kitty, onKittyPatch,
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
@@ -2138,6 +2138,7 @@ function HomeView({
         <JeopardyView
           me={me} jeopardy={jeopardy} members={members} admin={admin} active={event.active}
           onPatch={onJeopardyPatch}
+          onJeopardyRegenerate={onJeopardyRegenerate}
           onOpenSettings={() => setModuleSettingsOpen('jeopardy')}
         />
       )}
