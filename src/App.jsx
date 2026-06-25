@@ -1054,12 +1054,14 @@ export default function App() {
       throw e;
     }
     // Swap the question, reset its attempt state, keep it open + same dran.
+    // Count regenerations so the UI can cap them (2× per question).
     const latest = jeopardyRef.current?.rounds || rounds;
     const next = latest.map((r, i) => i !== ri ? r : {
       ...r,
       questions: r.questions.map((x, j) => j !== qi ? x : {
         ...x, ...patchFields,
         winnerUserId: null, revealed: false, resolved: false, triedUsers: [], typedAnswer: '',
+        regenCount: (x.regenCount || 0) + 1,
       }),
     });
     await onJeopardyPatch({ rounds: next });
@@ -3277,16 +3279,24 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 </button>
               </div>
             )}
-            {(admin || ((hostPlays || remote) && iAmParticipant)) && onJeopardyRegenerate && (
-              <button className="ww-mini-btn" style={{ marginTop: 10 }} disabled={regenBusy}
-                onClick={async () => {
-                  setRegenBusy(true);
-                  try { await onJeopardyRegenerate(activeOpen.ri, activeOpen.qi); } catch (_) {}
-                  finally { setRegenBusy(false); }
-                }}>
-                <RotateCcw size={12} /> {regenBusy ? 'Generiere…' : 'Frage taugt nicht — neu generieren'}
-              </button>
-            )}
+            {(admin || iAmParticipant) && onJeopardyRegenerate && (() => {
+              const left = 2 - (q.regenCount || 0);
+              if (left <= 0) return (
+                <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 10 }}>
+                  🔄 Schon 2× neu generiert — diese Frage muss jetzt reichen 😄
+                </div>
+              );
+              return (
+                <button className="ww-jeo-regen" disabled={regenBusy}
+                  onClick={async () => {
+                    setRegenBusy(true);
+                    try { await onJeopardyRegenerate(activeOpen.ri, activeOpen.qi); } catch (_) {}
+                    finally { setRegenBusy(false); }
+                  }}>
+                  <RotateCcw size={16} /> {regenBusy ? 'Neue Frage wird generiert…' : `Frage taugt nicht — andere Frage (noch ${left}×)`}
+                </button>
+              );
+            })()}
             {admin && (
               <button className="ww-mini-btn red" style={{ marginTop: 10 }}
                 onClick={() => closeQuestion(activeOpen.ri, activeOpen.qi)}>
