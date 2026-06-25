@@ -3325,7 +3325,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 </button>
               </div>
             )}
-            {(admin || iAmParticipant) && onJeopardyRegenerate && (() => {
+            {/* Only the host/judge may regenerate (the API is host-gated) —
+                never the player who's currently answering. */}
+            {admin && !iAmDran && onJeopardyRegenerate && (() => {
               const left = 2 - (q.regenCount || 0);
               if (left <= 0) return (
                 <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 10 }}>
@@ -4259,6 +4261,7 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
   const [reward, setReward] = useState(3);
   const [secret, setSecret] = useState(false);
   const [isPhoto, setIsPhoto] = useState(false);
+  const [rolled, setRolled] = useState(false); // text came from the random bank → photo is auto
   const [busy, setBusy] = useState(false);
   const [failingId, setFailingId] = useState(null); // challenge being marked failed
   const [penalty, setPenalty] = useState(3);
@@ -4266,30 +4269,34 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
   const open = challenges.filter(c => !c.status || c.status === 'open');
   const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
   const textOk = text.trim().length >= 2 && Number(reward) > 0;
-  // Secret challenges are 1:1 (a private dare) → force single mode.
-  const effMode = secret ? 'single' : mode;
-  const valid = textOk && others.length > 0 && (effMode !== 'single' || toUser);
+  const valid = textOk && others.length > 0 && (mode !== 'single' || toUser);
   const canResolve = (c) => c.fromUser === me.id || admin;
   // Who may read a secret challenge's text: the two involved + host/admin.
   const canSeeSecret = (c) => !c.secret || c.fromUser === me.id || c.toUser === me.id || admin;
 
   const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
 
+  // Explicit state transitions so the toggles never desync from the mode tabs.
+  const selectMode = (k) => { setMode(k); if (k !== 'single') setSecret(false); }; // secret is a 1:1 dare
+  const toggleSecret = () => { setSecret(s => { const next = !s; if (next) setMode('single'); return next; }); };
+  // Manual text → it's a "concrete" challenge: the user owns the Fotobeweis choice.
+  const onTextChange = (v) => { setText(v); setRolled(false); };
+  // 🎲 Random text from the bank → the prompt itself dictates whether it needs a photo.
   const rollRandom = () => {
     const c = randomChallenge(text.trim());
-    setText(c.text); setReward(c.reward || 3); setIsPhoto(!!c.photo);
+    setText(c.text); setReward(c.reward || 3); setIsPhoto(!!c.photo); setRolled(true);
   };
 
   const submit = async () => {
     if (!valid) return;
     let toUsers = [];
-    if (effMode === 'group') toUsers = others.map(u => u.id);
-    else if (effMode === 'random') toUsers = [others[Math.floor(Math.random() * others.length)].id];
+    if (mode === 'group') toUsers = others.map(u => u.id);
+    else if (mode === 'random') toUsers = [others[Math.floor(Math.random() * others.length)].id];
     else toUsers = [toUser];
     setBusy(true);
     try {
       await onCreate({ toUsers, text: text.trim(), reward: Number(reward), secret, isPhoto });
-      setText(''); setToUser(''); setReward(3); setMode('single'); setSecret(false); setIsPhoto(false);
+      setText(''); setToUser(''); setReward(3); setMode('single'); setSecret(false); setIsPhoto(false); setRolled(false);
     } finally { setBusy(false); }
   };
   const markDone = (c) => onResolve(c.id, { status: 'done' });
@@ -4311,23 +4318,23 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
             { k: 'random', label: '🎲 Zufällig' },
             { k: 'group', label: '👥 Gruppe' },
           ].map(m => (
-            <button key={m.k} type="button" disabled={secret && m.k !== 'single'}
-              className={`ww-auth-tab ${effMode === m.k ? 'active' : ''}`}
-              onClick={() => setMode(m.k)}>{m.label}</button>
+            <button key={m.k} type="button"
+              className={`ww-auth-tab ${mode === m.k ? 'active' : ''}`}
+              onClick={() => selectMode(m.k)}>{m.label}</button>
           ))}
         </div>
-        {effMode === 'single' && (
+        {mode === 'single' && (
           <select className="ww-input" style={{ marginTop: 8 }} value={toUser} onChange={e => setToUser(e.target.value)}>
             <option value="">— Spieler wählen —</option>
             {others.map(u => <option key={u.id} value={u.id}>{u.displayName || u.email}</option>)}
           </select>
         )}
-        {effMode === 'random' && (
+        {mode === 'random' && (
           <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
             🎲 Ein zufälliger Mitspieler wird beim Stellen ausgelost.
           </p>
         )}
-        {effMode === 'group' && (
+        {mode === 'group' && (
           <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
             👥 Alle {others.length} Mitspieler bekommen die Challenge — jeder
             wird einzeln aufgelöst.
@@ -4335,14 +4342,23 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
         )}
         <div className="ww-chal-toggles">
           <button type="button" className={`ww-chal-toggle ${secret ? 'on' : ''}`}
-            onClick={() => setSecret(s => !s)}>
+            onClick={toggleSecret}>
             {secret ? <EyeOff size={14} /> : <Eye size={14} />} Geheim
           </button>
-          <button type="button" className={`ww-chal-toggle ${isPhoto ? 'on' : ''}`}
-            onClick={() => setIsPhoto(p => !p)}>
-            📸 Foto-Challenge
-          </button>
+          {/* Fotobeweis is a manual choice only for self-written challenges;
+              random-bank prompts already carry their own photo flag. */}
+          {!rolled && (
+            <button type="button" className={`ww-chal-toggle ${isPhoto ? 'on' : ''}`}
+              onClick={() => setIsPhoto(p => !p)}>
+              📸 Fotobeweis
+            </button>
+          )}
         </div>
+        {rolled && isPhoto && (
+          <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+            📸 Diese Zufalls-Challenge braucht einen Fotobeweis (automatisch erkannt).
+          </p>
+        )}
         {secret && (
           <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
             🤫 Nur du & {toUser ? (usersById[toUser]?.displayName || 'der Spieler') : 'der Spieler'} seht den Text.
@@ -4354,7 +4370,7 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
           <button type="button" className="ww-chal-roll" onClick={rollRandom}><Dice5 size={13} /> Zufall</button>
         </div>
         <textarea className="ww-textarea" rows={2} maxLength={280} value={text}
-          onChange={e => setText(e.target.value)} placeholder="z.B. Trink ein Bier in unter 10 Sekunden" />
+          onChange={e => onTextChange(e.target.value)} placeholder="z.B. Trink ein Bier in unter 10 Sekunden" />
         <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : 'PUNKTE BEI ERFOLG'}</label>
         <input className="ww-input" type="number" inputMode="numeric" min={1} max={100}
           value={reward} onChange={e => setReward(e.target.value)} />
@@ -4376,7 +4392,7 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
                 {(c.secret || c.isPhoto) && (
                   <div className="ww-chal-badges">
                     {c.secret && <span className="ww-chal-badge secret">🤫 Geheim</span>}
-                    {c.isPhoto && <span className="ww-chal-badge photo">📸 Foto-Beweis</span>}
+                    {c.isPhoto && <span className="ww-chal-badge photo">📸 Fotobeweis</span>}
                   </div>
                 )}
                 <div className="ww-chal-text">
