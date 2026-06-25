@@ -2132,3 +2132,23 @@
 }
 .ww-funfact-item-title { font-size: 14px; font-weight: 600; }
 .ww-funfact-item-text { padding: 0 12px 12px; font-size: 13px; line-height: 1.5; color: var(--muted); }
+
+/* ============ Challenges: secret / photo / random ============ */
+.ww-chal-toggles { display: flex; gap: 8px; margin-top: 10px; }
+.ww-chal-toggle {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+}
+.ww-chal-toggle.on { background: rgba(245,165,36,0.14); border-color: var(--amber); color: var(--amber); }
+.ww-chal-label-row { display: flex; align-items: center; justify-content: space-between; }
+.ww-chal-roll {
+  display: inline-flex; align-items: center; gap: 5px; margin-top: 14px;
+  background: var(--card-2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.ww-chal-roll:hover { border-color: var(--amber); color: var(--amber); }
+.ww-chal-badges { display: flex; gap: 6px; margin: 2px 0 6px; flex-wrap: wrap; }
+.ww-chal-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.ww-chal-badge.secret { background: rgba(168,85,247,0.18); color: #c084fc; }
+.ww-chal-badge.photo { background: rgba(6,182,212,0.18); color: #22d3ee; }

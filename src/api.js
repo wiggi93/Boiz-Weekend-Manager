@@ -486,7 +486,7 @@ export async function listChallenges(eventId) {
   return pb.collection('challenges').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
 }
 
-export async function createChallenge({ eventId, toUser, text, reward }) {
+export async function createChallenge({ eventId, toUser, text, reward, secret = false, isPhoto = false }) {
   return pb.collection('challenges').create({
     event: eventId,
     fromUser: pb.authStore.record.id,
@@ -495,6 +495,8 @@ export async function createChallenge({ eventId, toUser, text, reward }) {
     reward: Number(reward) || 0,
     penalty: 0,
     status: 'open',
+    secret: !!secret,
+    isPhoto: !!isPhoto,
   });
 }
 
