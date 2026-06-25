@@ -4354,7 +4354,7 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
 
   // Explicit state transitions so the toggles never desync from the mode tabs.
   const selectMode = (k) => { setMode(k); if (k !== 'single') setSecret(false); }; // secret is a 1:1 dare
-  const toggleSecret = () => { setSecret(s => { const next = !s; if (next) setMode('single'); return next; }); };
+  const toggleSecret = () => setSecret(s => !s); // only offered in single mode
   // Manual text → it's a "concrete" challenge: the user owns the Fotobeweis choice.
   const onTextChange = (v) => { setText(v); setRolled(false); };
   // 🎲 Random text from the bank → the prompt itself dictates whether it needs a photo.
@@ -4416,26 +4416,14 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
             wird einzeln aufgelöst.
           </p>
         )}
-        <div className="ww-chal-toggles">
-          <button type="button" className={`ww-chal-toggle ${secret ? 'on' : ''}`}
-            onClick={toggleSecret}>
-            {secret ? <EyeOff size={14} /> : <Eye size={14} />} Geheim
+        {/* Geheim is a private 1:1 dare — only offered for a single player. */}
+        {mode === 'single' && (
+          <button type="button" className={`ww-chal-toggle solo ${secret ? 'on' : ''}`}
+            onClick={toggleSecret} style={{ marginTop: 8 }}>
+            {secret ? <EyeOff size={14} /> : <Eye size={14} />} Geheime Challenge
           </button>
-          {/* Fotobeweis is a manual choice only for self-written challenges;
-              random-bank prompts already carry their own photo flag. */}
-          {!rolled && (
-            <button type="button" className={`ww-chal-toggle ${isPhoto ? 'on' : ''}`}
-              onClick={() => setIsPhoto(p => !p)}>
-              📸 Fotobeweis
-            </button>
-          )}
-        </div>
-        {rolled && isPhoto && (
-          <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
-            📸 Diese Zufalls-Challenge braucht einen Fotobeweis (automatisch erkannt).
-          </p>
         )}
-        {secret && (
+        {secret && mode === 'single' && (
           <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
             🤫 Nur du & {toUser ? (usersById[toUser]?.displayName || 'der Spieler') : 'der Spieler'} seht den Text.
             Du allein entscheidest, ob bestanden — und zahlst die Punkte aus deinem eigenen Konto.
@@ -4447,6 +4435,18 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
         </div>
         <textarea className="ww-textarea" rows={2} maxLength={280} value={text}
           onChange={e => onTextChange(e.target.value)} placeholder="z.B. Trink ein Bier in unter 10 Sekunden" />
+        {/* Fotobeweis works for every mode. Manual checkbox for self-written
+            challenges; auto-detected (and locked) for random-bank prompts. */}
+        {!rolled ? (
+          <label className="ww-chal-check">
+            <input type="checkbox" checked={isPhoto} onChange={e => setIsPhoto(e.target.checked)} />
+            <span>📸 Fotobeweis nötig</span>
+          </label>
+        ) : isPhoto ? (
+          <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+            📸 Diese Zufalls-Challenge braucht einen Fotobeweis (automatisch erkannt).
+          </p>
+        ) : null}
         <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : 'PUNKTE BEI ERFOLG'}</label>
         <input className="ww-input" type="number" inputMode="numeric" min={1} max={100}
           value={reward} onChange={e => setReward(e.target.value)} />
