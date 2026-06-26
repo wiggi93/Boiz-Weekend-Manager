@@ -5,6 +5,32 @@ const PB_URL = import.meta.env.VITE_PB_URL || 'http://localhost:8090';
 export const pb = new PocketBase(PB_URL);
 pb.autoCancellation(false);
 
+// Recover from a wedged connection: on iOS the HTTP/2 connection the realtime
+// SSE keeps open can come back dead after a suspend, so requests fail at the
+// network level (status 0, no HTTP response) — and every action shows
+// "something went wrong" until the app is killed. When we see such a failure,
+// drop the realtime connection (frees the dead socket so the next request opens
+// a fresh one) and let the app rebuild its subscriptions.
+let _onRealtimeWedge = null;
+export function onRealtimeWedge(fn) { _onRealtimeWedge = fn; }
+let _lastWedgeReset = 0;
+const _origSend = pb.send.bind(pb);
+pb.send = async function (path, options) {
+  try {
+    return await _origSend(path, options);
+  } catch (e) {
+    if (e && e.status === 0 && !e.isAbort) {
+      const now = Date.now();
+      if (now - _lastWedgeReset > 3000) { // throttle resets
+        _lastWedgeReset = now;
+        try { pb.realtime.unsubscribe(); } catch (_) {}
+        if (_onRealtimeWedge) { try { _onRealtimeWedge(); } catch (_) {} }
+      }
+    }
+    throw e;
+  }
+};
+
 export const isSiteAdmin = (u) => !!u && u.role === 'admin';
 export const isHost = (u) => !!u && (u.role === 'admin' || u.role === 'host');
 export const isEventCreator = (u, ev) => !!u && !!ev && ev.createdBy === u.id;
