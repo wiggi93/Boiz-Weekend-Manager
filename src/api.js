@@ -494,10 +494,28 @@ export async function createChallenge({ eventId, toUser, text, reward, secret = 
     text,
     reward: Number(reward) || 0,
     penalty: 0,
-    status: 'open',
+    // Non-secret challenges go through group voting (points → judging); secret
+    // ones stay a direct 1:1 dare the proposer resolves themselves.
+    status: secret ? 'open' : 'voting',
     secret: !!secret,
     isPhoto: !!isPhoto,
   });
+}
+
+// ---- Challenge group votes (one row per challenge+voter+phase) ----
+export async function listChallengeVotes(eventId) {
+  return pb.collection('challenge_votes').getFullList({ filter: `event="${eventId}"` });
+}
+export async function castChallengeVote(challengeId, eventId, phase, value) {
+  const meId = pb.authStore.record?.id;
+  if (!meId) throw new Error('Not authenticated');
+  const patch = phase === 'points' ? { points: Number(value) || 0 } : { verdict: value };
+  try {
+    const existing = await pb.collection('challenge_votes').getFirstListItem(`challenge="${challengeId}" && voter="${meId}" && phase="${phase}"`);
+    return pb.collection('challenge_votes').update(existing.id, patch);
+  } catch (_) {
+    return pb.collection('challenge_votes').create({ challenge: challengeId, event: eventId, voter: meId, phase, ...patch });
+  }
 }
 
 export async function updateChallenge(id, patch) {
@@ -575,6 +593,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('schedule').subscribe('*', wrap('schedule', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('challenge_votes').subscribe('*', wrap('challenge_votes', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('ml_questions').subscribe('*', wrap('ml_questions', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('ml_votes').subscribe('*', wrap('ml_votes', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('wines').subscribe('*', wrap('wines', (ev) => ev.record?.event === eventId))),

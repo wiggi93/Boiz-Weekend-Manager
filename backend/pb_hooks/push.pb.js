@@ -22,27 +22,41 @@ routerAdd("GET", "/api/push/pubkey", (e) => {
   return e.json(200, { key });
 });
 
-// ---- Trigger 1: new challenge → push to the challenged player -------------
+// ---- Trigger 1: new challenge → ping the challenged player, and (for a
+// non-secret challenge) the rest of the crew so they vote on the points -------
 onRecordAfterCreateSuccess((e) => {
   try {
-    console.log("[push] challenge created hook fired");
-    const { sendPushToUsers } = require(`${__hooks}/push_lib.js`);
-    const toUser = e.record.get("toUser");
-    const fromUser = e.record.get("fromUser");
-    const eventId = e.record.get("event");
+    const push = require(`${__hooks}/push_lib.js`);
+    const rec = e.record;
+    const toUser = rec.get("toUser");
+    const fromUser = rec.get("fromUser");
+    const eventId = rec.get("event");
+    const secret = !!rec.get("secret");
+    const text = rec.get("text") || "";
+    const nameOf = (id) => { try { return e.app.findRecordById("users", id).get("displayName") || "Jemand"; } catch (_) { return "Jemand"; } };
+    const fromName = nameOf(fromUser);
+
     if (toUser && toUser !== fromUser) {
-      let fromName = "Jemand";
-      try {
-        const u = e.app.findRecordById("users", fromUser);
-        fromName = u.get("displayName") || fromName;
-      } catch (_) {}
-      const reward = Number(e.record.get("reward")) || 0;
-      sendPushToUsers(e.app, [toUser], {
+      push.sendPushToUsers(e.app, [toUser], {
         title: "🎯 Neue Challenge!",
-        body: `${fromName}: ${e.record.get("text")} (+${reward} Pkt)`,
+        body: `${fromName}: ${text}`,
         url: `/?event=${eventId}&goto=challenges`,
-        tag: `chal-${e.record.id}`,
+        tag: `chal-${rec.id}`,
       });
+    }
+
+    // Non-secret challenges go to group voting → notify everyone else.
+    if (!secret) {
+      const all = push.eventMemberIds(e.app, eventId, null);
+      const voters = all.filter((id) => id !== toUser && id !== fromUser);
+      if (voters.length) {
+        push.sendPushToUsers(e.app, voters, {
+          title: "🗳️ Challenge-Voting",
+          body: `${fromName} → ${nameOf(toUser)}: Stimm ab, wie viele Punkte fair sind.`,
+          url: `/?event=${eventId}&goto=challenges`,
+          tag: `chalvote-${rec.id}`,
+        });
+      }
     }
   } catch (err) { console.log("[push] challenge trigger:", err); }
   e.next();
