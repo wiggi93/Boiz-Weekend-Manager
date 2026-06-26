@@ -584,6 +584,19 @@ export async function deleteChallenge(id) {
   return pb.collection('challenges').delete(id);
 }
 
+// Challenged player uploads the photo proof (multipart). The backend guard
+// (challenges.pb.js) ensures the toUser can only touch the photo field.
+export async function uploadChallengePhoto(challengeId, file) {
+  const fd = new FormData();
+  fd.append('photo', file);
+  return pb.collection('challenges').update(challengeId, fd);
+}
+export function challengePhotoUrl(challenge, thumb) {
+  if (!challenge?.photo) return '';
+  try { return pb.files.getURL(challenge, challenge.photo, thumb ? { thumb } : {}); }
+  catch { return ''; }
+}
+
 // ---- Wer würde eher (Most-Likely-To) ----
 export async function listMlQuestions(eventId) {
   return pb.collection('ml_questions').getFullList({ filter: `event="${eventId}"`, sort: '-created' });

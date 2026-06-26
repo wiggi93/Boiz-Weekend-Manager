@@ -2228,3 +2228,17 @@
 .ww-bonus-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .ww-bonus-val { font-size: 13px; color: var(--muted); margin-left: 4px; }
 .ww-bonus-val b { color: var(--amber); font-family: 'IBM Plex Mono', monospace; }
+
+/* Challenge photo proof */
+.ww-chal-photo { display: block; margin-top: 10px; }
+.ww-chal-photo img {
+  width: 100%; max-height: 320px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border); display: block;
+}
+.ww-chal-photo-upload {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  margin-top: 10px; padding: 14px; border-radius: 8px; cursor: pointer;
+  border: 1px dashed var(--amber); color: var(--amber);
+  background: rgba(245,165,36,0.08); font-size: 13px; font-weight: 600;
+}
+.ww-chal-photo-upload:active { transform: scale(0.99); }
