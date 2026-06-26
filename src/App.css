@@ -2294,3 +2294,41 @@
 /* Photo proof: camera vs gallery options side by side */
 .ww-chal-photo-actions { display: flex; gap: 8px; margin-top: 10px; }
 .ww-chal-photo-actions .ww-chal-photo-upload { margin-top: 0; flex: 1; padding: 12px; }
+
+/* ============ Werwolf ============ */
+.ww-ww-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.ww-ww-phase {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 14px; border-radius: 12px; margin-bottom: 12px; text-align: center;
+  font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.06em; font-size: 22px;
+}
+.ww-ww-phase span { font-family: 'Inter', sans-serif; letter-spacing: 0; font-size: 12px; opacity: 0.85; font-weight: 400; }
+.ww-ww-phase.night { background: linear-gradient(135deg, #1e1b4b, #312e81); color: #c7d2fe; }
+.ww-ww-phase.day { background: linear-gradient(135deg, #78350f, #b45309); color: #fde68a; }
+.ww-ww-rolecard { text-align: center; padding: 18px; border-radius: 12px; cursor: pointer; border: 1px solid var(--border); }
+.ww-ww-rolecard.wolf { background: rgba(239,68,68,0.12); border-color: #ef4444; }
+.ww-ww-rolecard.village { background: rgba(34,197,94,0.10); border-color: var(--green,#22c55e); }
+.ww-ww-roleemoji { font-size: 46px; }
+.ww-ww-rolename { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 0.04em; margin-top: 4px; }
+.ww-ww-roleteam { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.ww-ww-roledesc { font-size: 13px; line-height: 1.5; margin-top: 8px; color: var(--text); }
+.ww-ww-seer { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.ww-ww-targets { display: flex; flex-wrap: wrap; gap: 6px; }
+.ww-ww-peek { padding: 12px; border-radius: 8px; text-align: center; font-weight: 700; font-size: 15px; }
+.ww-ww-peek.wolf { background: rgba(239,68,68,0.18); color: #fca5a5; }
+.ww-ww-peek.ok { background: rgba(34,197,94,0.15); color: #86efac; }
+.ww-ww-mod { border: 1px solid var(--amber); }
+.ww-ww-script { font-size: 13px; line-height: 1.5; color: var(--muted); background: var(--card-2); padding: 10px; border-radius: 8px; }
+.ww-ww-winbanner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; margin: 10px 0; border-radius: 8px; background: rgba(245,165,36,0.15); border: 1px solid var(--amber); font-weight: 700; font-size: 14px; }
+.ww-ww-modlist { display: flex; flex-direction: column; gap: 5px; }
+.ww-ww-modrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 10px 12px; border-radius: 8px; background: var(--card-2); border: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 14px; }
+.ww-ww-modrow:hover { border-color: var(--red,#ef4444); }
+.ww-ww-rolelist { display: flex; flex-direction: column; gap: 4px; }
+.ww-ww-rolerow { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 2px; border-bottom: 1px solid var(--border); font-size: 14px; }
+.ww-ww-rolerow:last-child { border-bottom: none; }
+.ww-ww-rolerow.dead { opacity: 0.5; }
+.ww-ww-roletag { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+.ww-ww-roletag.wolf { background: rgba(239,68,68,0.18); color: #fca5a5; }
+.ww-ww-roletag.village { background: rgba(34,197,94,0.15); color: #86efac; }
+.ww-ww-aliveok { font-size: 12px; color: var(--green,#22c55e); }
+.ww-ww-bigwin { font-size: 60px; }
