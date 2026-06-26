@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
-  login, register, logout, requestPasswordReset, requestVerification, confirmVerification, broadcastEmail,
+  login, register, logout, requestPasswordReset, confirmPasswordReset, requestVerification, confirmVerification, broadcastEmail,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
@@ -247,6 +247,10 @@ export default function App() {
   // Email-verification token from the link in the verification mail (?verify=).
   const [verifyToken, setVerifyToken] = useState(() => {
     try { return new URLSearchParams(window.location.search).get('verify') || null; } catch { return null; }
+  });
+  // Password-reset token from the link in the reset mail (?reset=).
+  const [resetToken, setResetToken] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('reset') || null; } catch { return null; }
   });
   const [myMemberships, setMyMemberships] = useState([]);
   const [currentEventId, setCurrentEventId] = useState(null);
@@ -1306,6 +1310,21 @@ export default function App() {
   // ---- Render ----
   if (!booted) return <BootScreen />;
 
+  // Password-reset link landed here (?reset=…) — set a new password in-app.
+  if (resetToken) {
+    return (
+      <div className="ww-app">
+        <GrainOverlay />
+        <ResetPasswordScreen
+          token={resetToken}
+          onDone={() => { setResetToken(null); try { window.history.replaceState({}, '', window.location.pathname); } catch (_) {} }}
+        />
+        {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
+      </div>
+    );
+  }
+
   // Email-verification link landed here (?verify=…) — confirm it in-app.
   if (verifyToken) {
     return (
@@ -1663,6 +1682,62 @@ function OnboardingGate({ me, onLogout, onRefresh }) {
           Sobald beides ✅ ist, geht's automatisch los — die Seite aktualisiert sich selbst.
         </p>
         <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Abmelden</button>
+      </div>
+    </div>
+  );
+}
+
+// Sets a new password in-app from a reset link (?reset=…), so it works without
+// the PocketBase dashboard.
+function ResetPasswordScreen({ token, onDone }) {
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const valid = pw.length >= 8 && pw === pw2;
+
+  const submit = async () => {
+    if (!valid) return;
+    setBusy(true); setErr('');
+    try {
+      await confirmPasswordReset(token, pw, pw2);
+      try { logout(); } catch (_) {} // reset invalidates sessions → sign in fresh
+      setDone(true);
+    } catch (_) {
+      setErr('Link ungültig oder abgelaufen — fordere einen neuen Reset-Link an.');
+    } finally { setBusy(false); }
+  };
+
+  if (done) {
+    return (
+      <div className="ww-pending">
+        <div className="ww-pending-card">
+          <div className="ww-pending-emoji">✅</div>
+          <h2 className="ww-pending-title">Passwort geändert!</h2>
+          <p className="ww-pending-text">Log dich jetzt mit deinem neuen Passwort ein.</p>
+          <button className="ww-big-cta" onClick={onDone}><Check size={18} /><span>ZUM LOGIN</span></button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ww-pending">
+      <div className="ww-pending-card">
+        <div className="ww-pending-emoji">🔑</div>
+        <h2 className="ww-pending-title">Neues Passwort</h2>
+        <p className="ww-pending-text">Wähle ein neues Passwort (min. 8 Zeichen).</p>
+        <label className="ww-label" style={{ textAlign: 'left' }}><Lock size={12} /> NEUES PASSWORT</label>
+        <input className="ww-input" type="password" autoComplete="new-password" placeholder="••••••••" value={pw} onChange={e => setPw(e.target.value)} />
+        <label className="ww-label" style={{ textAlign: 'left' }}><Lock size={12} /> WIEDERHOLEN</label>
+        <input className="ww-input" type="password" autoComplete="new-password" placeholder="••••••••" value={pw2} onChange={e => setPw2(e.target.value)} />
+        {pw2 && pw !== pw2 && <div className="ww-err" style={{ marginTop: 6 }}>Passwörter stimmen nicht überein.</div>}
+        {err && <div className="ww-err" style={{ marginTop: 6 }}>{err}</div>}
+        <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy} style={{ marginTop: 10 }}>
+          {busy ? <span className="ww-spinner" /> : <Check size={18} />}<span>PASSWORT SPEICHERN</span>
+        </button>
+        <button className="ww-text-btn" onClick={onDone}>Abbrechen</button>
       </div>
     </div>
   );

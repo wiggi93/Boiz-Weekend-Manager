@@ -46,6 +46,20 @@ onMailerRecordVerificationSend((e) => {
   e.next();
 });
 
+// Same blank-dashboard problem for the password-reset link — rewrite it to the
+// app's in-app reset form (?reset=…).
+onMailerRecordPasswordResetSend((e) => {
+  try {
+    const front = ($os.getenv("APP_FRONTEND_URL") || "https://boiz.dr-disco.eu").replace(/\/$/, "");
+    const re = /https?:\/\/[^/"'\s]+\/_\/#\/auth\/confirm-password-reset\//gi;
+    if (e.message) {
+      if (e.message.html) e.message.html = e.message.html.replace(re, front + "/?reset=");
+      if (e.message.text) e.message.text = e.message.text.replace(re, front + "/?reset=");
+    }
+  } catch (err) { console.log("[mail] reset-link rewrite:", err); }
+  e.next();
+});
+
 // ---- Host broadcast: email every member of an event ---------------------
 // POST /api/broadcast  { eventId, subject, body }
 // Only site admin / event creator / event-host may send.
