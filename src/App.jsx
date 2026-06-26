@@ -23,7 +23,7 @@ import {
   getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
-  listChallengeVotes, castChallengeVote,
+  listChallengeVotes, castChallengeVote, uploadChallengePhoto, challengePhotoUrl,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
   listMlQuestions, createMlQuestion, updateMlQuestion, deleteMlQuestion, listMlVotes, castMlVote,
   getWineFacts, pushWineFact,
@@ -1080,6 +1080,13 @@ export default function App() {
     try { await castChallengeVote(challengeId, currentEventId, phase, value); }
     catch (e) { showToast('Vote fehlgeschlagen 😬'); listChallengeVotes(currentEventId).then(setChallengeVotes).catch(() => {}); }
   };
+  const onChallengePhoto = async (challengeId, file) => {
+    try {
+      const rec = await uploadChallengePhoto(challengeId, file);
+      setChallenges(prev => prev.map(c => c.id === challengeId ? { ...c, photo: rec.photo } : c));
+      showToast('Fotobeweis hochgeladen 📸');
+    } catch (e) { showToast(`Upload fehlgeschlagen: ${e?.status || ''} ${e?.message || ''}`); }
+  };
 
   // ---- Wer würde eher ----
   const onMlCreate = async ({ text, points }) => {
@@ -1533,6 +1540,7 @@ export default function App() {
             onChallengeResolve={onChallengeResolve}
             onChallengeDelete={onChallengeDelete}
             onChallengeVote={onChallengeVote}
+            onChallengePhoto={onChallengePhoto}
             mlQuestions={mlQuestions} mlVotes={mlVotes}
             onMlCreate={onMlCreate} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
             wines={wines} wineRatings={wineRatings}
@@ -2394,7 +2402,7 @@ function HomeView({
   kitty, onKittyPatch,
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
-  challenges, challengeVotes, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote,
+  challenges, challengeVotes, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote, onChallengePhoto,
   mlQuestions, mlVotes, onMlCreate, onMlVote, onMlPatch, onMlDelete,
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
@@ -2494,7 +2502,7 @@ function HomeView({
       {moduleTab === 'challenges' && (
         <ChallengesView
           me={me} admin={admin} members={members} challenges={challenges} votes={challengeVotes}
-          onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete} onVote={onChallengeVote}
+          onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete} onVote={onChallengeVote} onPhoto={onChallengePhoto}
         />
       )}
       {moduleTab === 'mostlikely' && (
@@ -4587,7 +4595,7 @@ function ScheduleEntryDrawer({ entry, onSave, onClose, eventDays = [], openEnded
 // Challenges (peer dares for points)
 // ============================================================
 
-function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, onResolve, onDelete, onVote }) {
+function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, onResolve, onDelete, onVote, onPhoto }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4632,6 +4640,31 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
     return { yes: vs.filter(v => v.verdict === 'done').length, no: vs.filter(v => v.verdict === 'failed').length, total: vs.length };
   };
   const POINT_CHOICES = [1, 2, 3, 5, 8, 10];
+
+  // Photo proof. Public challenges → everyone sees; secret → only the two
+  // involved (canSeeSecret). The challenged player uploads it.
+  const renderPhoto = (c) => {
+    if (!c.isPhoto) return null;
+    const canSee = canSeeSecret(c);
+    if (c.photo) {
+      if (!canSee) return <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>📸 Fotobeweis vorhanden (nur für die Beteiligten sichtbar)</div>;
+      return (
+        <a className="ww-chal-photo" href={challengePhotoUrl(c)} target="_blank" rel="noopener noreferrer">
+          <img src={challengePhotoUrl(c, '0x320')} alt="Fotobeweis" loading="lazy" />
+        </a>
+      );
+    }
+    if (c.toUser === me.id) {
+      return (
+        <label className="ww-chal-photo-upload">
+          📸 Fotobeweis hochladen
+          <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onPhoto?.(c.id, f); e.target.value = ''; }} />
+        </label>
+      );
+    }
+    return <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>📸 Wartet auf Fotobeweis…</div>;
+  };
 
   const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
 
@@ -4761,6 +4794,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
                   <div className="ww-chal-text">
                     {canSeeSecret(c) ? c.text : <span className="ww-muted">🤫 Geheime Challenge — nur für {uname(c.toUser)} sichtbar</span>}
                   </div>
+                  {renderPhoto(c)}
                 </>
               );
 
@@ -4883,6 +4917,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
                 <div className="ww-chal-text">
                   {canSeeSecret(c) ? c.text : <span className="ww-muted">🤫 Geheime Challenge</span>}
                 </div>
+                {renderPhoto(c)}
                 <div className="ww-chal-bottom">
                   <span className={`ww-chal-status ${c.status}`}>{c.status === 'done' ? '✓ erfüllt' : '✗ nicht erfüllt'}</span>
                   <div style={{ display: 'flex', gap: 6 }}>
