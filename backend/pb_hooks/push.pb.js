@@ -45,7 +45,7 @@ onRecordAfterCreateSuccess((e) => {
       });
     }
 
-    // Non-secret challenges go to group voting → notify everyone else.
+    // Non-secret challenges go to group voting → notify everyone else + feed.
     if (!secret) {
       const all = push.eventMemberIds(e.app, eventId, null);
       const voters = all.filter((id) => id !== toUser && id !== fromUser);
@@ -57,6 +57,12 @@ onRecordAfterCreateSuccess((e) => {
           tag: `chalvote-${rec.id}`,
         });
       }
+      push.logNotif(e.app, {
+        event: eventId, type: "challenge",
+        title: "🎯 Neue Challenge",
+        body: `${fromName} → ${nameOf(toUser)}: ${text}`,
+        url: `/?event=${eventId}&goto=challenges`,
+      });
     }
   } catch (err) { console.log("[push] challenge trigger:", err); }
   e.next();
@@ -74,12 +80,18 @@ onRecordUpdateRequest((e) => {
   e.next(); // persist first — only push when the update actually succeeded
   try {
     if (!wasActive && nowActive) {
-      const { sendPushToUsers, eventMemberIds } = require(`${__hooks}/push_lib.js`);
-      sendPushToUsers(e.app, eventMemberIds(e.app, e.record.id, actor), {
+      const lib = require(`${__hooks}/push_lib.js`);
+      lib.sendPushToUsers(e.app, lib.eventMemberIds(e.app, e.record.id, actor), {
         title: "🍻 Es geht los!",
         body: `"${e.record.get("name")}" ist jetzt live — rein da!`,
         url: `/?event=${e.record.id}`,
         tag: `event-live-${e.record.id}`,
+      });
+      lib.logNotif(e.app, {
+        event: e.record.id, type: "event",
+        title: "🍻 Event ist live!",
+        body: `"${e.record.get("name")}" läuft jetzt.`,
+        url: `/?event=${e.record.id}`,
       });
     }
   } catch (err) { console.log("[push] event trigger:", err); }
@@ -111,6 +123,12 @@ onRecordUpdateRequest((e) => {
         body: "Alle haben ihre Ausgaben eingereicht — ihr könnt jetzt ausgleichen.",
         url: `/?event=${eventId}&goto=kitty`,
         tag: `kitty-done-${e.record.id}`,
+      });
+      lib.logNotif(e.app, {
+        event: eventId, type: "kitty",
+        title: "💸 Kassensturz komplett",
+        body: "Alle Ausgaben sind drin — ihr könnt ausgleichen.",
+        url: `/?event=${eventId}&goto=kitty`,
       });
     }
   } catch (err) { console.log("[push] kitty trigger:", err); }

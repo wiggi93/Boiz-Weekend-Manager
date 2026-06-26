@@ -113,4 +113,19 @@ function parseArr(record, field) {
   return [];
 }
 
-module.exports = { sendPushToUsers, eventMemberIds, parseArr };
+// Append an entry to the in-app notification feed (mirrors a push). Best-effort.
+function logNotif(app, n) {
+  try {
+    const col = app.findCollectionByNameOrId("notifications");
+    const rec = new Record(col);
+    rec.set("event", n.event);
+    rec.set("type", n.type || "");
+    rec.set("title", n.title || "");
+    rec.set("body", n.body || "");
+    rec.set("url", n.url || "");
+    if (n.createdBy) rec.set("createdBy", n.createdBy);
+    app.save(rec);
+  } catch (err) { console.log("[notif] log:", err); }
+}
+
+module.exports = { sendPushToUsers, eventMemberIds, parseArr, logNotif };

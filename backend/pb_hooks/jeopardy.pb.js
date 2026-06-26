@@ -143,6 +143,12 @@ routerAdd("POST", "/api/jeopardy/start-round", (e) => {
       url: `/?event=${data.eventId}&goto=jeopardy`,
       tag: `jeo-ready-${jrec.id}-${nextRounds.length}`,
     });
+    push.logNotif(e.app, {
+      event: data.eventId, type: "jeopardy",
+      title: "🎤 Jeopardy-Runde gestartet",
+      body: "Eine neue Runde läuft — Handy raus!",
+      url: `/?event=${data.eventId}&goto=jeopardy`,
+    });
   } catch (err) { console.log("[push] start-round:", err); }
 
   return e.json(200, { ok: true, roundId: round.id });

@@ -584,6 +584,24 @@ export async function deleteChallenge(id) {
   return pb.collection('challenges').delete(id);
 }
 
+// ---- Notification feed ----
+export async function listNotifications(eventId) {
+  return pb.collection('notifications').getFullList({ filter: `event="${eventId}"`, sort: '-created', expand: 'createdBy' });
+}
+export async function deleteNotification(id) {
+  return pb.collection('notifications').delete(id);
+}
+// Host broadcast → push to all members + feed entry.
+export async function sendAnnouncement(eventId, text) {
+  const res = await fetch(`${PB_URL}/api/notify/announce`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ eventId, text }),
+  });
+  if (!res.ok) throw new Error(`announce failed (${res.status})`);
+  return res.json();
+}
+
 // Challenged player uploads the photo proof (multipart). The backend guard
 // (challenges.pb.js) ensures the toUser can only touch the photo field.
 export async function uploadChallengePhoto(challengeId, file) {
@@ -665,6 +683,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenge_votes').subscribe('*', wrap('challenge_votes', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('notifications').subscribe('*', wrap('notifications', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('ml_questions').subscribe('*', wrap('ml_questions', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('ml_votes').subscribe('*', wrap('ml_votes', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('wines').subscribe('*', wrap('wines', (ev) => ev.record?.event === eventId))),
