@@ -25,6 +25,7 @@ import {
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
   listChallengeVotes, castChallengeVote, uploadChallengePhoto, challengePhotoUrl,
   listNotifications, deleteNotification, sendAnnouncement,
+  getWerewolf, getMyWerewolfRole, listWerewolfRoles, updateWerewolf, startWerewolf, peekWerewolf,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
   listMlQuestions, createMlQuestion, updateMlQuestion, deleteMlQuestion, listMlVotes, castMlVote,
   getWineFacts, pushWineFact,
@@ -297,6 +298,9 @@ export default function App() {
   const [challenges, setChallenges] = useState([]);
   const [challengeVotes, setChallengeVotes] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [werewolf, setWerewolf] = useState(null);
+  const [myRole, setMyRole] = useState(null);
+  const [werewolfRoles, setWerewolfRoles] = useState([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifSeenAt, setNotifSeenAt] = useState('');
   const [wines, setWines] = useState([]);
@@ -648,6 +652,20 @@ export default function App() {
       return;
     }
 
+    if (collection === 'werewolf') {
+      if (ev.action !== 'delete') setWerewolf(rec);
+      return;
+    }
+    if (collection === 'werewolf_roles') {
+      // Roles (re)assigned → refresh my own role + (host) the full list.
+      const eid = eventRef.current?.id;
+      if (eid) {
+        getMyWerewolfRole(eid).then(setMyRole).catch(() => {});
+        listWerewolfRoles(eid).then(setWerewolfRoles).catch(() => {});
+      }
+      return;
+    }
+
     if (collection === 'wines') {
       setWines(prev => {
         if (ev.action === 'delete') return prev.filter(w => w.id !== rec.id);
@@ -712,6 +730,14 @@ export default function App() {
     subscribeEvent(currentEventId, realtimeHandler).then(fn => { if (cancelled) { try { fn(); } catch (_) {} } else { unsub = fn; } });
     return () => { cancelled = true; if (unsub) { try { unsub(); } catch (_) {} } };
   }, [currentEventId, realtimeHandler, rtEpoch]);
+
+  // Werwolf: load the public game state + my secret role (host gets all roles).
+  useEffect(() => {
+    if (!currentEventId) { setWerewolf(null); setMyRole(null); setWerewolfRoles([]); return; }
+    getWerewolf(currentEventId).then(setWerewolf).catch(() => {});
+    getMyWerewolfRole(currentEventId).then(setMyRole).catch(() => {});
+    listWerewolfRoles(currentEventId).then(setWerewolfRoles).catch(() => {});
+  }, [currentEventId]);
 
   // Resilience: PocketBase's realtime (SSE) can silently die on mobile —
   // backgrounding the app, a network blip, or a flaky connection — and then a
@@ -1170,6 +1196,22 @@ export default function App() {
     catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); refreshCurrentEvent(); }
   };
 
+  // ---- Werwolf ----
+  const onWerewolfStart = async (config) => {
+    try { await startWerewolf(currentEventId, config); showToast('🐺 Rollen verteilt!'); }
+    catch (e) { showToast(`Fehler: ${e?.message || ''}`); }
+  };
+  const onWerewolfPatch = async (patch) => {
+    if (!werewolf?.id) return;
+    setWerewolf(prev => (prev ? { ...prev, ...patch } : prev));
+    try { await updateWerewolf(werewolf.id, patch); }
+    catch (e) { showToast('Fehler 😬'); getWerewolf(currentEventId).then(setWerewolf).catch(() => {}); }
+  };
+  const onWerewolfPeek = async (target) => {
+    try { return await peekWerewolf(currentEventId, target); }
+    catch (e) { showToast('Prüfen fehlgeschlagen 😬'); return null; }
+  };
+
   // ---- Weinwanderung ----
   const onWineCreate = async ({ name, note }) => {
     const clean = (name || '').trim();
@@ -1603,6 +1645,8 @@ export default function App() {
             onChallengePhoto={onChallengePhoto}
             mlQuestions={mlQuestions} mlVotes={mlVotes}
             onMlCreate={onMlCreate} onMlCreateBatch={onMlCreateBatch} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
+            werewolf={werewolf} myRole={myRole} werewolfRoles={werewolfRoles}
+            onWerewolfStart={onWerewolfStart} onWerewolfPatch={onWerewolfPatch} onWerewolfPeek={onWerewolfPeek}
             wines={wines} wineRatings={wineRatings}
             onWineCreate={onWineCreate} onWineDelete={onWineDelete} onWineRate={onWineRate}
             customModules={customModules}
@@ -2541,6 +2585,7 @@ function HomeView({
   schedule, onSchedulePatch,
   challenges, challengeVotes, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote, onChallengePhoto,
   mlQuestions, mlVotes, onMlCreate, onMlCreateBatch, onMlVote, onMlPatch, onMlDelete,
+  werewolf, myRole, werewolfRoles, onWerewolfStart, onWerewolfPatch, onWerewolfPeek,
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
@@ -2648,6 +2693,13 @@ function HomeView({
           me={me} admin={admin} active={event.active} members={members}
           questions={mlQuestions} votes={mlVotes}
           onCreate={onMlCreate} onCreateBatch={onMlCreateBatch} onVote={onMlVote} onPatch={onMlPatch} onDelete={onMlDelete}
+        />
+      )}
+      {moduleTab === 'werewolf' && (
+        <WerewolfView
+          me={me} admin={admin} members={members}
+          game={werewolf} myRole={myRole} allRoles={werewolfRoles}
+          onStart={onWerewolfStart} onPatch={onWerewolfPatch} onPeek={onWerewolfPeek}
         />
       )}
       {moduleTab === 'wine' && (
@@ -5104,6 +5156,232 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
 // ============================================================
 // Wer würde eher — pose questions, everyone votes, most votes wins points
 // ============================================================
+
+// ============================================================
+// Werwolf — host-moderated secret roles + night/day phases
+// ============================================================
+
+const WW_ROLES = {
+  wolf:     { emoji: '🐺', name: 'Werwolf',       team: 'wolf',    desc: 'Nachts reißt ihr Werwölfe gemeinsam ein Dorfmitglied. Tagsüber tarnt euch und lügt, was das Zeug hält.' },
+  villager: { emoji: '🧑‍🌾', name: 'Dorfbewohner', team: 'village', desc: 'Keine Spezialkraft — nur dein Verstand. Entlarve die Werwölfe und stimme tagsüber gegen sie.' },
+  seer:     { emoji: '🔮', name: 'Seherin',       team: 'village', desc: 'Jede Nacht darfst du eine Person überprüfen und erfährst, ob sie ein Werwolf ist.' },
+  witch:    { emoji: '🧪', name: 'Hexe',          team: 'village', desc: 'Ein Heiltrank + ein Gifttrank, je einmal im Spiel. Sag dem Spielleiter heimlich, wen du rettest/vergiftest.' },
+  hunter:   { emoji: '🏹', name: 'Jäger',         team: 'village', desc: 'Stirbst du, reißt du sofort eine Person deiner Wahl mit in den Tod.' },
+};
+const wwRole = (k) => WW_ROLES[k] || { emoji: '❓', name: k || '?', team: 'village', desc: '' };
+
+function WerewolfView({ me, admin, members, game, myRole, allRoles, onStart, onPatch, onPeek }) {
+  const usersById = useMemo(() => {
+    const m = {};
+    for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
+    return m;
+  }, [members]);
+  const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email?.split('@')[0]}` : '?'; };
+
+  const phase = game?.phase || null;
+  const playing = phase === 'night' || phase === 'day';
+  const over = phase === 'over';
+  const isMod = !!game && game.moderator === me.id;
+  const alive = Array.isArray(game?.alive) ? game.alive : [];
+  const deaths = Array.isArray(game?.deaths) ? game.deaths : [];
+  const reveal = game?.reveal && typeof game.reveal === 'object' ? game.reveal : {};
+  const rolesById = useMemo(() => { const m = {}; for (const r of (allRoles || [])) m[r.user] = r.role; return m; }, [allRoles]);
+
+  const [wolves, setWolves] = useState(1);
+  const [seer, setSeer] = useState(true);
+  const [witch, setWitch] = useState(true);
+  const [hunter, setHunter] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [peekResult, setPeekResult] = useState(null);
+  useEffect(() => { setRevealed(false); }, [phase, game?.round]);
+  useEffect(() => { setPeekResult(null); }, [phase, game?.round]);
+
+  const playerCount = Math.max(0, members.length - 1); // minus the moderator
+
+  // ---------- Setup (host) / waiting (player) ----------
+  if (!playing && !over) {
+    if (!admin) return <div className="ww-empty" style={{ marginTop: 24 }}>🐺 Warte, bis der Host das Werwolf-Spiel startet…</div>;
+    const maxWolves = Math.max(1, Math.floor(playerCount / 2));
+    const start = async () => { setBusy(true); try { await onStart({ wolves: Math.min(wolves, maxWolves), seer, witch, hunter }); } finally { setBusy(false); } };
+    return (
+      <div className="ww-werewolf">
+        <section className="ww-section">
+          <div className="ww-section-head"><span style={{ fontSize: 16 }}>🐺</span><h3>WERWOLF — SPIEL STARTEN</h3></div>
+          <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
+            Du bist der <b>Spielleiter</b>: du spielst nicht mit, siehst alle Rollen und führst durch die Nächte.
+            Die App verteilt geheime Rollen an die {playerCount} Mitspieler.
+          </p>
+          {playerCount < 3 ? (
+            <div className="ww-err" style={{ marginTop: 8 }}>Zu wenige Mitspieler — es braucht mind. 3 (zusätzlich zu dir).</div>
+          ) : (<>
+            <label className="ww-label">WERWÖLFE</label>
+            <div className="ww-chal-chips">
+              {Array.from({ length: maxWolves }, (_, i) => i + 1).map(n => (
+                <button key={n} className={`ww-chal-chip ${wolves === n ? 'sel' : ''}`} onClick={() => setWolves(n)}>{n}</button>
+              ))}
+            </div>
+            <label className="ww-label">SONDERROLLEN</label>
+            <div className="ww-ww-toggles">
+              {[['seer', seer, setSeer], ['witch', witch, setWitch], ['hunter', hunter, setHunter]].map(([k, v, set]) => (
+                <button key={k} type="button" className={`ww-chal-toggle ${v ? 'on' : ''}`} onClick={() => set(x => !x)}>
+                  {wwRole(k).emoji} {wwRole(k).name}
+                </button>
+              ))}
+            </div>
+            <button className={`ww-big-cta ${busy ? 'disabled' : ''}`} disabled={busy} onClick={start}>
+              {busy ? <span className="ww-spinner" /> : <span style={{ fontSize: 18 }}>🐺</span>}<span>ROLLEN VERTEILEN & STARTEN</span>
+            </button>
+          </>)}
+        </section>
+      </div>
+    );
+  }
+
+  // ---------- Game over ----------
+  if (over) {
+    const win = game?.winner;
+    const order = members.map(m => m.expand?.user?.id).filter(id => id && id !== game?.moderator);
+    return (
+      <div className="ww-werewolf">
+        <section className="ww-section" style={{ textAlign: 'center' }}>
+          <div className="ww-ww-bigwin">{win === 'wolves' ? '🐺' : '🏘️'}</div>
+          <h2 className="ww-pending-title">{win === 'wolves' ? 'Die Werwölfe gewinnen!' : 'Das Dorf gewinnt!'}</h2>
+        </section>
+        <section className="ww-section">
+          <div className="ww-section-head"><h3>ALLE ROLLEN</h3></div>
+          <div className="ww-ww-rolelist">
+            {order.map(id => {
+              const r = wwRole(reveal[id] || rolesById[id]);
+              const dead = !alive.includes(id);
+              return (
+                <div key={id} className={`ww-ww-rolerow ${dead ? 'dead' : ''}`}>
+                  <span>{uname(id)}{dead ? ' 💀' : ''}</span>
+                  <span className={`ww-ww-roletag ${r.team}`}>{r.emoji} {r.name}</span>
+                </div>
+              );
+            })}
+          </div>
+          {isMod && (
+            <button className="ww-big-cta" style={{ marginTop: 12 }} onClick={() => onPatch({ phase: 'lobby' })}>
+              <RotateCcw size={18} /><span>NEUES SPIEL</span>
+            </button>
+          )}
+        </section>
+      </div>
+    );
+  }
+
+  // ---------- Active game ----------
+  const iAmAlive = alive.includes(me.id);
+  const myR = myRole?.role ? wwRole(myRole.role) : null;
+  const aliveWolves = alive.filter(u => rolesById[u] === 'wolf').length;
+  const aliveOthers = alive.length - aliveWolves;
+  const winner = isMod ? (aliveWolves === 0 ? 'village' : (aliveWolves >= aliveOthers && aliveWolves > 0 ? 'wolves' : '')) : '';
+
+  const markDead = (uid) => onPatch({ alive: alive.filter(x => x !== uid), deaths: [...deaths, { round: game.round, phase, userId: uid, role: rolesById[uid] || '' }] });
+  const revive = (uid) => onPatch({ alive: [...alive, uid], deaths: deaths.filter(d => d.userId !== uid) });
+  const doPeek = async (uid) => { const r = await onPeek(uid); if (r) setPeekResult({ uid, isWolf: r.isWolf }); };
+
+  const nightScript = `🌙 Nacht ${game.round}. Alle schließen die Augen. 🐺 Werwölfe wachen auf und einigen sich auf ein Opfer${game.config?.seer ? ', 🔮 Seherin überprüft eine Person' : ''}${game.config?.witch ? ', 🧪 Hexe entscheidet über ihre Tränke' : ''}. Danach markiere unten, wer gestorben ist.`;
+  const dayScript = `☀️ Tag ${game.round}. Besprecht euch und stimmt ab, wer gelyncht wird — dann markiere das Opfer unten.`;
+
+  return (
+    <div className="ww-werewolf">
+      {/* Phase banner */}
+      <div className={`ww-ww-phase ${phase}`}>
+        {phase === 'night' ? `🌙 NACHT ${game.round}` : `☀️ TAG ${game.round}`}
+        <span>{phase === 'night' ? 'Augen zu — der Spielleiter führt euch' : 'Diskutiert & stimmt ab'}</span>
+      </div>
+
+      {/* My secret role (players only) */}
+      {!isMod && myR && (
+        <section className="ww-section">
+          <div className="ww-section-head"><h3>DEINE ROLLE</h3>{!iAmAlive && <span className="ww-pending-badge" style={{ background: 'var(--red,#ef4444)', color: '#fff' }}>💀 RAUS</span>}</div>
+          {revealed ? (
+            <div className={`ww-ww-rolecard ${myR.team}`} onClick={() => setRevealed(false)}>
+              <div className="ww-ww-roleemoji">{myR.emoji}</div>
+              <div className="ww-ww-rolename">{myR.name}</div>
+              <div className="ww-ww-roleteam">{myR.team === 'wolf' ? 'Team Werwölfe' : 'Team Dorf'}</div>
+              <div className="ww-ww-roledesc">{myR.desc}</div>
+              <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>Tippen zum Verbergen</div>
+            </div>
+          ) : (
+            <button className="ww-big-cta" onClick={() => setRevealed(true)}><Eye size={18} /><span>MEINE ROLLE ANSEHEN</span></button>
+          )}
+
+          {/* Seer night action */}
+          {myRole?.role === 'seer' && iAmAlive && phase === 'night' && (
+            <div className="ww-ww-seer">
+              <div className="ww-muted" style={{ fontSize: 12, marginBottom: 6 }}>🔮 Überprüfe eine Person:</div>
+              {peekResult ? (
+                <div className={`ww-ww-peek ${peekResult.isWolf ? 'wolf' : 'ok'}`}>
+                  {uname(peekResult.uid)} ist {peekResult.isWolf ? 'ein 🐺 WERWOLF!' : 'KEIN Werwolf.'}
+                </div>
+              ) : (
+                <div className="ww-ww-targets">
+                  {alive.filter(id => id !== me.id).map(id => (
+                    <button key={id} className="ww-mini-btn" onClick={() => doPeek(id)}>{uname(id)}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Moderator panel */}
+      {isMod && (
+        <section className="ww-section ww-ww-mod">
+          <div className="ww-section-head"><ShieldCheck size={16} /><h3>SPIELLEITER</h3></div>
+          <p className="ww-ww-script">{phase === 'night' ? nightScript : dayScript}</p>
+          {winner && (
+            <div className="ww-ww-winbanner">
+              {winner === 'wolves' ? '🐺 Werwölfe haben gewonnen!' : '🏘️ Das Dorf hat gewonnen!'}
+              <button className="ww-mini-btn green" onClick={() => onPatch({ phase: 'over', winner, reveal: rolesById })}>Spiel beenden</button>
+            </div>
+          )}
+          <div className="ww-muted" style={{ fontSize: 11, margin: '4px 0' }}>Lebende ({alive.length}) · 🐺 {aliveWolves} · tippe zum Töten:</div>
+          <div className="ww-ww-modlist">
+            {alive.map(id => {
+              const r = wwRole(rolesById[id]);
+              return (
+                <button key={id} className="ww-ww-modrow" onClick={() => markDead(id)}>
+                  <span>{uname(id)}</span>
+                  <span className={`ww-ww-roletag ${r.team}`}>{r.emoji} {r.name}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="ww-ml-actions" style={{ marginTop: 10 }}>
+            {phase === 'night'
+              ? <button className="ww-mini-btn" onClick={() => onPatch({ phase: 'day' })}>☀️ → Tag</button>
+              : <button className="ww-mini-btn" onClick={() => onPatch({ phase: 'night', round: (game.round || 1) + 1 })}>🌙 → Nacht {(game.round || 1) + 1}</button>}
+          </div>
+        </section>
+      )}
+
+      {/* Who's still in (everyone) */}
+      <section className="ww-section">
+        <div className="ww-section-head"><Users size={16} /><h3>IM SPIEL ({alive.length})</h3></div>
+        <div className="ww-ww-rolelist">
+          {members.map(m => m.expand?.user?.id).filter(id => id && id !== game?.moderator).map(id => {
+            const dead = !alive.includes(id);
+            const d = deaths.find(x => x.userId === id);
+            return (
+              <div key={id} className={`ww-ww-rolerow ${dead ? 'dead' : ''}`}>
+                <span>{uname(id)}{id === me.id ? ' (du)' : ''}</span>
+                {dead
+                  ? <span className="ww-muted" style={{ fontSize: 12 }}>💀 {isMod && d ? wwRole(d.role).name : 'tot'}{isMod && <button className="ww-mini-btn" style={{ marginLeft: 6 }} onClick={() => revive(id)}><RotateCcw size={11} /></button>}</span>
+                  : <span className="ww-ww-aliveok">lebt</span>}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
 
 function MostLikelyView({ me, admin, active, members, questions, votes, onCreate, onCreateBatch, onVote, onPatch, onDelete }) {
   const usersById = useMemo(() => {

@@ -584,6 +584,38 @@ export async function deleteChallenge(id) {
   return pb.collection('challenges').delete(id);
 }
 
+// ---- Werwolf ----
+export async function getWerewolf(eventId) {
+  try { return await pb.collection('werewolf').getFirstListItem(`event="${eventId}"`); } catch { return null; }
+}
+export async function getMyWerewolfRole(eventId) {
+  const meId = pb.authStore.record?.id;
+  if (!meId) return null;
+  try { return await pb.collection('werewolf_roles').getFirstListItem(`event="${eventId}" && user="${meId}"`); } catch { return null; }
+}
+export async function listWerewolfRoles(eventId) {
+  try { return await pb.collection('werewolf_roles').getFullList({ filter: `event="${eventId}"` }); } catch { return []; }
+}
+export async function updateWerewolf(id, patch) {
+  return pb.collection('werewolf').update(id, patch);
+}
+export async function startWerewolf(eventId, config) {
+  const res = await fetch(`${PB_URL}/api/werewolf/start`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ eventId, config }),
+  });
+  if (!res.ok) { const t = await res.text(); throw new Error(`${res.status}: ${t.slice(0, 200)}`); }
+  return res.json();
+}
+export async function peekWerewolf(eventId, target) {
+  const res = await fetch(`${PB_URL}/api/werewolf/peek`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ eventId, target }),
+  });
+  if (!res.ok) throw new Error(`peek failed (${res.status})`);
+  return res.json();
+}
+
 // ---- Notification feed ----
 export async function listNotifications(eventId) {
   return pb.collection('notifications').getFullList({ filter: `event="${eventId}"`, sort: '-created', expand: 'createdBy' });
@@ -684,6 +716,8 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenge_votes').subscribe('*', wrap('challenge_votes', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('notifications').subscribe('*', wrap('notifications', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('werewolf').subscribe('*', wrap('werewolf', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('werewolf_roles').subscribe('*', wrap('werewolf_roles', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('ml_questions').subscribe('*', wrap('ml_questions', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('ml_votes').subscribe('*', wrap('ml_votes', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('wines').subscribe('*', wrap('wines', (ev) => ev.record?.event === eventId))),
