@@ -24,6 +24,7 @@ import {
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
   listChallengeVotes, castChallengeVote, uploadChallengePhoto, challengePhotoUrl,
+  listNotifications, deleteNotification, sendAnnouncement,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
   listMlQuestions, createMlQuestion, updateMlQuestion, deleteMlQuestion, listMlVotes, castMlVote,
   getWineFacts, pushWineFact,
@@ -295,6 +296,9 @@ export default function App() {
   const [pollVotes, setPollVotes] = useState([]);
   const [challenges, setChallenges] = useState([]);
   const [challengeVotes, setChallengeVotes] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifSeenAt, setNotifSeenAt] = useState('');
   const [wines, setWines] = useState([]);
   const [wineRatings, setWineRatings] = useState([]);
   const [mlQuestions, setMlQuestions] = useState([]);
@@ -430,7 +434,7 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setChallengeVotes([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setChallengeVotes([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]); setNotifications([]);
       return;
     }
     // Fetch the event first. ONLY a genuinely missing event (404) kicks the
@@ -447,7 +451,7 @@ export default function App() {
     // Sub-fetches: each tolerates its own failure, never resets the event.
     const safe = (p, fallback) => p.catch(() => fallback);
     try {
-      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, cvotes, wn, wr, mq, mv] = await Promise.all([
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, cvotes, wn, wr, mq, mv, notifs] = await Promise.all([
         safe(listEventMembers(currentEventId), []),
         safe(loadEventStats(currentEventId), {}),
         safe(getFlunky(currentEventId), null),
@@ -464,11 +468,12 @@ export default function App() {
         safe(listWineRatings(currentEventId), []),
         safe(listMlQuestions(currentEventId), []),
         safe(listMlVotes(currentEventId), []),
+        safe(listNotifications(currentEventId), []),
       ]);
       setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
       setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch); setChallengeVotes(cvotes);
-      setWines(wn); setWineRatings(wr); setMlQuestions(mq); setMlVotes(mv);
+      setWines(wn); setWineRatings(wr); setMlQuestions(mq); setMlVotes(mv); setNotifications(notifs);
     } catch (e) {
       console.warn('refreshCurrentEvent sub-fetch', e);
     }
@@ -628,6 +633,15 @@ export default function App() {
     if (collection === 'challenge_votes') {
       const eid = eventRef.current?.id;
       if (eid) listChallengeVotes(eid).then(setChallengeVotes).catch(() => {});
+      return;
+    }
+
+    if (collection === 'notifications') {
+      setNotifications(prev => {
+        if (ev.action === 'delete') return prev.filter(n => n.id !== rec.id);
+        if (prev.some(n => n.id === rec.id)) return prev;
+        return [rec, ...prev];
+      });
       return;
     }
 
@@ -848,6 +862,24 @@ export default function App() {
       return next;
     });
   }, [seenKey]);
+
+  // ---- Notification feed: unread tracking + open/click/delete ----
+  const notifSeenKey = currentEventId && me?.id ? `boiz_notifseen_${currentEventId}_${me.id}` : null;
+  useEffect(() => {
+    if (!notifSeenKey) { setNotifSeenAt(''); return; }
+    try { setNotifSeenAt(localStorage.getItem(notifSeenKey) || ''); } catch { setNotifSeenAt(''); }
+  }, [notifSeenKey]);
+  const notifUnread = notifications.reduce((n, x) => n + ((x.created || '') > notifSeenAt ? 1 : 0), 0);
+  const openNotifs = () => {
+    setNotifOpen(true);
+    const newest = notifications.reduce((m, x) => ((x.created || '') > m ? x.created : m), notifSeenAt || '');
+    if (newest && newest !== notifSeenAt) { setNotifSeenAt(newest); try { if (notifSeenKey) localStorage.setItem(notifSeenKey, newest); } catch (_) {} }
+  };
+  const onNotifClick = (n) => { setNotifOpen(false); if (n?.url) applyDeepLink(n.url); };
+  const onNotifDelete = async (id) => {
+    setNotifications(prev => prev.filter(x => x.id !== id));
+    try { await deleteNotification(id); } catch (_) {}
+  };
 
   const isUnread = useCallback((id) => {
     const a = moduleActivity[id];
@@ -1492,6 +1524,18 @@ export default function App() {
   const admin = isEventAdmin(me, currentEvent);
   const modules = currentEvent.modules || [];
 
+  const notifPanel = notifOpen ? (
+    <NotificationsPanel
+      notifications={notifications}
+      usersById={Object.fromEntries(eventMembers.filter(m => m.expand?.user).map(m => [m.expand.user.id, m.expand.user]))}
+      admin={admin}
+      eventId={currentEventId}
+      onClose={() => setNotifOpen(false)}
+      onOpen={onNotifClick}
+      onDelete={onNotifDelete}
+    />
+  ) : null;
+
   if (!currentEvent.active && !admin) {
     return (
       <div className="ww-app">
@@ -1499,7 +1543,9 @@ export default function App() {
         <TopBar me={me} admin={admin} eventName={currentEvent.name}
           settingsActive={settingsOpen}
           onToggleSettings={() => setSettingsOpen(v => !v)}
+          notifUnread={notifUnread} onOpenNotifs={openNotifs}
           onSwitchEvent={() => setCurrentEventId(null)} />
+        {notifPanel}
         <main className="ww-main">
           <WaitingScreen
             event={currentEvent} onLeave={onLeaveEvent}
@@ -1525,6 +1571,7 @@ export default function App() {
         me={me} admin={admin} eventName={currentEvent.name} active={currentEvent.active}
         settingsActive={settingsOpen}
         backToTools={view === 'tools' && !!toolOpen}
+        notifUnread={notifUnread} onOpenNotifs={openNotifs}
         onToggleSettings={() => setSettingsOpen(v => !v)}
         onSwitchEvent={() => {
           // Context-aware back: inside an open tool, go back to the tool list
@@ -1533,6 +1580,7 @@ export default function App() {
           else setCurrentEventId(null);
         }}
       />
+      {notifPanel}
       <main className="ww-main">
         {view === 'home' && (
           <HomeView
@@ -2307,7 +2355,7 @@ function AdminAllEvents({ events, onPick, onDelete, onToggleActive }) {
 // Top bar
 // ============================================================
 
-function TopBar({ me, admin, eventName, active, settingsActive, backToTools, onToggleSettings, onSwitchEvent }) {
+function TopBar({ me, admin, eventName, active, settingsActive, backToTools, onToggleSettings, onSwitchEvent, notifUnread = 0, onOpenNotifs }) {
   return (
     <header className="ww-topbar">
       <div className="ww-topbar-left">
@@ -2328,19 +2376,94 @@ function TopBar({ me, admin, eventName, active, settingsActive, backToTools, onT
           </div>
         </div>
       </div>
-      {admin && (
-        <button
-          className={`ww-icon-btn ${settingsActive ? 'active' : ''}`}
-          onClick={onToggleSettings}
-          aria-label={settingsActive ? 'Settings schließen' : 'Settings öffnen'}
-          aria-pressed={settingsActive}
-          title={settingsActive ? 'Zurück zum Event' : 'Event-Settings'}
-        >
-          <Settings size={18} />
+      <div className="ww-topbar-right">
+        <button className="ww-icon-btn ww-bell" onClick={onOpenNotifs} aria-label="Benachrichtigungen" title="Benachrichtigungen">
+          <Bell size={18} />
+          {notifUnread > 0 && <span className="ww-bell-badge">{notifUnread > 9 ? '9+' : notifUnread}</span>}
         </button>
-      )}
+        {admin && (
+          <button
+            className={`ww-icon-btn ${settingsActive ? 'active' : ''}`}
+            onClick={onToggleSettings}
+            aria-label={settingsActive ? 'Settings schließen' : 'Settings öffnen'}
+            aria-pressed={settingsActive}
+            title={settingsActive ? 'Zurück zum Event' : 'Event-Settings'}
+          >
+            <Settings size={18} />
+          </button>
+        )}
+      </div>
     </header>
   );
+}
+
+// Bell panel: in-app notification feed + host announcement composer.
+function NotificationsPanel({ notifications, usersById, admin, eventId, onClose, onOpen, onDelete }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const sortable = [...notifications].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
+
+  const send = async () => {
+    if (text.trim().length < 2) return;
+    setBusy(true);
+    try { await sendAnnouncement(eventId, text.trim()); setText(''); setSent(true); setTimeout(() => setSent(false), 2500); }
+    catch (e) { /* surfaced via toast elsewhere */ }
+    finally { setBusy(false); }
+  };
+
+  return createPortal(
+    <div className="ww-sheet-overlay" onClick={onClose}>
+      <div className="ww-sheet ww-notif-sheet" onClick={e => e.stopPropagation()}>
+        <div className="ww-sheet-head">
+          <h3><Bell size={16} /> Benachrichtigungen</h3>
+          <button className="ww-icon-btn" onClick={onClose} aria-label="Schließen"><X size={18} /></button>
+        </div>
+
+        {admin && (
+          <div className="ww-notif-compose">
+            <label className="ww-label" style={{ marginTop: 0 }}>📢 NACHRICHT AN ALLE</label>
+            <textarea className="ww-textarea" rows={2} maxLength={400} value={text}
+              onChange={e => setText(e.target.value)} placeholder="z.B. Event startet — ab jetzt Wein zählen, gibt Punkte! 🍷" />
+            <button className={`ww-big-cta ${sent ? 'green' : ''} ${text.trim().length >= 2 && !busy ? '' : 'disabled'}`}
+              disabled={text.trim().length < 2 || busy} onClick={send} style={{ marginTop: 8 }}>
+              {sent ? <><Check size={18} /> Verschickt!</> : <>{busy ? <span className="ww-spinner" /> : <Send size={18} />}<span>AN ALLE SENDEN</span></>}
+            </button>
+          </div>
+        )}
+
+        <div className="ww-notif-list">
+          {sortable.length === 0 && <div className="ww-empty">Noch keine Benachrichtigungen 🔔</div>}
+          {sortable.map(n => {
+            const who = n.expand?.createdBy || (n.createdBy ? usersById?.[n.createdBy] : null);
+            return (
+              <div key={n.id} className="ww-notif-item">
+                <button className="ww-notif-main" onClick={() => onOpen(n)}>
+                  <div className="ww-notif-title">{n.title}</div>
+                  {n.body && <div className="ww-notif-body">{n.body}</div>}
+                  <div className="ww-notif-time">{who ? `${who.emoji || ''} ${who.displayName} · ` : ''}{formatNotifTime(n.created)}</div>
+                </button>
+                {admin && <button className="ww-notif-del" onClick={() => onDelete(n.id)} aria-label="Löschen"><Trash2 size={13} /></button>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function formatNotifTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso.replace(' ', 'T') + (iso.endsWith('Z') ? '' : 'Z'));
+    const diff = (Date.now() - d.getTime()) / 1000;
+    if (diff < 60) return 'gerade eben';
+    if (diff < 3600) return `vor ${Math.floor(diff / 60)} Min`;
+    if (diff < 86400) return `vor ${Math.floor(diff / 3600)} Std`;
+    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
 }
 
 function WaitingScreen({ event, onLeave, me, polls = [], pollVotes = [], onVote, schedule, scheduleOn }) {

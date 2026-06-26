@@ -42,6 +42,12 @@ routerAdd("POST", "/api/wine/fact-push", (e) => {
         tag: `wine-fact-${data.eventId}`,
       });
     }
+    push.logNotif(e.app, {
+      event: data.eventId, type: "wine",
+      title: "🍷 Wein-Fun-Fact: " + f.title,
+      body: f.text || "",
+      url: `/?event=${data.eventId}&goto=wine&fact=${idx}`,
+    });
     // Mark as delivered + stamp the time (so the next auto-fact waits its interval).
     ev.set("wineFactsSeen", seen.concat([String(idx)]));
     ev.set("wineFactLastAt", new Date().toISOString());
@@ -92,6 +98,12 @@ cronAdd("wine-funfact", "0 * * * *", () => {
             tag: `wine-fact-${ev.id}`,
           });
         }
+        push.logNotif($app, {
+          event: ev.id, type: "wine",
+          title: "🍷 Wein-Fun-Fact: " + f.title,
+          body: f.text || "",
+          url: `/?event=${ev.id}&goto=wine&fact=${idx}`,
+        });
         ev.set("wineFactsSeen", seen.concat([String(idx)]));
         ev.set("wineFactLastAt", new Date().toISOString());
         $app.save(ev);
