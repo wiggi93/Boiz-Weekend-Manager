@@ -28,7 +28,7 @@ import {
   listMlQuestions, createMlQuestion, updateMlQuestion, deleteMlQuestion, listMlVotes, castMlVote,
   getWineFacts, pushWineFact,
   ensurePushSubscription,
-  subscribeEvent, subscribeMyMemberships,
+  subscribeEvent, subscribeMyMemberships, onRealtimeWedge,
 } from './api.js';
 import { MODULES, moduleById, TOOL_MODULES, GAME_MODULES } from './modules.js';
 import { SCHNELLE_FRAGEN } from './schnelleFragenBank.js';
@@ -243,6 +243,11 @@ const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, chal
 
 export default function App() {
   const [booted, setBooted] = useState(false);
+  // Bumping this tears down + rebuilds every realtime subscription. Used to
+  // recover from a wedged HTTP/2 connection (iOS suspends the PWA → the shared
+  // connection the SSE holds open comes back dead, failing every request).
+  const [rtEpoch, setRtEpoch] = useState(0);
+  const hiddenAtRef = useRef(0);
   const [me, setMe] = useState(pb.authStore.record);
   // Email-verification token from the link in the verification mail (?verify=).
   const [verifyToken, setVerifyToken] = useState(() => {
@@ -336,6 +341,9 @@ export default function App() {
   }, []);
 
   useEffect(() => pb.authStore.onChange(() => setMe(pb.authStore.record)), []);
+  // On a network-level failure, the api layer drops the realtime connection;
+  // rebuild all subscriptions so live updates resume on the fresh connection.
+  useEffect(() => { onRealtimeWedge(() => setRtEpoch(e => e + 1)); }, []);
 
   // Web-Push: once logged in with notification permission granted, make sure
   // this device has a push subscription registered (idempotent).
@@ -391,9 +399,12 @@ export default function App() {
   // we were offline (e.g., admin promoted us to host) are picked up.
   useEffect(() => {
     if (pb.authStore.isValid) {
-      pb.collection('users').authRefresh().catch(() => {
-        // token invalid / user deleted → clear so user re-logs
-        pb.authStore.clear();
+      pb.collection('users').authRefresh().catch((e) => {
+        // Only sign out on a DEFINITIVE auth failure (token rejected / user
+        // gone). A transient error — network blip, or the backend restarting
+        // during a deploy — must NOT clear the session, or users get randomly
+        // logged out whenever they open the app mid-deploy.
+        if (e?.status === 401 || e?.status === 403) pb.authStore.clear();
       });
     }
   }, []);
@@ -402,12 +413,12 @@ export default function App() {
   // pull a fresh auth record so the UI flips to host/admin mode immediately.
   useEffect(() => {
     if (!me?.id) return;
-    let unsub;
+    let unsub; let cancelled = false;
     pb.collection('users').subscribe(me.id, () => {
       pb.collection('users').authRefresh().catch(() => {});
-    }).then(fn => { unsub = fn; }).catch(() => {});
-    return () => { if (unsub) unsub(); };
-  }, [me?.id]);
+    }).then(fn => { if (cancelled) { try { fn(); } catch (_) {} } else { unsub = fn; } }).catch(() => {});
+    return () => { cancelled = true; if (unsub) { try { unsub(); } catch (_) {} } };
+  }, [me?.id, rtEpoch]);
 
   const refreshMemberships = useCallback(async () => {
     if (!pb.authStore.isValid) { setMyMemberships([]); return; }
@@ -479,10 +490,10 @@ export default function App() {
 
   useEffect(() => {
     if (!me) return;
-    let unsub;
-    subscribeMyMemberships(() => refreshMemberships()).then(fn => { unsub = fn; });
-    return () => { if (unsub) unsub(); };
-  }, [me, refreshMemberships]);
+    let unsub; let cancelled = false;
+    subscribeMyMemberships(() => refreshMemberships()).then(fn => { if (cancelled) { try { fn(); } catch (_) {} } else { unsub = fn; } });
+    return () => { cancelled = true; if (unsub) { try { unsub(); } catch (_) {} } };
+  }, [me, refreshMemberships, rtEpoch]);
 
   useEffect(() => {
     refreshCurrentEvent();
@@ -678,10 +689,10 @@ export default function App() {
 
   useEffect(() => {
     if (!currentEventId) return;
-    let unsub;
-    subscribeEvent(currentEventId, realtimeHandler).then(fn => { unsub = fn; });
-    return () => { if (unsub) unsub(); };
-  }, [currentEventId, realtimeHandler]);
+    let unsub; let cancelled = false;
+    subscribeEvent(currentEventId, realtimeHandler).then(fn => { if (cancelled) { try { fn(); } catch (_) {} } else { unsub = fn; } });
+    return () => { cancelled = true; if (unsub) { try { unsub(); } catch (_) {} } };
+  }, [currentEventId, realtimeHandler, rtEpoch]);
 
   // Resilience: PocketBase's realtime (SSE) can silently die on mobile —
   // backgrounding the app, a network blip, or a flaky connection — and then a
@@ -702,16 +713,29 @@ export default function App() {
       const now = Date.now();
       if (now - last < 1500) return; // debounce focus/visibility/online storms
       last = now;
+      // Coming back after a real background: the HTTP/2 connection the realtime
+      // SSE keeps open can return wedged (iOS suspend), failing EVERY request.
+      // Drop the SSE so a fresh connection is opened, then rebuild subscriptions.
+      const wasHidden = hiddenAtRef.current && (now - hiddenAtRef.current > 8000);
+      hiddenAtRef.current = 0;
+      if (wasHidden) {
+        try { pb.realtime.unsubscribe(); } catch (_) {}
+        setRtEpoch(e => e + 1);
+      }
       if (pb.authStore.isValid) {
         pb.collection('users').authRefresh().catch(() => {});
       }
       if (eventRef.current?.id) refreshCurrentEvent();
     };
-    document.addEventListener('visibilitychange', onForeground);
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') { hiddenAtRef.current = Date.now(); return; }
+      onForeground();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', onForeground);
     window.addEventListener('online', onForeground);
     return () => {
-      document.removeEventListener('visibilitychange', onForeground);
+      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onForeground);
       window.removeEventListener('online', onForeground);
     };
