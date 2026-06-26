@@ -788,9 +788,14 @@ export default function App() {
     if (view === 'tools' && toolOpen) markSeen(toolOpen);
   }, [view, toolOpen, moduleActivity, markSeen]);
 
-  // Roll-ups for the bottom nav (when you're NOT on that section).
-  const gameModuleIds = ['flunky', 'jeopardy', 'schnelle_fragen', 'schedule', 'challenges', 'wine',
-    ...(customModules || []).map(cm => `cm-${cm.id}`)];
+  // Roll-ups for the bottom nav (when you're NOT on that section). Only count
+  // modules that are actually enabled (i.e. have a visible tab) — otherwise a
+  // disabled module with leftover activity (e.g. an auto-created schedule row)
+  // would flag Home forever, since there's no tab to open and clear it.
+  const gameModuleIds = [
+    ...GAME_MODULES.filter(m => (currentEvent?.modules || []).includes(m.id)).map(m => m.id),
+    ...(customModules || []).map(cm => `cm-${cm.id}`),
+  ];
   const homeUnread = gameModuleIds.some(id => id !== moduleTab && isUnread(id));
   const toolsUnread = ['kitty', 'polls'].some(id => isUnread(id) && !(view === 'tools' && toolOpen === id));
 
@@ -4696,7 +4701,7 @@ function WineView({ me, admin, eventId, event, members, wines, ratings, onCreate
 
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
-  const [sort, setSort] = useState('new'); // 'new' | 'best'
+  const [sort, setSort] = useState('new'); // 'new' | 'alpha' | 'rating'
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(null); // wine id whose raters are shown
 
@@ -4748,17 +4753,32 @@ function WineView({ me, admin, eventId, event, members, wines, ratings, onCreate
     return m;
   }, [ratings]);
 
-  const openWine = (id) => { setExpanded(id); setSort('best'); setTimeout(() => { document.getElementById(`wine-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60); };
+  const openWine = (id) => { setExpanded(id); setSort('rating'); setTimeout(() => { document.getElementById(`wine-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 60); };
+
+  // Rank by a vote-count-aware Bayesian score, not the raw average — so a wine
+  // with one lonely 5★ doesn't outrank one that 10 people rated highly. The
+  // score pulls a wine's average toward the global mean until it has enough
+  // votes (M) to be trusted on its own.
+  const M = 3;
+  const allRatingVals = ratings.map(r => Number(r.rating) || 0);
+  const C = allRatingVals.length ? allRatingVals.reduce((a, b) => a + b, 0) / allRatingVals.length : 0;
+  const wScore = (avg, count) => count > 0 ? (count / (count + M)) * avg + (M / (count + M)) * C : 0;
 
   const enriched = wines.map(w => {
     const s = stats[w.id] || { sum: 0, count: 0, mine: 0 };
-    return { ...w, avg: s.count ? s.sum / s.count : 0, count: s.count, mine: s.mine };
+    const avg = s.count ? s.sum / s.count : 0;
+    return { ...w, avg, count: s.count, mine: s.mine, score: wScore(avg, s.count) };
   });
 
-  const ranked = [...enriched].filter(w => w.count > 0).sort((a, b) => b.avg - a.avg || b.count - a.count);
-  const list = sort === 'best'
-    ? [...enriched].sort((a, b) => b.avg - a.avg || b.count - a.count)
-    : enriched; // already -created (newest first) from the API
+  const ranked = [...enriched].filter(w => w.count > 0).sort((a, b) => b.score - a.score || b.count - a.count);
+  const byRating = (a, b) => {
+    if ((a.count > 0) !== (b.count > 0)) return a.count > 0 ? -1 : 1; // rated wines first
+    if (a.count > 0) return b.score - a.score || b.count - a.count;
+    return (a.name || '').localeCompare(b.name || '', 'de');
+  };
+  const list = sort === 'rating' ? [...enriched].sort(byRating)
+    : sort === 'alpha' ? [...enriched].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'))
+    : enriched; // 'new' — already -created (newest first) from the API
   const rankOf = (id) => ranked.findIndex(w => w.id === id);
 
   const totalWines = wines.length;
@@ -4863,11 +4883,12 @@ function WineView({ me, admin, eventId, event, members, wines, ratings, onCreate
 
       {/* Wine list */}
       <section className="ww-section">
-        <div className="ww-section-head" style={{ justifyContent: 'space-between' }}>
+        <div className="ww-section-head" style={{ justifyContent: 'space-between', flexWrap: 'wrap', rowGap: 8 }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Wine size={16} /><h3 style={{ display: 'inline' }}>ALLE WEINE</h3></span>
           <div className="ww-auth-tabs" style={{ margin: 0, width: 'auto' }}>
             <button className={`ww-auth-tab ${sort === 'new' ? 'active' : ''}`} onClick={() => setSort('new')}>NEUESTE</button>
-            <button className={`ww-auth-tab ${sort === 'best' ? 'active' : ''}`} onClick={() => setSort('best')}>BESTE</button>
+            <button className={`ww-auth-tab ${sort === 'alpha' ? 'active' : ''}`} onClick={() => setSort('alpha')}>A–Z</button>
+            <button className={`ww-auth-tab ${sort === 'rating' ? 'active' : ''}`} onClick={() => setSort('rating')}>RATING</button>
           </div>
         </div>
 
