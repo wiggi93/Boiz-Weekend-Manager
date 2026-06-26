@@ -4811,12 +4811,18 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
       );
     }
     if (c.toUser === me.id) {
+      const pick = (e) => { const f = e.target.files && e.target.files[0]; if (f) onPhoto?.(c.id, f); e.target.value = ''; };
       return (
-        <label className="ww-chal-photo-upload">
-          📸 Fotobeweis hochladen
-          <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
-            onChange={e => { const f = e.target.files && e.target.files[0]; if (f) onPhoto?.(c.id, f); e.target.value = ''; }} />
-        </label>
+        <div className="ww-chal-photo-actions">
+          <label className="ww-chal-photo-upload">
+            📷 Foto machen
+            <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={pick} />
+          </label>
+          <label className="ww-chal-photo-upload">
+            🖼️ Aus Galerie
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={pick} />
+          </label>
+        </div>
       );
     }
     return <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>📸 Wartet auf Fotobeweis…</div>;
