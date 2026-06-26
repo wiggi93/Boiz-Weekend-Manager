@@ -315,6 +315,7 @@ export default function App() {
   const [moduleTab, setModuleTab] = useState('overview');
   const [moduleSettingsOpen, setModuleSettingsOpen] = useState(null); // module id or null
   const [wineFactJump, setWineFactJump] = useState(null); // fact index from a fun-fact push
+  const [challengeJump, setChallengeJump] = useState(null); // challenge id from a challenge push
   const [detailUserId, setDetailUserId] = useState(null);
   const [authView, setAuthView] = useState('login');
   const [lobbyView, setLobbyView] = useState('list');
@@ -381,6 +382,8 @@ export default function App() {
         setView('home'); setModuleTab(goto);
         // Fun-fact push deep-links straight to a specific fact in the wine module.
         if (goto === 'wine' && params.get('fact') != null) setWineFactJump(Number(params.get('fact')));
+        // Challenge push deep-links straight to a specific challenge.
+        if (goto === 'challenges' && params.get('challenge')) setChallengeJump(params.get('challenge'));
       }
       else { setView('home'); setModuleTab('overview'); }
       return true;
@@ -1616,6 +1619,8 @@ export default function App() {
             isUnread={isUnread}
             wineFactJump={wineFactJump}
             onWineFactJumpDone={() => setWineFactJump(null)}
+            challengeJump={challengeJump}
+            onChallengeJumpDone={() => setChallengeJump(null)}
           />
         )}
         {view === 'crew' && (
@@ -2540,7 +2545,7 @@ function HomeView({
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
   onSaveEvent, onShowUserDetail, myOptRef, isUnread = () => false,
-  wineFactJump, onWineFactJumpDone,
+  wineFactJump, onWineFactJumpDone, challengeJump, onChallengeJumpDone,
 }) {
   // 'drinks' is no longer a tab; it lives as the always-visible sticky bar.
   // Games are opt-in per event (modules array); tools are ALWAYS available.
@@ -2635,6 +2640,7 @@ function HomeView({
         <ChallengesView
           me={me} admin={admin} members={members} challenges={challenges} votes={challengeVotes}
           onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete} onVote={onChallengeVote} onPhoto={onChallengePhoto}
+          jump={challengeJump} onJumpDone={onChallengeJumpDone}
         />
       )}
       {moduleTab === 'mostlikely' && (
@@ -4727,7 +4733,7 @@ function ScheduleEntryDrawer({ entry, onSave, onClose, eventDays = [], openEnded
 // Challenges (peer dares for points)
 // ============================================================
 
-function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, onResolve, onDelete, onVote, onPhoto }) {
+function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, onResolve, onDelete, onVote, onPhoto, jump, onJumpDone }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4745,9 +4751,27 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
   const [busy, setBusy] = useState(false);
   const [failingId, setFailingId] = useState(null); // challenge being marked failed
   const [penalty, setPenalty] = useState(3);
+  const [createOpen, setCreateOpen] = useState(false); // create form collapsed by default
+  const [highlightId, setHighlightId] = useState(null); // challenge jumped-to from a push
 
   const active = challenges.filter(c => c.status !== 'done' && c.status !== 'failed');
   const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
+
+  // Open the create form by default only when there's nothing else to look at.
+  useEffect(() => { if (challenges.length === 0) setCreateOpen(true); }, [challenges.length === 0]);
+
+  // Deep-link from a challenge push → scroll to it + highlight briefly.
+  useEffect(() => {
+    if (!jump) return;
+    const t = setTimeout(() => {
+      const el = document.getElementById(`chal-${jump}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightId(jump);
+      setTimeout(() => setHighlightId(null), 2600);
+    }, 120);
+    onJumpDone?.();
+    return () => clearTimeout(t);
+  }, [jump]);
   const textOk = text.trim().length >= 2 && Number(reward) > 0;
   const valid = textOk && others.length > 0 && (mode !== 'single' || toUser);
   const canResolve = (c) => c.fromUser === me.id || admin;
@@ -4829,9 +4853,13 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
 
   return (
     <div className="ww-challenges">
-      <section className="ww-section">
-        <div className="ww-section-head"><Target size={16} /><h3>NEUE CHALLENGE</h3></div>
-        <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
+      <section className="ww-section" style={{ order: 2 }}>
+        <button className="ww-collapse-head" onClick={() => setCreateOpen(o => !o)}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Plus size={16} /><h3 style={{ display: 'inline', margin: 0 }}>NEUE CHALLENGE STELLEN</h3></span>
+          <ChevronRight size={18} style={{ transform: createOpen ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+        </button>
+        {createOpen && (<>
+        <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
           Fordere jemanden heraus. Bei normalen Challenges stimmt die Gruppe ab,
           wie viele Punkte fair sind und ob's geschafft wurde (Mehrheit zählt).
           Geheime Challenges entscheidest nur du.
@@ -4902,11 +4930,12 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
         <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
           {busy ? <span className="ww-spinner" /> : <Target size={20} />}<span>CHALLENGE STELLEN</span>
         </button>
+        </>)}
       </section>
 
       {active.length > 0 && (
-        <section className="ww-section">
-          <div className="ww-section-head"><h3>AKTIV</h3></div>
+        <section className="ww-section ww-chal-active" style={{ order: 1 }}>
+          <div className="ww-section-head"><Target size={16} /><h3>🎯 OFFENE CHALLENGES ({active.length})</h3></div>
           <div className="ww-board">
             {active.map(c => {
               const ptsVotes = votesFor(c.id, 'points');
@@ -4933,7 +4962,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
               // --- Phase 1: vote on the fair point value (non-secret) ---
               if (c.status === 'voting') {
                 return (
-                  <div key={c.id} className="ww-chal-card voting">
+                  <div key={c.id} id={`chal-${c.id}`} className={`ww-chal-card voting ${highlightId === c.id ? 'highlight' : ''}`}>
                     {header}
                     {iAmEligible(c) ? (
                       <div className="ww-chal-vote">
@@ -4969,7 +4998,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
               if (c.status === 'judging') {
                 const lead = dTally.yes > dTally.no ? 'done' : 'failed';
                 return (
-                  <div key={c.id} className="ww-chal-card judging">
+                  <div key={c.id} id={`chal-${c.id}`} className={`ww-chal-card judging ${highlightId === c.id ? 'highlight' : ''}`}>
                     {header}
                     {iAmEligible(c) ? (
                       <div className="ww-chal-vote">
@@ -5006,7 +5035,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
 
               // --- Secret / legacy: proposer (or host) resolves directly ---
               return (
-                <div key={c.id} className="ww-chal-card">
+                <div key={c.id} id={`chal-${c.id}`} className={`ww-chal-card ${highlightId === c.id ? 'highlight' : ''}`}>
                   {header}
                   {canResolve(c) && failingId !== c.id && (
                     <div className="ww-chal-actions">
@@ -5035,11 +5064,11 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
       )}
 
       {resolved.length > 0 && (
-        <section className="ww-section">
+        <section className="ww-section" style={{ order: 3 }}>
           <div className="ww-section-head"><h3>ERLEDIGT</h3></div>
           <div className="ww-board">
             {resolved.map(c => (
-              <div key={c.id} className={`ww-chal-card ${c.status === 'done' ? 'done' : 'failed'}`}>
+              <div key={c.id} id={`chal-${c.id}`} className={`ww-chal-card ${c.status === 'done' ? 'done' : 'failed'} ${highlightId === c.id ? 'highlight' : ''}`}>
                 <div className="ww-chal-top">
                   <span className="ww-chal-who"><b>{uname(c.toUser)}</b>{c.secret && ' 🤫'}</span>
                   <span className={c.status === 'done' ? 'ww-chal-reward' : 'ww-chal-penalty-badge'}>
