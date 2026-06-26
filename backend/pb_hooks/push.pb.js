@@ -40,7 +40,7 @@ onRecordAfterCreateSuccess((e) => {
       push.sendPushToUsers(e.app, [toUser], {
         title: "🎯 Neue Challenge!",
         body: `${fromName}: ${text}`,
-        url: `/?event=${eventId}&goto=challenges`,
+        url: `/?event=${eventId}&goto=challenges&challenge=${rec.id}`,
         tag: `chal-${rec.id}`,
       });
     }
@@ -53,7 +53,7 @@ onRecordAfterCreateSuccess((e) => {
         push.sendPushToUsers(e.app, voters, {
           title: "🗳️ Challenge-Voting",
           body: `${fromName} → ${nameOf(toUser)}: Stimm ab, wie viele Punkte fair sind.`,
-          url: `/?event=${eventId}&goto=challenges`,
+          url: `/?event=${eventId}&goto=challenges&challenge=${rec.id}`,
           tag: `chalvote-${rec.id}`,
         });
       }
@@ -61,7 +61,7 @@ onRecordAfterCreateSuccess((e) => {
         event: eventId, type: "challenge",
         title: "🎯 Neue Challenge",
         body: `${fromName} → ${nameOf(toUser)}: ${text}`,
-        url: `/?event=${eventId}&goto=challenges`,
+        url: `/?event=${eventId}&goto=challenges&challenge=${rec.id}`,
       });
     }
   } catch (err) { console.log("[push] challenge trigger:", err); }
