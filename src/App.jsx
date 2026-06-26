@@ -13,7 +13,7 @@ import {
   login, register, logout, requestPasswordReset, confirmPasswordReset, requestVerification, confirmVerification, broadcastEmail,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
-  loadEventStats, setMyCount, resetEventStats,
+  loadEventStats, setMyCount, setStatsBonus, resetEventStats,
   updateMyProfile, setUserRole, setUserApproved, setUserVerified, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
   getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard, startJeopardyRound,
@@ -235,7 +235,8 @@ const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, chal
   + computeCustomPoints(userId, customModules)
   + computeJeopardyPoints(userId, jeopardy)
   + computeChallengePoints(userId, challenges)
-  + computeMostLikelyPoints(userId, mlQuestions);
+  + computeMostLikelyPoints(userId, mlQuestions)
+  + (Number(s?.bonus) || 0); // manual host adjustment
 
 // ============================================================
 // Root
@@ -540,7 +541,7 @@ export default function App() {
         if (JSON.stringify(recCounts) === JSON.stringify(opt)) return;
         myOptRef.current = { counts: { ...recCounts } };
       }
-      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0, counts: recCounts, log: Array.isArray(rec.log) ? rec.log : (m[rec.user]?.log || []) } }));
+      setStatsMap(m => ({ ...m, [rec.user]: { id: rec.id, beer: rec.beer || 0, mische: rec.mische || 0, counts: recCounts, bonus: Number(rec.bonus) || 0, log: Array.isArray(rec.log) ? rec.log : (m[rec.user]?.log || []) } }));
       return;
     }
 
@@ -1110,6 +1111,14 @@ export default function App() {
     catch (e) { showToast('Fehler 😬'); }
   };
 
+  // ---- Host: manual point adjustment ----
+  const onSetBonus = async (statsId, userId, bonus) => {
+    if (!statsId) { showToast('Keine Stats-Zeile für diesen Spieler'); return; }
+    setStatsMap(m => ({ ...m, [userId]: { ...(m[userId] || {}), bonus } }));
+    try { await setStatsBonus(statsId, bonus); }
+    catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); refreshCurrentEvent(); }
+  };
+
   // ---- Weinwanderung ----
   const onWineCreate = async ({ name, note }) => {
     const clean = (name || '').trim();
@@ -1624,6 +1633,8 @@ export default function App() {
           challenges={challenges}
           mlQuestions={mlQuestions}
           isMe={detailUserId === me.id}
+          admin={admin}
+          onSetBonus={onSetBonus}
           onClose={() => setDetailUserId(null)}
         />
       )}
@@ -5981,7 +5992,7 @@ function MyEventWishes({ membership, onSave, eventName }) {
 // User detail drawer (point breakdown)
 // ============================================================
 
-function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, challenges, mlQuestions, isMe, onClose }) {
+function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, challenges, mlQuestions, isMe, admin, onSetBonus, onClose }) {
   if (!user) return null;
   const evFood = membership?.foodWishes || '';
   const evDrink = membership?.drinkWishes || '';
@@ -6044,8 +6055,10 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
   const jeopardyPts = jeopardyBreakdown.reduce((s, x) => s + x.pts, 0);
   const challengePts = computeChallengePoints(user.id, challenges);
   const mlPts = computeMostLikelyPoints(user.id, mlQuestions);
+  const bonus = Number(stats?.bonus) || 0;
 
-  const total = drinkPts + flunkyPts + customPts + jeopardyPts + challengePts + mlPts;
+  const total = drinkPts + flunkyPts + customPts + jeopardyPts + challengePts + mlPts + bonus;
+  const adjustBonus = (delta) => onSetBonus?.(stats?.id, user.id, bonus + delta);
 
   return (
     <ModuleSettingsDrawer
@@ -6057,6 +6070,24 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
           <div className="ww-detail-total-label">PUNKTE GESAMT</div>
           <div className="ww-detail-total-val">{total}</div>
         </div>
+
+        {admin && onSetBonus && (
+          <div className="ww-detail-section">
+            <div className="ww-detail-section-head">⚖️ HOST: PUNKTE ANPASSEN</div>
+            <div className="ww-bonus-row">
+              {[-5, -1, +1, +5].map(d => (
+                <button key={d} className={`ww-mini-btn ${d < 0 ? 'red' : 'green'}`} onClick={() => adjustBonus(d)}>
+                  {d > 0 ? `+${d}` : d}
+                </button>
+              ))}
+              <span className="ww-bonus-val">Bonus: <b>{bonus > 0 ? `+${bonus}` : bonus}</b></span>
+              {bonus !== 0 && <button className="ww-mini-btn" onClick={() => onSetBonus(stats?.id, user.id, 0)}>Reset</button>}
+            </div>
+          </div>
+        )}
+        {!admin && bonus !== 0 && (
+          <DetailRow label="⚖️ Host-Bonus" pts={bonus} bold />
+        )}
 
         <div className="ww-detail-section">
           <div className="ww-detail-section-head">🍺 GETRÄNKE</div>
