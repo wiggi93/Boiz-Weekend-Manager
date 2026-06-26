@@ -6,15 +6,19 @@
 // officially supported, restart-safe way and avoids touching app settings
 // from code.
 
-// ---- Require verified email for password login --------------------------
-// Verification is REQUIRED by default now that SMTP is configured. Set
-// REQUIRE_EMAIL_VERIFICATION=false on the server to disable (escape hatch in
-// case SMTP breaks). Existing users are grandfathered verified by migration
-// 1748500000, so nobody currently registered gets locked out.
+// ---- Email verification ---------------------------------------------------
+// We no longer block login on an unverified email. Instead the app lets the
+// user sign in and shows a combined onboarding gate (email confirmation AND
+// admin approval, side by side, both required to enter) — so the two can be
+// fulfilled in parallel and the user can see each status. Verification is thus
+// enforced app-side, not by withholding the auth token.
+//
+// Hard-blocking can still be re-enabled by setting REQUIRE_EMAIL_VERIFICATION
+// =true on the server (opt-in escape hatch), e.g. for stricter deployments.
 onRecordAuthWithPasswordRequest((e) => {
   try {
-    const disabled = $os.getenv("REQUIRE_EMAIL_VERIFICATION") === "false";
-    if (!disabled && e.record && !e.record.get("verified")) {
+    const enforce = $os.getenv("REQUIRE_EMAIL_VERIFICATION") === "true";
+    if (enforce && e.record && !e.record.get("verified")) {
       throw new BadRequestError("Bitte bestätige zuerst deine E-Mail-Adresse (Link in deiner Inbox).");
     }
   } catch (err) {

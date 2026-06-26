@@ -2210,3 +2210,16 @@
   margin-top: 8px; font-size: 11px; color: var(--muted);
   font-family: 'IBM Plex Mono', monospace;
 }
+
+/* ============ Onboarding gate (email + approval, parallel) ============ */
+.ww-onb-steps { display: flex; flex-direction: column; gap: 10px; margin: 16px 0 4px; text-align: left; }
+.ww-onb-step {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card-2);
+}
+.ww-onb-step.done { border-color: var(--green, #22c55e); background: rgba(34,197,94,0.08); }
+.ww-onb-step.pending { border-color: var(--amber); background: rgba(245,165,36,0.06); }
+.ww-onb-state { font-size: 20px; line-height: 1.2; flex-shrink: 0; }
+.ww-onb-body { min-width: 0; }
+.ww-onb-head { font-weight: 700; font-size: 14px; }
+.ww-onb-sub { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }

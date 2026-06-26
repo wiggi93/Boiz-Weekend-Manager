@@ -859,6 +859,11 @@ export default function App() {
     throw lastErr;
   };
   const onRegister = async (data) => { await register(data); showToast('Fast fertig — bestätige deine E-Mail 📧'); };
+  // Re-fetch the auth record so the onboarding gate flips to ✓ live when the
+  // email gets confirmed or an admin approves (no manual reload).
+  const refreshAuth = useCallback(async () => {
+    try { await pb.collection('users').authRefresh(); } catch (_) {}
+  }, []);
   const onLogout = () => {
     logout(); setCurrentEventId(null); setMyMemberships([]);
     setView('home'); setLobbyView('list'); setAuthView('login');
@@ -1308,22 +1313,11 @@ export default function App() {
     );
   }
 
-  if (!me.verified) {
+  if (!me.verified || (!me.approved && me.role !== 'admin')) {
     return (
       <div className="ww-app">
         <GrainOverlay />
-        <VerifyEmailScreen me={me} onLogout={onLogout} />
-        {toast && <Toast toast={toast} />}
-        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
-      </div>
-    );
-  }
-
-  if (!me.approved && me.role !== 'admin') {
-    return (
-      <div className="ww-app">
-        <GrainOverlay />
-        <PendingApprovalScreen me={me} onLogout={onLogout} />
+        <OnboardingGate me={me} onLogout={onLogout} onRefresh={refreshAuth} />
         {toast && <Toast toast={toast} />}
         {confirmDlg && <ConfirmDialog {...confirmDlg} />}
       </div>
@@ -1576,44 +1570,66 @@ function BootScreen() {
   );
 }
 
-function PendingApprovalScreen({ me, onLogout }) {
-  return (
-    <div className="ww-pending">
-      <div className="ww-pending-card">
-        <div className="ww-pending-emoji">⏳</div>
-        <h2 className="ww-pending-title">Fast geschafft, {me.displayName || 'Boi'}!</h2>
-        <p className="ww-pending-text">
-          Dein Account wartet auf Freigabe durch einen Admin.
-          Sobald du freigeschaltet bist, geht's los. 🍺
-        </p>
-        <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Abmelden</button>
+// Combined onboarding gate: email confirmation AND admin approval shown side
+// by side, both required, both fulfillable in parallel. Polls the auth record
+// so each flips to ✓ live.
+function OnboardingGate({ me, onLogout, onRefresh }) {
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const needsEmail = !me.verified;
+  const needsApproval = !me.approved && me.role !== 'admin';
+
+  useEffect(() => {
+    const t = setInterval(() => { onRefresh?.(); }, 4000);
+    const onFocus = () => onRefresh?.();
+    window.addEventListener('focus', onFocus);
+    return () => { clearInterval(t); window.removeEventListener('focus', onFocus); };
+  }, [onRefresh]);
+
+  const resend = async () => {
+    setBusy(true); setMsg('');
+    try { await requestVerification(me.email); setMsg('✓ Bestätigungs-Mail erneut verschickt — schau auch im Spam-Ordner.'); }
+    catch (_) { setMsg('Konnte Mail gerade nicht senden — versuch es gleich nochmal.'); }
+    finally { setBusy(false); }
+  };
+
+  const Step = ({ done, icon, head, children }) => (
+    <div className={`ww-onb-step ${done ? 'done' : 'pending'}`}>
+      <span className="ww-onb-state">{done ? '✅' : '⏳'}</span>
+      <div className="ww-onb-body">
+        <div className="ww-onb-head">{icon} {head}</div>
+        <div className="ww-onb-sub">{children}</div>
       </div>
     </div>
   );
-}
 
-function VerifyEmailScreen({ me, onLogout }) {
-  const [msg, setMsg] = useState('');
-  const [busy, setBusy] = useState(false);
-  const resend = async () => {
-    setBusy(true); setMsg('');
-    try { await requestVerification(me.email); setMsg('✓ Bestätigungs-Mail erneut verschickt — schau in deine Inbox (auch Spam).'); }
-    catch (_) { setMsg('Konnte Mail nicht erneut senden.'); }
-    finally { setBusy(false); }
-  };
   return (
     <div className="ww-pending">
       <div className="ww-pending-card">
-        <div className="ww-pending-emoji">📧</div>
-        <h2 className="ww-pending-title">Bestätige deine E-Mail</h2>
-        <p className="ww-pending-text">
-          Wir haben dir einen Link an <b>{me.email}</b> geschickt. Klick ihn an,
-          danach geht's weiter. (Schau auch im Spam-Ordner.)
+        <div className="ww-pending-emoji">🎉</div>
+        <h2 className="ww-pending-title">Fast geschafft, {me.displayName || 'Boi'}!</h2>
+        <p className="ww-pending-text">Zwei Dinge fehlen noch — beides läuft parallel:</p>
+
+        <div className="ww-onb-steps">
+          <Step done={!needsEmail} icon="📧" head="E-Mail bestätigen">
+            {needsEmail ? <>Link an <b>{me.email}</b> — klick ihn an.</> : 'Bestätigt.'}
+          </Step>
+          <Step done={!needsApproval} icon="🛡️" head="Admin-Freigabe">
+            {needsApproval ? 'Ein Admin muss dich noch freischalten.' : 'Freigegeben.'}
+          </Step>
+        </div>
+
+        {needsEmail && (
+          <>
+            {msg && <div className={msg.startsWith('✓') ? 'ww-notif-banner-ok' : 'ww-err'}>{msg}</div>}
+            <button className="ww-big-cta" onClick={resend} disabled={busy} style={{ marginTop: 8 }}>
+              {busy ? <span className="ww-spinner" /> : <Mail size={18} />}<span>MAIL ERNEUT SENDEN</span>
+            </button>
+          </>
+        )}
+        <p className="ww-pending-text" style={{ fontSize: 12, marginTop: 12, opacity: 0.8 }}>
+          Sobald beides ✅ ist, geht's automatisch los — die Seite aktualisiert sich selbst.
         </p>
-        {msg && <div className={msg.startsWith('✓') ? 'ww-notif-banner-ok' : 'ww-err'}>{msg}</div>}
-        <button className="ww-big-cta" onClick={resend} disabled={busy} style={{ marginTop: 4 }}>
-          {busy ? <span className="ww-spinner" /> : <Mail size={18} />}<span>MAIL ERNEUT SENDEN</span>
-        </button>
         <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Abmelden</button>
       </div>
     </div>
