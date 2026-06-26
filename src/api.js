@@ -26,10 +26,12 @@ export async function register({ email, password, displayName, emoji }) {
     email, password, passwordConfirm: password,
     displayName, emoji,
   });
-  // Fire off a verification email. Do NOT auto-login: verification is required
-  // before the account can sign in, so we leave the user logged out and let the
-  // UI tell them to confirm via the link first.
+  // Fire off the verification email.
   try { await pb.collection('users').requestVerification(email); } catch (_) {}
+  // Auto sign-in so the app can show the combined onboarding gate (email +
+  // approval, in parallel). Best-effort: if a stricter deployment still blocks
+  // unverified logins, we just fall back to the manual "confirm then log in".
+  try { await pb.collection('users').authWithPassword(email, password); } catch (_) {}
   return { needsVerification: true, email };
 }
 
