@@ -174,6 +174,18 @@ export async function setUserApproved(userId, approved) {
   return pb.collection('users').update(userId, { approved });
 }
 
+// Manually verify a user's email (admin escape hatch — `verified` is a PB
+// system field, so this goes through a backend route that uses $app.save()).
+export async function setUserVerified(userId, verified) {
+  const res = await fetch(`${PB_URL}/api/admin/set-verified`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ userId, verified }),
+  });
+  if (!res.ok) throw new Error(`set-verified failed (${res.status})`);
+  return res.json();
+}
+
 export async function deleteUser(userId) {
   return pb.collection('users').delete(userId);
 }

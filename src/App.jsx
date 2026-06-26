@@ -14,7 +14,7 @@ import {
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
-  updateMyProfile, setUserRole, setUserApproved, deleteUser, loadAllUsers,
+  updateMyProfile, setUserRole, setUserApproved, setUserVerified, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
   getJeopardy, updateJeopardy, ensureJeopardy, generateJeopardyBoard, startJeopardyRound,
   listCustomModules, createCustomModule, updateCustomModule, deleteCustomModule,
@@ -1369,6 +1369,17 @@ export default function App() {
               await refreshAllUsers();
             }
           }}
+          onSetUserVerified={async (id, verified) => {
+            setAllUsers(prev => prev.map(u => u.id === id ? { ...u, verified } : u));
+            try {
+              await setUserVerified(id, verified);
+              showToast(verified ? 'E-Mail manuell verifiziert ✓' : 'Verifizierung entzogen');
+              await refreshAllUsers();
+            } catch (e) {
+              showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`);
+              await refreshAllUsers();
+            }
+          }}
           onDeleteUser={async (id) => {
             if (!await appConfirm('User wirklich löschen? Gilt global, alle Events.', { title: 'User löschen?' })) return;
             try {
@@ -1803,7 +1814,7 @@ function RegisterForm({ onSubmit, onGoLogin }) {
 
 function Lobby({
   me, memberships, allEvents, allUsers, view, setView, onPick, onJoin, onCreate,
-  onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser, onSetUserApproved,
+  onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser, onSetUserApproved, onSetUserVerified,
 }) {
   const siteAdmin = isSiteAdmin(me);
   const canCreate = isHost(me);
@@ -1865,7 +1876,7 @@ function Lobby({
               <AdminAllEvents events={allEvents} onPick={onPick} onDelete={onDeleteEvent} onToggleActive={onToggleActiveAdmin} />
             )}
             {view === 'users' && siteAdmin && (
-              <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} onSetApproved={onSetUserApproved} />
+              <AdminAllUsers me={me} users={allUsers} onSetRole={onSetUserRole} onDelete={onDeleteUser} onSetApproved={onSetUserApproved} onSetVerified={onSetUserVerified} />
             )}
           </>
         )}
@@ -1875,7 +1886,7 @@ function Lobby({
   );
 }
 
-function AdminAllUsers({ me, users, onSetRole, onDelete, onSetApproved }) {
+function AdminAllUsers({ me, users, onSetRole, onDelete, onSetApproved, onSetVerified }) {
   if (users.length === 0) return <p className="ww-muted">Lade…</p>;
   const others = users.filter(u => u.id !== me.id);
   const pending = others.filter(u => !u.approved && u.role !== 'admin');
@@ -1905,6 +1916,11 @@ function AdminAllUsers({ me, users, onSetRole, onDelete, onSetApproved }) {
             >{r[0].toUpperCase()}</button>
           ))}
         </div>
+      )}
+      {!u.verified && onSetVerified && (
+        <button className="ww-mini-btn" onClick={() => onSetVerified(u.id, true)} title="E-Mail manuell verifizieren">
+          <Mail size={12} /> ✓
+        </button>
       )}
       <button className="ww-mini-btn red" onClick={() => onDelete(u.id)} title="User löschen"><X size={12} /></button>
     </div>
