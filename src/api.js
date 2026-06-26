@@ -41,6 +41,12 @@ export async function requestPasswordReset(email) {
   return pb.collection('users').requestPasswordReset(email);
 }
 
+// Confirm a password reset (token from the link in the reset mail, which we
+// point at the app via ?reset=). Public — the token is the auth.
+export async function confirmPasswordReset(token, password, passwordConfirm) {
+  return pb.collection('users').confirmPasswordReset(token, password, passwordConfirm);
+}
+
 export async function requestVerification(email) {
   return pb.collection('users').requestVerification(email);
 }
