@@ -48,7 +48,39 @@ function appConfirm(msg, opts = {}) {
   });
 }
 
-const EMOJI_AVATARS = ['🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘'];
+const EMOJI_AVATARS = [
+  // Originals first so existing users keep their pick near the top
+  '🦁','🐻','🐺','🦊','🐯','🦅','🦍','🐂','🐉','🦈','⚔️','🔥','💪','🍺','🎸','🏍️','⚡','💀','🍻','🐗','🐲','🥃','🎯','🤘',
+  // More beasts
+  '🐸','🦖','🦕','🦏','🐊','🦂','🐙','🦉','🦇','🐍','🐢','🦦','🦡','🐘','🦒','🦬','🐅','🦌','🐎','🦅',
+  // Characters / party
+  '👑','🛡️','🏆','🚀','🛸','👽','🤖','👾','🧙','🥷','🧛','🦸','🦹','🤠','🎃','🤡','👻','🌟','💥','🌈',
+  // Vibes / genuss
+  '🍷','🥂','🍾','🥁','🎮','🃏','🎲','🎺','🌶️','🧨',
+];
+
+// Avatar grid that collapses to a first row or two, with a "mehr/weniger"
+// toggle so the long list doesn't dominate the form. Auto-expands if the
+// current pick lives in the hidden tail.
+const AVATAR_COLLAPSED = 18;
+function EmojiAvatarPicker({ value, onPick }) {
+  const [expanded, setExpanded] = useState(() => !EMOJI_AVATARS.slice(0, AVATAR_COLLAPSED).includes(value));
+  const shown = expanded ? EMOJI_AVATARS : EMOJI_AVATARS.slice(0, AVATAR_COLLAPSED);
+  return (
+    <>
+      <div className="ww-emoji-grid">
+        {shown.map(e => (
+          <button key={e} type="button" className={`ww-emoji-btn ${value === e ? 'sel' : ''}`} onClick={() => onPick(e)}>{e}</button>
+        ))}
+      </div>
+      {EMOJI_AVATARS.length > AVATAR_COLLAPSED && (
+        <button type="button" className="ww-text-btn" style={{ marginTop: 4 }} onClick={() => setExpanded(x => !x)}>
+          {expanded ? '▲ Weniger' : `▼ Mehr Avatare (${EMOJI_AVATARS.length - AVATAR_COLLAPSED})`}
+        </button>
+      )}
+    </>
+  );
+}
 
 // Pickable icons for custom competition modules. Bias toward sport / game / bar themes.
 const MODULE_ICONS = ['🎯','🎳','🎱','🏓','🏐','🏀','⚽','🎾','🏈','🥏','🥅','🏑','🏏','🏌️','🎮','🎲','🃏','🧠','🚣','🧗','🏇','🏎️','🛹','🚴','🏹','🪁','🥊','🥋','🍻','🍺','🥃','🔥'];
@@ -1740,14 +1772,7 @@ function RegisterForm({ onSubmit, onGoLogin }) {
       <label className="ww-label">DEIN NAME</label>
       <input className="ww-input" placeholder="z.B. Max" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} />
       <label className="ww-label">AVATAR</label>
-      <div className="ww-emoji-grid">
-        {EMOJI_AVATARS.map(e => (
-          <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
-        ))}
-      </div>
-      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
-        Essens- & Getränke-Wünsche trägst du später pro Event im Crew-Tab ein.
-      </p>
+      <EmojiAvatarPicker value={emoji} onPick={setEmoji} />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} onClick={submit} disabled={!valid || busy}>
         {busy ? <span className="ww-spinner" /> : <UserPlus size={20} />}<span>{busy ? 'ERSTELLE…' : 'SQUAD BEITRETEN'}</span>
@@ -5966,16 +5991,8 @@ function ProfileView({ me, onSave, onLogout }) {
       <label className="ww-label">NAME</label>
       <input className="ww-input" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={20} />
       <label className="ww-label">AVATAR</label>
-      <div className="ww-emoji-grid">
-        {EMOJI_AVATARS.map(e => (
-          <button key={e} className={`ww-emoji-btn ${emoji === e ? 'sel' : ''}`} onClick={() => setEmoji(e)}>{e}</button>
-        ))}
-      </div>
-      <div className="ww-profile-hint">
-        Essens- & Getränke-Wünsche setzt du pro Event im <b>Crew</b>-Tab des
-        jeweiligen Events.
-      </div>
-      <button className={`ww-big-cta ${dirty ? '' : 'disabled'}`} disabled={!dirty}
+      <EmojiAvatarPicker value={emoji} onPick={setEmoji} />
+      <button className={`ww-big-cta ${dirty ? '' : 'disabled'}`} disabled={!dirty} style={{ marginTop: 16 }}
         onClick={() => onSave({ displayName: displayName.trim(), emoji })}>
         <Check size={20} /><span>SPEICHERN</span>
       </button>
