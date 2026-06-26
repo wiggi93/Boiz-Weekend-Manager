@@ -2223,3 +2223,8 @@
 .ww-onb-body { min-width: 0; }
 .ww-onb-head { font-weight: 700; font-size: 14px; }
 .ww-onb-sub { font-size: 12px; color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+
+/* Host manual point adjustment (user detail) */
+.ww-bonus-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ww-bonus-val { font-size: 13px; color: var(--muted); margin-left: 4px; }
+.ww-bonus-val b { color: var(--amber); font-family: 'IBM Plex Mono', monospace; }

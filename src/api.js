@@ -182,12 +182,18 @@ export async function updateMembership(memberRecordId, patch) {
 export async function loadEventStats(eventId) {
   const list = await pb.collection('stats').getFullList({ filter: `event="${eventId}"` });
   const map = {};
-  for (const s of list) map[s.user] = { id: s.id, beer: s.beer || 0, mische: s.mische || 0, counts: (s.counts && typeof s.counts === 'object') ? s.counts : {}, log: Array.isArray(s.log) ? s.log : [] };
+  for (const s of list) map[s.user] = { id: s.id, beer: s.beer || 0, mische: s.mische || 0, counts: (s.counts && typeof s.counts === 'object') ? s.counts : {}, bonus: Number(s.bonus) || 0, log: Array.isArray(s.log) ? s.log : [] };
   return map;
 }
 
 export async function setMyCount(statsId, vals) {
   return pb.collection('stats').update(statsId, vals);
+}
+
+// Host sets a participant's manual bonus (signed). Allowed by the stats rule
+// for event hosts / site admins.
+export async function setStatsBonus(statsId, bonus) {
+  return pb.collection('stats').update(statsId, { bonus: Number(bonus) || 0 });
 }
 
 export async function resetEventStats(eventId) {
