@@ -2290,3 +2290,7 @@
   0%, 100% { box-shadow: none; border-color: var(--border); }
   15%, 60% { box-shadow: 0 0 0 3px rgba(245,165,36,0.35); border-color: var(--amber); }
 }
+
+/* Photo proof: camera vs gallery options side by side */
+.ww-chal-photo-actions { display: flex; gap: 8px; margin-top: 10px; }
+.ww-chal-photo-actions .ww-chal-photo-upload { margin-top: 0; flex: 1; padding: 12px; }

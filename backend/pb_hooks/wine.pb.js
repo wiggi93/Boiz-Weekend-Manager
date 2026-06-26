@@ -36,7 +36,7 @@ routerAdd("POST", "/api/wine/fact-push", (e) => {
     if (members.length) {
       const body = (f.text || "").length > 130 ? (f.text.slice(0, 127) + "…") : (f.text || "");
       push.sendPushToUsers(e.app, members, {
-        title: "🍷 Wein-Fun-Fact: " + f.title,
+        title: "🍷 Spontaner Wein-Fact: " + f.title,
         body: body,
         url: `/?event=${data.eventId}&goto=wine&fact=${idx}`,
         tag: `wine-fact-${data.eventId}`,
@@ -44,7 +44,7 @@ routerAdd("POST", "/api/wine/fact-push", (e) => {
     }
     push.logNotif(e.app, {
       event: data.eventId, type: "wine",
-      title: "🍷 Wein-Fun-Fact: " + f.title,
+      title: "🍷 Spontaner Wein-Fact: " + f.title,
       body: f.text || "",
       url: `/?event=${data.eventId}&goto=wine&fact=${idx}`,
     });
@@ -92,7 +92,7 @@ cronAdd("wine-funfact", "0 * * * *", () => {
         if (members.length) {
           const body = (f.text || "").length > 130 ? (f.text.slice(0, 127) + "…") : (f.text || "");
           push.sendPushToUsers($app, members, {
-            title: "🍷 Wein-Fun-Fact: " + f.title,
+            title: "🍷 Wein-Fact der Stunde: " + f.title,
             body: body,
             url: `/?event=${ev.id}&goto=wine&fact=${idx}`,
             tag: `wine-fact-${ev.id}`,
@@ -100,7 +100,7 @@ cronAdd("wine-funfact", "0 * * * *", () => {
         }
         push.logNotif($app, {
           event: ev.id, type: "wine",
-          title: "🍷 Wein-Fun-Fact: " + f.title,
+          title: "🍷 Wein-Fact der Stunde: " + f.title,
           body: f.text || "",
           url: `/?event=${ev.id}&goto=wine&fact=${idx}`,
         });
