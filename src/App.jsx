@@ -35,6 +35,7 @@ import { SCHNELLE_FRAGEN } from './schnelleFragenBank.js';
 import { flagEmoji, isFlagsCategory, pickFlagRound } from './flagsBank.js';
 import { pickCompliment } from './compliments.js';
 import { randomChallenge } from './challengeBank.js';
+import { randomMostLikely } from './mostLikelyBank.js';
 import './App.css';
 
 // ---- Confirm singleton (no prop drilling) ----
@@ -1096,6 +1097,14 @@ export default function App() {
       showToast('Frage gestellt 🤔');
     } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
   };
+  // Start a round: create several questions at once.
+  const onMlCreateBatch = async (texts, points) => {
+    try {
+      const recs = await Promise.all((texts || []).map(t => createMlQuestion({ eventId: currentEventId, text: t, points })));
+      setMlQuestions(prev => [...recs.reverse(), ...prev]);
+      showToast(`Runde gestartet — ${recs.length} Fragen 🤔`);
+    } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
+  };
   const onMlVote = async (questionId, targetId) => {
     const meId = me.id;
     // Optimistic: reflect my vote immediately.
@@ -1542,7 +1551,7 @@ export default function App() {
             onChallengeVote={onChallengeVote}
             onChallengePhoto={onChallengePhoto}
             mlQuestions={mlQuestions} mlVotes={mlVotes}
-            onMlCreate={onMlCreate} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
+            onMlCreate={onMlCreate} onMlCreateBatch={onMlCreateBatch} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
             wines={wines} wineRatings={wineRatings}
             onWineCreate={onWineCreate} onWineDelete={onWineDelete} onWineRate={onWineRate}
             customModules={customModules}
@@ -2403,7 +2412,7 @@ function HomeView({
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
   challenges, challengeVotes, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote, onChallengePhoto,
-  mlQuestions, mlVotes, onMlCreate, onMlVote, onMlPatch, onMlDelete,
+  mlQuestions, mlVotes, onMlCreate, onMlCreateBatch, onMlVote, onMlPatch, onMlDelete,
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
   modules, onToggleModule, moduleTab, setModuleTab, moduleSettingsOpen, setModuleSettingsOpen,
@@ -2509,7 +2518,7 @@ function HomeView({
         <MostLikelyView
           me={me} admin={admin} active={event.active} members={members}
           questions={mlQuestions} votes={mlVotes}
-          onCreate={onMlCreate} onVote={onMlVote} onPatch={onMlPatch} onDelete={onMlDelete}
+          onCreate={onMlCreate} onCreateBatch={onMlCreateBatch} onVote={onMlVote} onPatch={onMlPatch} onDelete={onMlDelete}
         />
       )}
       {moduleTab === 'wine' && (
@@ -4938,7 +4947,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
 // Wer würde eher — pose questions, everyone votes, most votes wins points
 // ============================================================
 
-function MostLikelyView({ me, admin, active, members, questions, votes, onCreate, onVote, onPatch, onDelete }) {
+function MostLikelyView({ me, admin, active, members, questions, votes, onCreate, onCreateBatch, onVote, onPatch, onDelete }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4946,6 +4955,8 @@ function MostLikelyView({ me, admin, active, members, questions, votes, onCreate
   }, [members]);
   const participants = members.map(m => m.expand?.user).filter(Boolean);
 
+  const [mode, setMode] = useState('round'); // 'round' (random batch) | 'custom'
+  const [roundCount, setRoundCount] = useState(5);
   const [text, setText] = useState('');
   const [points, setPoints] = useState(2);
   const [busy, setBusy] = useState(false);
@@ -4969,13 +4980,22 @@ function MostLikelyView({ me, admin, active, members, questions, votes, onCreate
   const submit = async () => {
     if (text.trim().length < 4) return;
     setBusy(true);
-    try { await onCreate({ text: text.trim(), points: Number(points) || 2 }); setText(''); setPoints(2); }
+    try { await onCreate({ text: text.trim(), points: Number(points) || 2 }); setText(''); }
     finally { setBusy(false); }
+  };
+  const startRound = async () => {
+    setBusy(true);
+    try {
+      const existing = questions.map(q => q.text);
+      const qs = randomMostLikely(Number(roundCount) || 5, existing);
+      await onCreateBatch?.(qs, Number(points) || 2);
+    } finally { setBusy(false); }
   };
   const closeQ = (q) => { const l = leaderOf(q.id); onPatch(q.id, { closed: true, winnerId: l.tie ? '' : (l.id || '') }); };
 
   const open = questions.filter(q => !q.closed);
   const closed = questions.filter(q => q.closed);
+  const closeAll = () => { open.forEach(q => closeQ(q)); };
   const valid = text.trim().length >= 4 && Number(points) > 0;
 
   return (
@@ -4983,18 +5003,48 @@ function MostLikelyView({ me, admin, active, members, questions, votes, onCreate
       <section className="ww-section">
         <div className="ww-section-head"><span style={{ fontSize: 16 }}>🤔</span><h3>WER WÜRDE EHER…?</h3></div>
         <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
-          Stell eine Frage — alle stimmen für eine Person ab. Wer die meisten
-          Stimmen kriegt, gewinnt die Punkte.
+          Startet eine Runde mit mehreren Fragen auf einmal — alle stimmen ab,
+          am Ende wertet ihr die ganze Runde zusammen aus.
         </p>
-        <textarea className="ww-textarea" rows={2} maxLength={200} value={text}
-          onChange={e => setText(e.target.value)} placeholder="z.B. Wer würde am ehesten im Knast landen?" />
-        <label className="ww-label">PUNKTE FÜR DEN GEWINNER</label>
-        <input className="ww-input" type="number" inputMode="numeric" min={1} max={50}
-          value={points} onChange={e => setPoints(e.target.value)} />
-        <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
-          {busy ? <span className="ww-spinner" /> : <span style={{ fontSize: 18 }}>🤔</span>}<span>FRAGE STELLEN</span>
-        </button>
+        <div className="ww-auth-tabs" style={{ marginTop: 4 }}>
+          <button className={`ww-auth-tab ${mode === 'round' ? 'active' : ''}`} onClick={() => setMode('round')}>🎲 ZUFALLSRUNDE</button>
+          <button className={`ww-auth-tab ${mode === 'custom' ? 'active' : ''}`} onClick={() => setMode('custom')}>✏️ EIGENE FRAGE</button>
+        </div>
+
+        {mode === 'round' ? (
+          <>
+            <label className="ww-label">WIE VIELE FRAGEN?</label>
+            <div className="ww-chal-chips">
+              {[3, 5, 8, 12].map(n => (
+                <button key={n} className={`ww-chal-chip ${Number(roundCount) === n ? 'sel' : ''}`} onClick={() => setRoundCount(n)}>{n}</button>
+              ))}
+            </div>
+            <label className="ww-label">PUNKTE PRO FRAGE</label>
+            <input className="ww-input" type="number" inputMode="numeric" min={1} max={50}
+              value={points} onChange={e => setPoints(e.target.value)} />
+            <button className={`ww-big-cta ${!busy ? '' : 'disabled'}`} disabled={busy} onClick={startRound}>
+              {busy ? <span className="ww-spinner" /> : <span style={{ fontSize: 18 }}>🎲</span>}<span>ZUFALLSRUNDE STARTEN ({roundCount})</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <textarea className="ww-textarea" rows={2} maxLength={200} value={text}
+              onChange={e => setText(e.target.value)} placeholder="z.B. Wer würde am ehesten im Knast landen?" />
+            <label className="ww-label">PUNKTE FÜR DEN GEWINNER</label>
+            <input className="ww-input" type="number" inputMode="numeric" min={1} max={50}
+              value={points} onChange={e => setPoints(e.target.value)} />
+            <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
+              {busy ? <span className="ww-spinner" /> : <span style={{ fontSize: 18 }}>🤔</span>}<span>FRAGE STELLEN</span>
+            </button>
+          </>
+        )}
       </section>
+
+      {open.length > 1 && admin && (
+        <button className="ww-big-cta green" style={{ marginTop: 0 }} onClick={closeAll}>
+          <Check size={20} /><span>GANZE RUNDE AUSWERTEN ({open.length})</span>
+        </button>
+      )}
 
       {open.length === 0 && closed.length === 0 && (
         <div className="ww-empty">Noch keine Fragen — stell die erste! 🤔</div>
