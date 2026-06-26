@@ -28,6 +28,24 @@ onRecordAuthWithPasswordRequest((e) => {
   e.next();
 }, "users");
 
+// ---- Fix the verification link --------------------------------------------
+// PocketBase's default verification email points at {APP_URL}/_/#/auth/confirm-
+// verification/{TOKEN} — i.e. the PB Admin dashboard, which this deployment
+// only serves as an empty shell (blank page). Rewrite the link so it lands on
+// the actual app, which confirms the token itself (see ?verify= handling in
+// the frontend). Override the target with APP_FRONTEND_URL if needed.
+onMailerRecordVerificationSend((e) => {
+  try {
+    const front = ($os.getenv("APP_FRONTEND_URL") || "https://boiz.dr-disco.eu").replace(/\/$/, "");
+    const re = /https?:\/\/[^/"'\s]+\/_\/#\/auth\/confirm-verification\//gi;
+    if (e.message) {
+      if (e.message.html) e.message.html = e.message.html.replace(re, front + "/?verify=");
+      if (e.message.text) e.message.text = e.message.text.replace(re, front + "/?verify=");
+    }
+  } catch (err) { console.log("[mail] verify-link rewrite:", err); }
+  e.next();
+});
+
 // ---- Host broadcast: email every member of an event ---------------------
 // POST /api/broadcast  { eventId, subject, body }
 // Only site admin / event creator / event-host may send.

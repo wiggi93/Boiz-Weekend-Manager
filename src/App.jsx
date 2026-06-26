@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
-  login, register, logout, requestPasswordReset, requestVerification, broadcastEmail,
+  login, register, logout, requestPasswordReset, requestVerification, confirmVerification, broadcastEmail,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
   loadEventStats, setMyCount, resetEventStats,
@@ -244,6 +244,10 @@ const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, chal
 export default function App() {
   const [booted, setBooted] = useState(false);
   const [me, setMe] = useState(pb.authStore.record);
+  // Email-verification token from the link in the verification mail (?verify=).
+  const [verifyToken, setVerifyToken] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('verify') || null; } catch { return null; }
+  });
   const [myMemberships, setMyMemberships] = useState([]);
   const [currentEventId, setCurrentEventId] = useState(null);
   const [currentEvent, setCurrentEvent] = useState(null);
@@ -1302,6 +1306,23 @@ export default function App() {
   // ---- Render ----
   if (!booted) return <BootScreen />;
 
+  // Email-verification link landed here (?verify=…) — confirm it in-app.
+  if (verifyToken) {
+    return (
+      <div className="ww-app">
+        <GrainOverlay />
+        <VerifyConfirmScreen
+          token={verifyToken}
+          loggedIn={!!me}
+          onRefresh={refreshAuth}
+          onDone={() => { setVerifyToken(null); try { window.history.replaceState({}, '', window.location.pathname); } catch (_) {} }}
+        />
+        {toast && <Toast toast={toast} />}
+        {confirmDlg && <ConfirmDialog {...confirmDlg} />}
+      </div>
+    );
+  }
+
   if (!me) {
     return (
       <div className="ww-app">
@@ -1642,6 +1663,54 @@ function OnboardingGate({ me, onLogout, onRefresh }) {
           Sobald beides ✅ ist, geht's automatisch los — die Seite aktualisiert sich selbst.
         </p>
         <button className="ww-text-btn" onClick={onLogout}><LogOut size={14} /> Abmelden</button>
+      </div>
+    </div>
+  );
+}
+
+// Confirms an email-verification token in-app (the mail link lands here via
+// ?verify=…), so it works without the PocketBase dashboard.
+function VerifyConfirmScreen({ token, loggedIn, onRefresh, onDone }) {
+  const [state, setState] = useState('pending'); // 'pending' | 'ok' | 'err'
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await confirmVerification(token);
+        if (!alive) return;
+        setState('ok');
+        if (loggedIn) { try { await onRefresh?.(); } catch (_) {} }
+      } catch (_) { if (alive) setState('err'); }
+    })();
+    return () => { alive = false; };
+  }, [token]);
+
+  return (
+    <div className="ww-pending">
+      <div className="ww-pending-card">
+        {state === 'pending' && (<>
+          <div className="ww-pending-emoji">⏳</div>
+          <h2 className="ww-pending-title">E-Mail wird bestätigt…</h2>
+        </>)}
+        {state === 'ok' && (<>
+          <div className="ww-pending-emoji">✅</div>
+          <h2 className="ww-pending-title">E-Mail bestätigt!</h2>
+          <p className="ww-pending-text">
+            {loggedIn
+              ? 'Geschafft — sobald auch die Admin-Freigabe da ist, geht’s automatisch los.'
+              : 'Du kannst dich jetzt einloggen.'}
+          </p>
+          <button className="ww-big-cta" onClick={onDone}><Check size={18} /><span>WEITER</span></button>
+        </>)}
+        {state === 'err' && (<>
+          <div className="ww-pending-emoji">⚠️</div>
+          <h2 className="ww-pending-title">Link ungültig oder abgelaufen</h2>
+          <p className="ww-pending-text">
+            Der Bestätigungslink ist abgelaufen oder wurde schon benutzt. Log dich
+            ein und fordere im nächsten Schritt eine neue Mail an.
+          </p>
+          <button className="ww-big-cta" onClick={onDone}><span>WEITER</span></button>
+        </>)}
       </div>
     </div>
   );

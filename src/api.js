@@ -45,6 +45,12 @@ export async function requestVerification(email) {
   return pb.collection('users').requestVerification(email);
 }
 
+// Confirm an email-verification token (from the link in the verification mail,
+// which we point at the app via ?verify=). Public — the token is the auth.
+export async function confirmVerification(token) {
+  return pb.collection('users').confirmVerification(token);
+}
+
 // Host broadcast: email every member of an event.
 export async function broadcastEmail(eventId, subject, body) {
   const res = await fetch(`${PB_URL}/api/broadcast`, {
