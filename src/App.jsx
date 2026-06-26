@@ -23,6 +23,7 @@ import {
   getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
   listChallenges, createChallenge, updateChallenge, deleteChallenge,
+  listChallengeVotes, castChallengeVote,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
   listMlQuestions, createMlQuestion, updateMlQuestion, deleteMlQuestion, listMlVotes, castMlVote,
   getWineFacts, pushWineFact,
@@ -246,6 +247,7 @@ export default function App() {
   const [polls, setPolls] = useState([]);
   const [pollVotes, setPollVotes] = useState([]);
   const [challenges, setChallenges] = useState([]);
+  const [challengeVotes, setChallengeVotes] = useState([]);
   const [wines, setWines] = useState([]);
   const [wineRatings, setWineRatings] = useState([]);
   const [mlQuestions, setMlQuestions] = useState([]);
@@ -375,7 +377,7 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setChallengeVotes([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]);
       return;
     }
     // Fetch the event first. ONLY a genuinely missing event (404) kicks the
@@ -392,7 +394,7 @@ export default function App() {
     // Sub-fetches: each tolerates its own failure, never resets the event.
     const safe = (p, fallback) => p.catch(() => fallback);
     try {
-      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, wn, wr, mq, mv] = await Promise.all([
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, cvotes, wn, wr, mq, mv] = await Promise.all([
         safe(listEventMembers(currentEventId), []),
         safe(loadEventStats(currentEventId), {}),
         safe(getFlunky(currentEventId), null),
@@ -404,6 +406,7 @@ export default function App() {
         safe(listPolls(currentEventId), []),
         safe(listPollVotes(currentEventId), []),
         safe(listChallenges(currentEventId), []),
+        safe(listChallengeVotes(currentEventId), []),
         safe(listWines(currentEventId), []),
         safe(listWineRatings(currentEventId), []),
         safe(listMlQuestions(currentEventId), []),
@@ -411,7 +414,7 @@ export default function App() {
       ]);
       setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
-      setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch);
+      setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch); setChallengeVotes(cvotes);
       setWines(wn); setWineRatings(wr); setMlQuestions(mq); setMlVotes(mv);
     } catch (e) {
       console.warn('refreshCurrentEvent sub-fetch', e);
@@ -566,6 +569,12 @@ export default function App() {
         if (idx === -1) return [rec, ...prev];
         const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
       });
+      return;
+    }
+
+    if (collection === 'challenge_votes') {
+      const eid = eventRef.current?.id;
+      if (eid) listChallengeVotes(eid).then(setChallengeVotes).catch(() => {});
       return;
     }
 
@@ -744,7 +753,7 @@ export default function App() {
       jeopardy: jeopardy?.updated || '',
       schnelle_fragen: schnelleFragen?.updated || '',
       schedule: schedule?.updated || '',
-      challenges: maxUpd(challenges),
+      challenges: [maxUpd(challenges), maxUpd(challengeVotes)].sort().pop() || '',
       mostlikely: [maxUpd(mlQuestions), maxUpd(mlVotes)].sort().pop() || '',
       wine: [maxUpd(wines), maxUpd(wineRatings)].sort().pop() || '',
       kitty: kitty?.updated || '',
@@ -752,7 +761,7 @@ export default function App() {
     };
     for (const cm of (customModules || [])) act[`cm-${cm.id}`] = cm.updated || '';
     return act;
-  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, mlQuestions, mlVotes, wines, wineRatings, kitty, polls, customModules]);
+  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, challengeVotes, mlQuestions, mlVotes, wines, wineRatings, kitty, polls, customModules]);
   const moduleActivityRef = useRef(moduleActivity);
   useEffect(() => { moduleActivityRef.current = moduleActivity; }, [moduleActivity]);
 
@@ -988,6 +997,18 @@ export default function App() {
     if (!(await appConfirm('Challenge wirklich löschen?'))) return;
     try { await deleteChallenge(id); setChallenges(prev => prev.filter(c => c.id !== id)); showToast('Challenge gelöscht'); }
     catch (e) { showToast('Fehler 😬'); }
+  };
+  const onChallengeVote = async (challengeId, phase, value) => {
+    const meId = me.id;
+    // Optimistic: reflect my vote immediately.
+    setChallengeVotes(prev => {
+      const idx = prev.findIndex(v => v.challenge === challengeId && v.voter === meId && v.phase === phase);
+      const patch = phase === 'points' ? { points: Number(value) || 0 } : { verdict: value };
+      if (idx === -1) return [...prev, { id: `tmp-${challengeId}-${phase}`, challenge: challengeId, event: currentEventId, voter: meId, phase, ...patch }];
+      const copy = [...prev]; copy[idx] = { ...copy[idx], ...patch }; return copy;
+    });
+    try { await castChallengeVote(challengeId, currentEventId, phase, value); }
+    catch (e) { showToast('Vote fehlgeschlagen 😬'); listChallengeVotes(currentEventId).then(setChallengeVotes).catch(() => {}); }
   };
 
   // ---- Wer würde eher ----
@@ -1397,9 +1418,11 @@ export default function App() {
             schnelleFragen={schnelleFragen} onSchnellePatch={onSchnellePatch}
             schedule={schedule} onSchedulePatch={onSchedulePatch}
             challenges={challenges}
+            challengeVotes={challengeVotes}
             onChallengeCreate={onChallengeCreate}
             onChallengeResolve={onChallengeResolve}
             onChallengeDelete={onChallengeDelete}
+            onChallengeVote={onChallengeVote}
             mlQuestions={mlQuestions} mlVotes={mlVotes}
             onMlCreate={onMlCreate} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
             wines={wines} wineRatings={wineRatings}
@@ -2135,7 +2158,7 @@ function HomeView({
   kitty, onKittyPatch,
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
-  challenges, onChallengeCreate, onChallengeResolve, onChallengeDelete,
+  challenges, challengeVotes, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote,
   mlQuestions, mlVotes, onMlCreate, onMlVote, onMlPatch, onMlDelete,
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
   customModules, onCustomCreate, onCustomPatch, onCustomDelete,
@@ -2234,8 +2257,8 @@ function HomeView({
       )}
       {moduleTab === 'challenges' && (
         <ChallengesView
-          me={me} admin={admin} members={members} challenges={challenges}
-          onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete}
+          me={me} admin={admin} members={members} challenges={challenges} votes={challengeVotes}
+          onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete} onVote={onChallengeVote}
         />
       )}
       {moduleTab === 'mostlikely' && (
@@ -4328,7 +4351,7 @@ function ScheduleEntryDrawer({ entry, onSave, onClose, eventDays = [], openEnded
 // Challenges (peer dares for points)
 // ============================================================
 
-function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, onDelete }) {
+function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, onResolve, onDelete, onVote }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4347,13 +4370,32 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
   const [failingId, setFailingId] = useState(null); // challenge being marked failed
   const [penalty, setPenalty] = useState(3);
 
-  const open = challenges.filter(c => !c.status || c.status === 'open');
+  const active = challenges.filter(c => c.status !== 'done' && c.status !== 'failed');
   const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
   const textOk = text.trim().length >= 2 && Number(reward) > 0;
   const valid = textOk && others.length > 0 && (mode !== 'single' || toUser);
   const canResolve = (c) => c.fromUser === me.id || admin;
   // Who may read a secret challenge's text: the two involved + host/admin.
   const canSeeSecret = (c) => !c.secret || c.fromUser === me.id || c.toUser === me.id || admin;
+
+  // ---- Group-voting helpers (non-secret challenges) ----
+  const median = (arr) => {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b); const mid = Math.floor(s.length / 2);
+    return s.length % 2 ? s[mid] : Math.round((s[mid - 1] + s[mid]) / 2);
+  };
+  const votesFor = (cid, phase) => votes.filter(v => v.challenge === cid && v.phase === phase);
+  const myVote = (cid, phase) => votesFor(cid, phase).find(v => v.voter === me.id);
+  // Everyone except the challenged player is eligible to vote.
+  const eligibleCount = Math.max(0, members.length - 1);
+  const majorityNeeded = Math.floor(eligibleCount / 2) + 1;
+  const iAmEligible = (c) => c.toUser !== me.id;
+  const pointsAgreed = (c) => median(votesFor(c.id, 'points').map(v => Number(v.points) || 0)) || Number(c.reward) || 0;
+  const doneTally = (c) => {
+    const vs = votesFor(c.id, 'done');
+    return { yes: vs.filter(v => v.verdict === 'done').length, no: vs.filter(v => v.verdict === 'failed').length, total: vs.length };
+  };
+  const POINT_CHOICES = [1, 2, 3, 5, 8, 10];
 
   const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
 
@@ -4389,8 +4431,9 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
       <section className="ww-section">
         <div className="ww-section-head"><Target size={16} /><h3>NEUE CHALLENGE</h3></div>
         <p className="ww-muted" style={{ fontSize: 12, marginTop: -2 }}>
-          Fordere jemanden heraus. Schafft er's, kriegt er die Punkte. Schafft
-          er's nicht, legst du beim Auflösen die Strafe fest.
+          Fordere jemanden heraus. Bei normalen Challenges stimmt die Gruppe ab,
+          wie viele Punkte fair sind und ob's geschafft wurde (Mehrheit zählt).
+          Geheime Challenges entscheidest nur du.
         </p>
         <label className="ww-label">WEN?</label>
         <div className="ww-chal-modes">
@@ -4452,7 +4495,7 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
             📸 Diese Zufalls-Challenge braucht einen Fotobeweis (automatisch erkannt).
           </p>
         ) : null}
-        <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : 'PUNKTE BEI ERFOLG'}</label>
+        <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : 'PUNKTE-VORSCHLAG (Gruppe stimmt ab)'}</label>
         <input className="ww-input" type="number" inputMode="numeric" min={1} max={100}
           value={reward} onChange={e => setReward(e.target.value)} />
         <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
@@ -4460,46 +4503,131 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
         </button>
       </section>
 
-      {open.length > 0 && (
+      {active.length > 0 && (
         <section className="ww-section">
-          <div className="ww-section-head"><h3>OFFEN</h3></div>
+          <div className="ww-section-head"><h3>AKTIV</h3></div>
           <div className="ww-board">
-            {open.map(c => (
-              <div key={c.id} className="ww-chal-card">
-                <div className="ww-chal-top">
-                  <span className="ww-chal-who">{uname(c.fromUser)} → <b>{uname(c.toUser)}</b></span>
-                  <span className="ww-chal-reward">+{c.reward}</span>
+            {active.map(c => {
+              const ptsVotes = votesFor(c.id, 'points');
+              const dTally = doneTally(c);
+              const header = (
+                <>
+                  <div className="ww-chal-top">
+                    <span className="ww-chal-who">{uname(c.fromUser)} → <b>{uname(c.toUser)}</b></span>
+                    <span className="ww-chal-reward">+{c.status === 'voting' ? pointsAgreed(c) : c.reward}</span>
+                  </div>
+                  {(c.secret || c.isPhoto) && (
+                    <div className="ww-chal-badges">
+                      {c.secret && <span className="ww-chal-badge secret">🤫 Geheim</span>}
+                      {c.isPhoto && <span className="ww-chal-badge photo">📸 Fotobeweis</span>}
+                    </div>
+                  )}
+                  <div className="ww-chal-text">
+                    {canSeeSecret(c) ? c.text : <span className="ww-muted">🤫 Geheime Challenge — nur für {uname(c.toUser)} sichtbar</span>}
+                  </div>
+                </>
+              );
+
+              // --- Phase 1: vote on the fair point value (non-secret) ---
+              if (c.status === 'voting') {
+                return (
+                  <div key={c.id} className="ww-chal-card voting">
+                    {header}
+                    {iAmEligible(c) ? (
+                      <div className="ww-chal-vote">
+                        <div className="ww-muted" style={{ fontSize: 11 }}>Wie viele Punkte ist das fair?</div>
+                        <div className="ww-chal-chips">
+                          {POINT_CHOICES.map(p => (
+                            <button key={p} className={`ww-chal-chip ${myVote(c.id, 'points')?.points === p ? 'sel' : ''}`}
+                              onClick={() => onVote(c.id, 'points', p)}>{p}</button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="ww-muted" style={{ fontSize: 11 }}>⏳ Die anderen stimmen über die Punkte ab…</div>
+                    )}
+                    <div className="ww-chal-votestat">📊 {ptsVotes.length}/{eligibleCount} abgestimmt · Median {pointsAgreed(c)} Pkt</div>
+                    {canResolve(c) && (
+                      <div className="ww-chal-actions">
+                        <button className="ww-mini-btn green" disabled={!admin && ptsVotes.length < majorityNeeded}
+                          onClick={() => onResolve(c.id, { status: 'judging', reward: pointsAgreed(c) })}>
+                          Punkte festlegen ({pointsAgreed(c)}) → bewerten
+                        </button>
+                        <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>
+                      </div>
+                    )}
+                    {!admin && ptsVotes.length < majorityNeeded && canResolve(c) && (
+                      <div className="ww-muted" style={{ fontSize: 10 }}>Mehrheit nötig: {majorityNeeded}</div>
+                    )}
+                  </div>
+                );
+              }
+
+              // --- Phase 2: vote on whether it was pulled off (non-secret) ---
+              if (c.status === 'judging') {
+                const lead = dTally.yes > dTally.no ? 'done' : 'failed';
+                return (
+                  <div key={c.id} className="ww-chal-card judging">
+                    {header}
+                    {iAmEligible(c) ? (
+                      <div className="ww-chal-vote">
+                        <div className="ww-muted" style={{ fontSize: 11 }}>Hat {uname(c.toUser).split(' ').slice(1).join(' ') || 'er/sie'} es geschafft?</div>
+                        <div className="ww-chal-judge">
+                          <button className={`ww-mini-btn green ${myVote(c.id, 'done')?.verdict === 'done' ? 'sel' : ''}`} onClick={() => onVote(c.id, 'done', 'done')}><Check size={12} /> Ja</button>
+                          <button className={`ww-mini-btn red ${myVote(c.id, 'done')?.verdict === 'failed' ? 'sel' : ''}`} onClick={() => onVote(c.id, 'done', 'failed')}><X size={12} /> Nein</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="ww-muted" style={{ fontSize: 11 }}>⏳ Die anderen entscheiden, ob du's geschafft hast…</div>
+                    )}
+                    <div className="ww-chal-votestat">📊 {dTally.yes} Ja / {dTally.no} Nein · {dTally.total}/{eligibleCount} abgestimmt</div>
+                    {canResolve(c) && (
+                      <div className="ww-chal-actions">
+                        <button className="ww-mini-btn green" disabled={!admin && dTally.total < majorityNeeded}
+                          onClick={() => onResolve(c.id, { status: lead })}>
+                          Ergebnis übernehmen ({lead === 'done' ? 'Bestanden ✓' : 'Nicht bestanden ✗'})
+                        </button>
+                        <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>
+                      </div>
+                    )}
+                    {admin && (
+                      <div className="ww-chal-actions" style={{ marginTop: 4 }}>
+                        <span className="ww-muted" style={{ fontSize: 10, alignSelf: 'center' }}>Host:</span>
+                        <button className="ww-mini-btn green" onClick={() => onResolve(c.id, { status: 'done' })}>✓ erzwingen</button>
+                        <button className="ww-mini-btn red" onClick={() => onResolve(c.id, { status: 'failed' })}>✗ erzwingen</button>
+                        <button className="ww-mini-btn" onClick={() => onResolve(c.id, { status: 'voting' })}><RotateCcw size={12} /></button>
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              // --- Secret / legacy: proposer (or host) resolves directly ---
+              return (
+                <div key={c.id} className="ww-chal-card">
+                  {header}
+                  {canResolve(c) && failingId !== c.id && (
+                    <div className="ww-chal-actions">
+                      <button className="ww-mini-btn green" onClick={() => markDone(c)}><Check size={12} /> Erfüllt</button>
+                      <button className="ww-mini-btn red" onClick={() => startFail(c)}><X size={12} /> Nicht erfüllt</button>
+                      <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>
+                    </div>
+                  )}
+                  {canResolve(c) && failingId === c.id && (
+                    <div className="ww-chal-fail">
+                      <span className="ww-muted" style={{ fontSize: 12 }}>Strafe (Punkte abziehen):</span>
+                      <input className="ww-input ww-chal-penalty" type="number" inputMode="numeric" min={0} max={100}
+                        value={penalty} onChange={e => setPenalty(e.target.value)} />
+                      <button className="ww-mini-btn red" onClick={() => confirmFail(c)}>−{Number(penalty) || 0} bestätigen</button>
+                      <button className="ww-mini-btn" onClick={() => setFailingId(null)}>Abbruch</button>
+                    </div>
+                  )}
+                  {!canResolve(c) && (
+                    <div className="ww-muted" style={{ fontSize: 11 }}>{uname(c.fromUser).split(' ').slice(1).join(' ')} entscheidet, ob erfüllt.</div>
+                  )}
                 </div>
-                {(c.secret || c.isPhoto) && (
-                  <div className="ww-chal-badges">
-                    {c.secret && <span className="ww-chal-badge secret">🤫 Geheim</span>}
-                    {c.isPhoto && <span className="ww-chal-badge photo">📸 Fotobeweis</span>}
-                  </div>
-                )}
-                <div className="ww-chal-text">
-                  {canSeeSecret(c) ? c.text : <span className="ww-muted">🤫 Geheime Challenge — nur für {uname(c.toUser)} sichtbar</span>}
-                </div>
-                {canResolve(c) && failingId !== c.id && (
-                  <div className="ww-chal-actions">
-                    <button className="ww-mini-btn green" onClick={() => markDone(c)}><Check size={12} /> Erfüllt</button>
-                    <button className="ww-mini-btn red" onClick={() => startFail(c)}><X size={12} /> Nicht erfüllt</button>
-                    <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>
-                  </div>
-                )}
-                {canResolve(c) && failingId === c.id && (
-                  <div className="ww-chal-fail">
-                    <span className="ww-muted" style={{ fontSize: 12 }}>Strafe (Punkte abziehen):</span>
-                    <input className="ww-input ww-chal-penalty" type="number" inputMode="numeric" min={0} max={100}
-                      value={penalty} onChange={e => setPenalty(e.target.value)} />
-                    <button className="ww-mini-btn red" onClick={() => confirmFail(c)}>−{Number(penalty) || 0} bestätigen</button>
-                    <button className="ww-mini-btn" onClick={() => setFailingId(null)}>Abbruch</button>
-                  </div>
-                )}
-                {!canResolve(c) && (
-                  <div className="ww-muted" style={{ fontSize: 11 }}>{uname(c.fromUser).split(' ').slice(1).join(' ')} entscheidet, ob erfüllt.</div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
@@ -4521,7 +4649,10 @@ function ChallengesView({ me, admin, members, challenges, onCreate, onResolve, o
                 </div>
                 <div className="ww-chal-bottom">
                   <span className={`ww-chal-status ${c.status}`}>{c.status === 'done' ? '✓ erfüllt' : '✗ nicht erfüllt'}</span>
-                  {canResolve(c) && <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {admin && <button className="ww-mini-btn" title="Wieder öffnen" onClick={() => onResolve(c.id, { status: c.secret ? 'open' : 'judging' })}><RotateCcw size={12} /></button>}
+                    {canResolve(c) && <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /></button>}
+                  </div>
                 </div>
               </div>
             ))}
