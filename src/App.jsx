@@ -1153,15 +1153,16 @@ export default function App() {
   // ---- Wer würde eher ----
   const onMlCreate = async ({ text, points }) => {
     try {
-      const rec = await createMlQuestion({ eventId: currentEventId, text, points });
+      const rec = await createMlQuestion({ eventId: currentEventId, text, points, round: `r-${Date.now()}` });
       setMlQuestions(prev => [rec, ...prev]);
       showToast('Frage gestellt 🤔');
     } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
   };
-  // Start a round: create several questions at once.
+  // Start a round: create several questions at once, all sharing one round id.
   const onMlCreateBatch = async (texts, points) => {
     try {
-      const recs = await Promise.all((texts || []).map(t => createMlQuestion({ eventId: currentEventId, text: t, points })));
+      const round = `r-${Date.now()}`;
+      const recs = await Promise.all((texts || []).map(t => createMlQuestion({ eventId: currentEventId, text: t, points, round })));
       setMlQuestions(prev => [...recs.reverse(), ...prev]);
       showToast(`Runde gestartet — ${recs.length} Fragen 🤔`);
     } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
@@ -5429,10 +5430,87 @@ function MostLikelyView({ me, admin, active, members, questions, votes, onCreate
   };
   const closeQ = (q) => { const l = leaderOf(q.id); onPatch(q.id, { closed: true, winnerId: l.tie ? '' : (l.id || '') }); };
 
-  const open = questions.filter(q => !q.closed);
-  const closed = questions.filter(q => q.closed);
-  const closeAll = () => { open.forEach(q => closeQ(q)); };
   const valid = text.trim().length >= 4 && Number(points) > 0;
+
+  // Group questions into their rounds (the batch they were created in).
+  const rounds = useMemo(() => {
+    const map = new Map();
+    for (const q of questions) {
+      const key = q.round || `solo-${q.id}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(q);
+    }
+    const arr = Array.from(map.entries()).map(([key, qs]) => ({
+      key, qs,
+      earliest: qs.reduce((m, q) => ((q.created || '') < m ? q.created : m), qs[0]?.created || ''),
+    }));
+    arr.sort((a, b) => (a.earliest || '').localeCompare(b.earliest || ''));
+    arr.forEach((r, i) => { r.num = i + 1; });
+    return arr.reverse(); // newest round first
+  }, [questions]);
+  const [collapseOverride, setCollapseOverride] = useState({});
+  const roundOpen = (r) => (collapseOverride[r.key] !== undefined ? collapseOverride[r.key] : !r.qs.every(q => q.closed));
+  const toggleRound = (r) => setCollapseOverride(o => ({ ...o, [r.key]: !roundOpen(r) }));
+
+  const renderOpenQuestion = (q) => {
+    const counts = tallyOf(q.id);
+    const total = (votesByQ[q.id] || []).length;
+    const mine = myVote(q.id);
+    const lead = leaderOf(q.id);
+    const canClose = admin || q.createdBy === me.id;
+    return (
+      <div className="ww-ml-qcard" key={q.id}>
+        <div className="ww-ml-q">{q.text}</div>
+        <div className="ww-ml-meta">{uname(q.createdBy)} · {q.points} Pkt · {total} {total === 1 ? 'Stimme' : 'Stimmen'}</div>
+        <div className="ww-ml-options">
+          {participants.map(u => {
+            const n = counts[u.id] || 0;
+            const pct = total ? Math.round((n / total) * 100) : 0;
+            const sel = mine === u.id;
+            return (
+              <button key={u.id} className={`ww-ml-opt ${sel ? 'sel' : ''}`} disabled={!active} onClick={() => onVote(q.id, u.id)}>
+                <span className="ww-ml-opt-bar" style={{ width: `${pct}%` }} />
+                <span className="ww-ml-opt-name">{u.emoji || '🍺'} {u.displayName || u.email?.split('@')[0]}{sel && ' ✓'}</span>
+                <span className="ww-ml-opt-n">{n}</span>
+              </button>
+            );
+          })}
+        </div>
+        {canClose && (
+          <div className="ww-ml-actions">
+            <button className="ww-mini-btn green" disabled={!lead.id} onClick={() => closeQ(q)}>
+              <Check size={12} /> {lead.tie ? 'Beenden (unentschieden)' : (lead.id ? `Beenden → ${usersById[lead.id]?.displayName || '?'}` : 'Noch keine Stimmen')}
+            </button>
+            <button className="ww-mini-btn" onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const renderClosedQuestion = (q) => {
+    const canEdit = admin || q.createdBy === me.id;
+    return (
+      <div key={q.id} className="ww-ml-closed">
+        <div className="ww-ml-closed-q">{q.text}</div>
+        <div className="ww-ml-winner">
+          <span>🏆 {q.winnerId ? uname(q.winnerId) : 'Unentschieden'}</span>
+          {q.winnerId && <span className="ww-ml-winner-pts">+{q.points}</span>}
+        </div>
+        {admin && (
+          <select className="ww-input ww-ml-override" value={q.winnerId || ''} onChange={e => onPatch(q.id, { winnerId: e.target.value })}>
+            <option value="">— Unentschieden —</option>
+            {participants.map(u => <option key={u.id} value={u.id}>Gewinner: {u.displayName || u.email}</option>)}
+          </select>
+        )}
+        {canEdit && (
+          <div className="ww-ml-actions">
+            <button className="ww-mini-btn" onClick={() => onPatch(q.id, { closed: false, winnerId: '' })}><RotateCcw size={12} /> Wieder öffnen</button>
+            <button className="ww-mini-btn" onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="ww-ml">
@@ -5476,84 +5554,40 @@ function MostLikelyView({ me, admin, active, members, questions, votes, onCreate
         )}
       </section>
 
-      {open.length > 1 && admin && (
-        <button className="ww-big-cta green" style={{ marginTop: 0 }} onClick={closeAll}>
-          <Check size={20} /><span>GANZE RUNDE AUSWERTEN ({open.length})</span>
-        </button>
+      {questions.length === 0 && (
+        <div className="ww-empty">Noch keine Fragen — starte eine Runde! 🤔</div>
       )}
 
-      {open.length === 0 && closed.length === 0 && (
-        <div className="ww-empty">Noch keine Fragen — stell die erste! 🤔</div>
-      )}
-
-      {open.map(q => {
-        const counts = tallyOf(q.id);
-        const total = (votesByQ[q.id] || []).length;
-        const mine = myVote(q.id);
-        const lead = leaderOf(q.id);
-        const canClose = admin || q.createdBy === me.id;
+      {rounds.map(r => {
+        const openQs = r.qs.filter(q => !q.closed);
+        const decided = r.qs.length - openQs.length;
+        const oc = roundOpen(r);
+        const multi = r.qs.length > 1;
         return (
-          <section className="ww-section" key={q.id}>
-            <div className="ww-ml-q">{q.text}</div>
-            <div className="ww-ml-meta">{uname(q.createdBy)} · {q.points} Pkt · {total} {total === 1 ? 'Stimme' : 'Stimmen'}</div>
-            <div className="ww-ml-options">
-              {participants.map(u => {
-                const n = counts[u.id] || 0;
-                const pct = total ? Math.round((n / total) * 100) : 0;
-                const sel = mine === u.id;
-                return (
-                  <button key={u.id} className={`ww-ml-opt ${sel ? 'sel' : ''}`} disabled={!active} onClick={() => onVote(q.id, u.id)}>
-                    <span className="ww-ml-opt-bar" style={{ width: `${pct}%` }} />
-                    <span className="ww-ml-opt-name">{u.emoji || '🍺'} {u.displayName || u.email?.split('@')[0]}{sel && ' ✓'}</span>
-                    <span className="ww-ml-opt-n">{n}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {canClose && (
-              <div className="ww-ml-actions">
-                <button className="ww-mini-btn green" disabled={!lead.id} onClick={() => closeQ(q)}>
-                  <Check size={12} /> {lead.tie ? 'Beenden (unentschieden)' : (lead.id ? `Beenden → ${usersById[lead.id]?.displayName || '?'}` : 'Noch keine Stimmen')}
+          <section className={`ww-section ww-ml-round ${openQs.length === 0 ? 'done' : ''}`} key={r.key}>
+            <button className="ww-collapse-head" onClick={() => toggleRound(r)}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <h3 style={{ margin: 0 }}>{multi ? `RUNDE ${r.num}` : 'FRAGE'}</h3>
+                <span className="ww-muted" style={{ fontSize: 12 }}>
+                  {openQs.length === 0 ? `✓ fertig · ${r.qs.length} ${r.qs.length === 1 ? 'Frage' : 'Fragen'}` : `${decided}/${r.qs.length} entschieden`}
+                </span>
+              </span>
+              <ChevronRight size={18} style={{ transform: oc ? 'rotate(90deg)' : 'none', transition: 'transform .15s', flexShrink: 0 }} />
+            </button>
+            {oc && (<>
+              {admin && openQs.length > 1 && (
+                <button className="ww-mini-btn green" style={{ marginTop: 8 }} onClick={() => openQs.forEach(q => closeQ(q))}>
+                  <Check size={12} /> Ganze Runde auswerten ({openQs.length})
                 </button>
-                <button className="ww-mini-btn" onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
+              )}
+              {!active && openQs.length > 0 && <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>Event pausiert — Abstimmen geht wieder, wenn's aktiv ist.</div>}
+              <div className="ww-ml-round-body">
+                {r.qs.map(q => (q.closed ? renderClosedQuestion(q) : renderOpenQuestion(q)))}
               </div>
-            )}
-            {!active && <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>Event pausiert — Abstimmen geht wieder, wenn's aktiv ist.</div>}
+            </>)}
           </section>
         );
       })}
-
-      {closed.length > 0 && (
-        <section className="ww-section">
-          <div className="ww-section-head"><Trophy size={16} /><h3>ENTSCHIEDEN</h3></div>
-          <div className="ww-board">
-            {closed.map(q => {
-              const canEdit = admin || q.createdBy === me.id;
-              return (
-                <div key={q.id} className="ww-ml-closed">
-                  <div className="ww-ml-closed-q">{q.text}</div>
-                  <div className="ww-ml-winner">
-                    <span>🏆 {q.winnerId ? uname(q.winnerId) : 'Unentschieden'}</span>
-                    {q.winnerId && <span className="ww-ml-winner-pts">+{q.points}</span>}
-                  </div>
-                  {admin && (
-                    <select className="ww-input ww-ml-override" value={q.winnerId || ''} onChange={e => onPatch(q.id, { winnerId: e.target.value })}>
-                      <option value="">— Unentschieden —</option>
-                      {participants.map(u => <option key={u.id} value={u.id}>Gewinner: {u.displayName || u.email}</option>)}
-                    </select>
-                  )}
-                  {canEdit && (
-                    <div className="ww-ml-actions">
-                      <button className="ww-mini-btn" onClick={() => onPatch(q.id, { closed: false, winnerId: '' })}><RotateCcw size={12} /> Wieder öffnen</button>
-                      <button className="ww-mini-btn" onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
     </div>
   );
 }
