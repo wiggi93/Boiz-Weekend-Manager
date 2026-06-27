@@ -22,8 +22,9 @@ import {
   getSchnelleFragen, updateSchnelleFragen, ensureSchnelleFragen,
   getSchedule, updateSchedule, ensureSchedule,
   listPolls, createPoll, updatePoll, deletePoll, listPollVotes, castVote,
-  listChallenges, createChallenge, updateChallenge, deleteChallenge,
+  listChallenges, createChallenge, createGroupChallenge, updateChallenge, deleteChallenge,
   listChallengeVotes, castChallengeVote, uploadChallengePhoto, challengePhotoUrl,
+  listChallengeEntries, updateChallengeEntry, uploadChallengeEntryPhoto, challengeEntryPhotoUrl,
   listNotifications, deleteNotification, sendAnnouncement,
   getWerewolf, getMyWerewolfRole, listWerewolfRoles, updateWerewolf, startWerewolf, peekWerewolf,
   listWines, createWine, deleteWine, listWineRatings, rateWine,
@@ -235,10 +236,12 @@ const computeJeopardyPoints = (userId, jeopardy) => {
 // Peer challenges: a player earns `reward` when a challenge assigned to them
 // is marked done, and loses `penalty` when it's marked failed. Open challenges
 // don't count yet.
-const computeChallengePoints = (userId, challenges) => {
+const computeChallengePoints = (userId, challenges, entries = []) => {
   if (!Array.isArray(challenges)) return 0;
   let total = 0;
+  const groupById = {};
   for (const c of challenges) {
+    if (c.group) { groupById[c.id] = c; continue; } // group → scored per entry below
     const reward = Number(c.reward) || 0;
     if (c.status === 'done') {
       if (c.toUser === userId) total += reward;
@@ -246,6 +249,16 @@ const computeChallengePoints = (userId, challenges) => {
       if (c.secret && c.fromUser === userId) total -= reward;
     } else if (c.status === 'failed') {
       if (c.toUser === userId) total -= Number(c.penalty) || 0;
+    }
+  }
+  // Group challenges: each participant is scored by their own entry's verdict.
+  if (Array.isArray(entries)) {
+    for (const en of entries) {
+      if (en.user !== userId) continue;
+      const c = groupById[en.challenge];
+      if (!c) continue;
+      if (en.status === 'done') total += Number(c.reward) || 0;
+      else if (en.status === 'failed') total -= Number(c.penalty) || 0;
     }
   }
   return total;
@@ -261,12 +274,12 @@ const computeMostLikelyPoints = (userId, mlQuestions) => {
   return total;
 };
 
-const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, challenges, mlQuestions) =>
+const computeTotalPoints = (userId, s, ev, flunky, customModules, jeopardy, challenges, mlQuestions, challengeEntries) =>
   computeDrinkPoints(s, ev)
   + computeFlunkyPoints(userId, flunky)
   + computeCustomPoints(userId, customModules)
   + computeJeopardyPoints(userId, jeopardy)
-  + computeChallengePoints(userId, challenges)
+  + computeChallengePoints(userId, challenges, challengeEntries)
   + computeMostLikelyPoints(userId, mlQuestions)
   + (Number(s?.bonus) || 0); // manual host adjustment
 
@@ -326,6 +339,7 @@ export default function App() {
   const [pollVotes, setPollVotes] = useState([]);
   const [challenges, setChallenges] = useState([]);
   const [challengeVotes, setChallengeVotes] = useState([]);
+  const [challengeEntries, setChallengeEntries] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [werewolf, setWerewolf] = useState(null);
   const [myRole, setMyRole] = useState(null);
@@ -470,7 +484,7 @@ export default function App() {
 
   const refreshCurrentEvent = useCallback(async () => {
     if (!currentEventId) {
-      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setChallengeVotes([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]); setNotifications([]);
+      setCurrentEvent(null); setEventMembers([]); setStatsMap({}); setFlunky(null); setJeopardy(null); setKitty(null); setSchnelleFragen(null); setCustomModules([]); setSchedule(null); setPolls([]); setPollVotes([]); setChallenges([]); setChallengeVotes([]); setChallengeEntries([]); setWines([]); setWineRatings([]); setMlQuestions([]); setMlVotes([]); setNotifications([]);
       return;
     }
     // Fetch the event first. ONLY a genuinely missing event (404) kicks the
@@ -487,7 +501,7 @@ export default function App() {
     // Sub-fetches: each tolerates its own failure, never resets the event.
     const safe = (p, fallback) => p.catch(() => fallback);
     try {
-      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, cvotes, wn, wr, mq, mv, notifs] = await Promise.all([
+      const [members, stats, fl, je, kt, sf, cms, sc, pl, pv, ch, cvotes, cents, wn, wr, mq, mv, notifs] = await Promise.all([
         safe(listEventMembers(currentEventId), []),
         safe(loadEventStats(currentEventId), {}),
         safe(getFlunky(currentEventId), null),
@@ -500,6 +514,7 @@ export default function App() {
         safe(listPollVotes(currentEventId), []),
         safe(listChallenges(currentEventId), []),
         safe(listChallengeVotes(currentEventId), []),
+        safe(listChallengeEntries(currentEventId), []),
         safe(listWines(currentEventId), []),
         safe(listWineRatings(currentEventId), []),
         safe(listMlQuestions(currentEventId), []),
@@ -508,7 +523,7 @@ export default function App() {
       ]);
       setEventMembers(members); setStatsMap(stats);
       setFlunky(fl); setJeopardy(je); setKitty(kt); setSchnelleFragen(sf); setCustomModules(cms);
-      setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch); setChallengeVotes(cvotes);
+      setSchedule(sc); setPolls(pl); setPollVotes(pv); setChallenges(ch); setChallengeVotes(cvotes); setChallengeEntries(cents);
       setWines(wn); setWineRatings(wr); setMlQuestions(mq); setMlVotes(mv); setNotifications(notifs);
     } catch (e) {
       console.warn('refreshCurrentEvent sub-fetch', e);
@@ -669,6 +684,16 @@ export default function App() {
     if (collection === 'challenge_votes') {
       const eid = eventRef.current?.id;
       if (eid) listChallengeVotes(eid).then(setChallengeVotes).catch(() => {});
+      return;
+    }
+
+    if (collection === 'challenge_entries') {
+      setChallengeEntries(prev => {
+        if (ev.action === 'delete') return prev.filter(en => en.id !== rec.id);
+        const idx = prev.findIndex(en => en.id === rec.id);
+        if (idx === -1) return [...prev, rec];
+        const copy = [...prev]; copy[idx] = { ...copy[idx], ...rec }; return copy;
+      });
       return;
     }
 
@@ -891,7 +916,7 @@ export default function App() {
       jeopardy: jeopardy?.updated || '',
       schnelle_fragen: schnelleFragen?.updated || '',
       schedule: schedule?.updated || '',
-      challenges: [maxUpd(challenges), maxUpd(challengeVotes)].sort().pop() || '',
+      challenges: [maxUpd(challenges), maxUpd(challengeVotes), maxUpd(challengeEntries)].sort().pop() || '',
       mostlikely: [maxUpd(mlQuestions), maxUpd(mlVotes)].sort().pop() || '',
       wine: [maxUpd(wines), maxUpd(wineRatings)].sort().pop() || '',
       kitty: kitty?.updated || '',
@@ -899,7 +924,7 @@ export default function App() {
     };
     for (const cm of (customModules || [])) act[`cm-${cm.id}`] = cm.updated || '';
     return act;
-  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, challengeVotes, mlQuestions, mlVotes, wines, wineRatings, kitty, polls, customModules]);
+  }, [flunky, jeopardy, schnelleFragen, schedule, challenges, challengeVotes, challengeEntries, mlQuestions, mlVotes, wines, wineRatings, kitty, polls, customModules]);
   const moduleActivityRef = useRef(moduleActivity);
   useEffect(() => { moduleActivityRef.current = moduleActivity; }, [moduleActivity]);
 
@@ -1138,15 +1163,22 @@ export default function App() {
   };
 
   // ---- Challenges (peer dares) ----
-  // toUsers is an array: 1 entry for a single/random target, N for a group
-  // challenge (one row per targeted member — reuses the normal per-target
-  // scoring + resolution).
-  const onChallengeCreate = async ({ toUsers, text, reward, secret = false, isPhoto = false }) => {
-    const targets = (toUsers || []).filter(Boolean);
-    if (targets.length === 0) return;
+  // Single/random: `toUsers` is a 1-entry array → one normal 1:1 challenge.
+  // Group: `group` + `participants` → ONE combined challenge row + one entry per
+  // participant (each with their own photo + verdict, one push per person).
+  const onChallengeCreate = async ({ toUsers, participants, group = false, text, reward, secret = false, isPhoto = false }) => {
     try {
-      await Promise.all(targets.map(t => createChallenge({ eventId: currentEventId, toUser: t, text, reward, secret, isPhoto })));
-      showToast(secret ? '🤫 Geheime Challenge gestellt' : (targets.length > 1 ? `Gruppen-Challenge an ${targets.length} 🎯` : 'Challenge gestellt 🎯'));
+      if (group) {
+        const takers = (participants || []).filter(Boolean);
+        if (takers.length === 0) return;
+        await createGroupChallenge({ eventId: currentEventId, participants: takers, text, reward, isPhoto });
+        showToast(`👥 Gruppen-Challenge an ${takers.length} 🎯`);
+        return;
+      }
+      const targets = (toUsers || []).filter(Boolean);
+      if (targets.length === 0) return;
+      await createChallenge({ eventId: currentEventId, toUser: targets[0], text, reward, secret, isPhoto });
+      showToast(secret ? '🤫 Geheime Challenge gestellt' : 'Challenge gestellt 🎯');
     } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
   };
   const onChallengeResolve = async (id, patch) => {
@@ -1175,6 +1207,19 @@ export default function App() {
     try {
       const rec = await uploadChallengePhoto(challengeId, file);
       setChallenges(prev => prev.map(c => c.id === challengeId ? { ...c, photo: rec.photo } : c));
+      showToast('Fotobeweis hochgeladen 📸');
+    } catch (e) { showToast(`Upload fehlgeschlagen: ${e?.status || ''} ${e?.message || ''}`); }
+  };
+  // ---- Group-challenge entries (per participant) ----
+  const onEntryResolve = async (id, patch) => {
+    setChallengeEntries(prev => prev.map(en => en.id === id ? { ...en, ...patch } : en));
+    try { await updateChallengeEntry(id, patch); }
+    catch (e) { showToast('Fehler 😬'); refreshCurrentEvent(); }
+  };
+  const onEntryPhoto = async (entryId, file) => {
+    try {
+      const rec = await uploadChallengeEntryPhoto(entryId, file);
+      setChallengeEntries(prev => prev.map(en => en.id === entryId ? { ...en, photo: rec.photo } : en));
       showToast('Fotobeweis hochgeladen 📸');
     } catch (e) { showToast(`Upload fehlgeschlagen: ${e?.status || ''} ${e?.message || ''}`); }
   };
@@ -1668,11 +1713,14 @@ export default function App() {
             schedule={schedule} onSchedulePatch={onSchedulePatch}
             challenges={challenges}
             challengeVotes={challengeVotes}
+            challengeEntries={challengeEntries}
             onChallengeCreate={onChallengeCreate}
             onChallengeResolve={onChallengeResolve}
             onChallengeDelete={onChallengeDelete}
             onChallengeVote={onChallengeVote}
             onChallengePhoto={onChallengePhoto}
+            onEntryResolve={onEntryResolve}
+            onEntryPhoto={onEntryPhoto}
             mlQuestions={mlQuestions} mlVotes={mlVotes}
             onMlCreate={onMlCreate} onMlCreateBatch={onMlCreateBatch} onMlVote={onMlVote} onMlPatch={onMlPatch} onMlDelete={onMlDelete}
             werewolf={werewolf} myRole={myRole} werewolfRoles={werewolfRoles}
@@ -1698,7 +1746,7 @@ export default function App() {
           />
         )}
         {view === 'crew' && (
-          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} mlQuestions={mlQuestions} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
+          <CrewView members={eventMembers} statsMap={statsMap} event={currentEvent} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} challengeEntries={challengeEntries} mlQuestions={mlQuestions} myId={me.id} onShowUserDetail={setDetailUserId} onSaveMyWishes={onSaveMyWishes} />
         )}
         {view === 'tools' && (
           <ToolsView
@@ -1775,6 +1823,7 @@ export default function App() {
           jeopardy={jeopardy}
           customModules={customModules}
           challenges={challenges}
+          challengeEntries={challengeEntries}
           mlQuestions={mlQuestions}
           isMe={detailUserId === me.id}
           admin={admin}
@@ -2613,7 +2662,7 @@ function HomeView({
   kitty, onKittyPatch,
   schnelleFragen, onSchnellePatch,
   schedule, onSchedulePatch,
-  challenges, challengeVotes, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote, onChallengePhoto,
+  challenges, challengeVotes, challengeEntries, onChallengeCreate, onChallengeResolve, onChallengeDelete, onChallengeVote, onChallengePhoto, onEntryResolve, onEntryPhoto,
   mlQuestions, mlVotes, onMlCreate, onMlCreateBatch, onMlVote, onMlPatch, onMlDelete,
   werewolf, myRole, werewolfRoles, onWerewolfStart, onWerewolfPatch, onWerewolfPeek,
   wines, wineRatings, onWineCreate, onWineDelete, onWineRate,
@@ -2688,7 +2737,7 @@ function HomeView({
       </div>
 
       {moduleTab === 'overview' && (
-        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} mlQuestions={mlQuestions} onShowUserDetail={onShowUserDetail} />
+        <OverviewView me={me} event={event} members={members} statsMap={statsMap} flunky={flunky} jeopardy={jeopardy} customModules={customModules} challenges={challenges} challengeEntries={challengeEntries} mlQuestions={mlQuestions} onShowUserDetail={onShowUserDetail} />
       )}
       {moduleTab === 'flunky' && flunky && (
         <FlunkyView
@@ -2713,8 +2762,9 @@ function HomeView({
       )}
       {moduleTab === 'challenges' && (
         <ChallengesView
-          me={me} admin={admin} members={members} challenges={challenges} votes={challengeVotes}
+          me={me} admin={admin} members={members} challenges={challenges} votes={challengeVotes} entries={challengeEntries}
           onCreate={onChallengeCreate} onResolve={onChallengeResolve} onDelete={onChallengeDelete} onVote={onChallengeVote} onPhoto={onChallengePhoto}
+          onEntryResolve={onEntryResolve} onEntryPhoto={onEntryPhoto}
           jump={challengeJump} onJumpDone={onChallengeJumpDone}
         />
       )}
@@ -3063,16 +3113,16 @@ function DrinkPill({ emoji, label, count, disabled, onInc, onDec }) {
 // Overview (leaderboard / standings)
 // ============================================================
 
-function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, challenges, mlQuestions, onShowUserDetail }) {
+function OverviewView({ me, event, members, statsMap, flunky, jeopardy, customModules, challenges, challengeEntries, mlQuestions, onShowUserDetail }) {
   const leaderboard = useMemo(() => members
     .map(m => {
       const u = m.expand?.user; if (!u) return null;
       const s = statsMap[u.id] || {};
-      return { ...u, drinkTotal: totalDrinkCount(s, event), points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges, mlQuestions) };
+      return { ...u, drinkTotal: totalDrinkCount(s, event), points: computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges, mlQuestions, challengeEntries) };
     })
     .filter(Boolean)
     .sort((a, b) => b.points - a.points),
-    [members, statsMap, event, flunky, customModules, jeopardy, challenges, mlQuestions]);
+    [members, statsMap, event, flunky, customModules, jeopardy, challenges, challengeEntries, mlQuestions]);
 
   const myRank = leaderboard.findIndex(u => u.id === me.id) + 1;
   const maxPoints = Math.max(1, ...leaderboard.map(u => u.points));
@@ -4890,7 +4940,7 @@ function ScheduleEntryDrawer({ entry, onSave, onClose, eventDays = [], openEnded
 // Challenges (peer dares for points)
 // ============================================================
 
-function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, onResolve, onDelete, onVote, onPhoto, jump, onJumpDone }) {
+function ChallengesView({ me, admin, members, challenges, votes = [], entries = [], onCreate, onResolve, onDelete, onVote, onPhoto, onEntryResolve, onEntryPhoto, jump, onJumpDone }) {
   const usersById = useMemo(() => {
     const m = {};
     for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user;
@@ -4900,6 +4950,8 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
 
   const [mode, setMode] = useState('single'); // 'single' | 'random' | 'group'
   const [toUser, setToUser] = useState('');
+  const [groupSel, setGroupSel] = useState([]); // selected co-players for a group challenge
+  const [includeMe, setIncludeMe] = useState(false); // creator takes part too?
   const [text, setText] = useState('');
   const [reward, setReward] = useState(3);
   const [secret, setSecret] = useState(false);
@@ -4911,11 +4963,18 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
   const [createOpen, setCreateOpen] = useState(false); // create form collapsed by default
   const [highlightId, setHighlightId] = useState(null); // challenge jumped-to from a push
 
-  const active = challenges.filter(c => c.status !== 'done' && c.status !== 'failed');
-  const resolved = challenges.filter(c => c.status === 'done' || c.status === 'failed');
+  // ---- Group-challenge helpers ----
+  const entriesFor = (cid) => entries.filter(en => en.challenge === cid);
+  // A group challenge is "done" once every participant's entry has a verdict.
+  const groupResolved = (c) => { const es = entriesFor(c.id); return es.length > 0 && es.every(en => en.status === 'done' || en.status === 'failed'); };
+
+  const active = challenges.filter(c => c.group ? !groupResolved(c) : (c.status !== 'done' && c.status !== 'failed'));
+  const resolved = challenges.filter(c => c.group ? groupResolved(c) : (c.status === 'done' || c.status === 'failed'));
 
   // Open the create form by default only when there's nothing else to look at.
   useEffect(() => { if (challenges.length === 0) setCreateOpen(true); }, [challenges.length === 0]);
+  // Default a group challenge to "everyone else takes part".
+  useEffect(() => { setGroupSel(others.map(u => u.id)); }, [others.map(u => u.id).join(',')]);
 
   // Deep-link from a challenge push → scroll to it + highlight briefly.
   useEffect(() => {
@@ -4930,7 +4989,14 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
     return () => clearTimeout(t);
   }, [jump]);
   const textOk = text.trim().length >= 2 && Number(reward) > 0;
-  const valid = textOk && others.length > 0 && (mode !== 'single' || toUser);
+  // Participants of the group challenge being composed (selected co-players + me if I take part).
+  const groupParticipants = [...groupSel, ...(includeMe ? [me.id] : [])];
+  const valid = textOk && others.length > 0 && (
+    mode === 'single' ? !!toUser :
+    mode === 'group' ? groupParticipants.length > 0 :
+    true
+  );
+  const toggleGroupSel = (id) => setGroupSel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const canResolve = (c) => c.fromUser === me.id || admin;
   // Who may read a secret challenge's text: the two involved + host/admin.
   const canSeeSecret = (c) => !c.secret || c.fromUser === me.id || c.toUser === me.id || admin;
@@ -4985,7 +5051,87 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
     return <div className="ww-muted" style={{ fontSize: 11, marginTop: 8 }}>📸 Wartet auf Fotobeweis…</div>;
   };
 
+  // Group-challenge photo proof per participant. Group challenges are public, so
+  // everyone sees every photo (the combined gallery); only the participant
+  // themselves may upload their own.
+  const renderEntryPhoto = (c, en, mine) => {
+    if (!c.isPhoto) return null;
+    if (en.photo) {
+      return (
+        <a className="ww-chal-photo" href={challengeEntryPhotoUrl(en)} target="_blank" rel="noopener noreferrer">
+          <img src={challengeEntryPhotoUrl(en, '0x320')} alt="Fotobeweis" loading="lazy" />
+        </a>
+      );
+    }
+    if (mine) {
+      const pick = (e) => { const f = e.target.files && e.target.files[0]; if (f) onEntryPhoto?.(en.id, f); e.target.value = ''; };
+      return (
+        <div className="ww-chal-photo-actions">
+          <label className="ww-chal-photo-upload">
+            📷 Foto machen
+            <input type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={pick} />
+          </label>
+          <label className="ww-chal-photo-upload">
+            🖼️ Aus Galerie
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={pick} />
+          </label>
+        </div>
+      );
+    }
+    return <div className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>📸 Wartet auf Fotobeweis…</div>;
+  };
+
   const uname = (id) => { const u = usersById[id]; return u ? `${u.emoji || '🍺'} ${u.displayName || u.email}` : '?'; };
+
+  // ---- One combined card for a whole group challenge (active or resolved) ----
+  const renderGroupCard = (c) => {
+    const es = entriesFor(c.id).slice().sort((a, b) => uname(a.user).localeCompare(uname(b.user)));
+    const canManage = canResolve(c);
+    const reward = Number(c.reward) || 0;
+    const doneCount = es.filter(en => en.status === 'done').length;
+    const finishedCount = es.filter(en => en.status === 'done' || en.status === 'failed').length;
+    return (
+      <div key={c.id} id={`chal-${c.id}`} className={`ww-chal-card group ${highlightId === c.id ? 'highlight' : ''}`}>
+        <div className="ww-chal-top">
+          <span className="ww-chal-who">{uname(c.fromUser)} → <b>👥 Gruppe ({es.length})</b></span>
+          <span className="ww-chal-reward">+{reward}</span>
+        </div>
+        <div className="ww-chal-badges">
+          <span className="ww-chal-badge group">👥 Gruppen-Challenge</span>
+          {c.isPhoto && <span className="ww-chal-badge photo">📸 Fotobeweis</span>}
+        </div>
+        <div className="ww-chal-text">{c.text}</div>
+        <div className="ww-chal-votestat">✅ {doneCount} geschafft · {finishedCount}/{es.length} bewertet</div>
+        <div className="ww-chal-entries">
+          {es.map(en => {
+            const mine = en.user === me.id;
+            const st = en.status || 'pending';
+            return (
+              <div key={en.id} className={`ww-chal-entry ${st}`}>
+                <div className="ww-chal-entry-head">
+                  <span className="ww-chal-entry-name">{uname(en.user)}{mine && <span className="ww-you">DU</span>}</span>
+                  <span className={`ww-chal-entry-status ${st}`}>{st === 'done' ? '✓' : st === 'failed' ? '✗' : '⏳'}</span>
+                </div>
+                {renderEntryPhoto(c, en, mine)}
+                {canManage && (
+                  <div className="ww-chal-entry-actions">
+                    <button className={`ww-mini-btn green ${st === 'done' ? 'sel' : ''}`} onClick={() => onEntryResolve(en.id, { status: 'done' })}><Check size={12} /> +{reward}</button>
+                    <button className={`ww-mini-btn red ${st === 'failed' ? 'sel' : ''}`} onClick={() => onEntryResolve(en.id, { status: 'failed' })}><X size={12} /></button>
+                    {st !== 'pending' && <button className="ww-mini-btn" title="Zurücksetzen" onClick={() => onEntryResolve(en.id, { status: 'pending' })}><RotateCcw size={12} /></button>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        {canManage && (
+          <div className="ww-chal-actions">
+            <button className="ww-mini-btn" onClick={() => onDelete(c.id)}><Trash2 size={12} /> Löschen</button>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // Explicit state transitions so the toggles never desync from the mode tabs.
   const selectMode = (k) => { setMode(k); if (k !== 'single') setSecret(false); }; // secret is a 1:1 dare
@@ -5000,14 +5146,18 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
 
   const submit = async () => {
     if (!valid) return;
-    let toUsers = [];
-    if (mode === 'group') toUsers = others.map(u => u.id);
-    else if (mode === 'random') toUsers = [others[Math.floor(Math.random() * others.length)].id];
-    else toUsers = [toUser];
     setBusy(true);
     try {
-      await onCreate({ toUsers, text: text.trim(), reward: Number(reward), secret, isPhoto });
+      if (mode === 'group') {
+        await onCreate({ group: true, participants: groupParticipants, text: text.trim(), reward: Number(reward), isPhoto });
+      } else {
+        const toUsers = mode === 'random'
+          ? [others[Math.floor(Math.random() * others.length)].id]
+          : [toUser];
+        await onCreate({ toUsers, text: text.trim(), reward: Number(reward), secret, isPhoto });
+      }
       setText(''); setToUser(''); setReward(3); setMode('single'); setSecret(false); setIsPhoto(false); setRolled(false);
+      setIncludeMe(false); setGroupSel(others.map(u => u.id));
     } finally { setBusy(false); }
   };
   const markDone = (c) => onResolve(c.id, { status: 'done' });
@@ -5051,10 +5201,32 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
           </p>
         )}
         {mode === 'group' && (
-          <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
-            👥 Alle {others.length} Mitspieler bekommen die Challenge — jeder
-            wird einzeln aufgelöst.
-          </p>
+          <div className="ww-chal-group-pick">
+            <p className="ww-muted" style={{ fontSize: 12, marginTop: 8 }}>
+              👥 Eine gemeinsame Challenge — jeder Teilnehmer bekommt nur eine Push
+              und lädt seinen eigenen Fotobeweis hoch. Du legst die Punkte fest und
+              hakst ab, wer's geschafft hat.
+            </p>
+            <label className="ww-chal-toggle solo" style={{ marginTop: 8 }}>
+              <input type="checkbox" checked={includeMe} onChange={e => setIncludeMe(e.target.checked)} style={{ display: 'none' }} />
+              {includeMe ? '✅' : '⬜'} Ich mache selbst mit
+            </label>
+            <div className="ww-chal-group-members">
+              {others.map(u => {
+                const on = groupSel.includes(u.id);
+                return (
+                  <button key={u.id} type="button"
+                    className={`ww-chal-member ${on ? 'on' : ''}`}
+                    onClick={() => toggleGroupSel(u.id)}>
+                    {on ? '✓ ' : ''}{u.emoji || '🍺'} {u.displayName || u.email}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="ww-muted" style={{ fontSize: 11, marginTop: 4 }}>
+              {groupParticipants.length} Teilnehmer ausgewählt
+            </div>
+          </div>
         )}
         {/* Geheim is a private 1:1 dare — only offered for a single player. */}
         {mode === 'single' && (
@@ -5087,7 +5259,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
             📸 Diese Zufalls-Challenge braucht einen Fotobeweis (automatisch erkannt).
           </p>
         ) : null}
-        <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : 'PUNKTE-VORSCHLAG (Gruppe stimmt ab)'}</label>
+        <label className="ww-label">{secret ? 'PUNKTE (zahlst du)' : mode === 'group' ? 'PUNKTE (pro Teilnehmer)' : 'PUNKTE-VORSCHLAG (Gruppe stimmt ab)'}</label>
         <input className="ww-input" type="number" inputMode="numeric" min={1} max={100}
           value={reward} onChange={e => setReward(e.target.value)} />
         <button className={`ww-big-cta ${valid && !busy ? '' : 'disabled'}`} disabled={!valid || busy} onClick={submit}>
@@ -5101,6 +5273,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
           <div className="ww-section-head"><Target size={16} /><h3>🎯 OFFENE CHALLENGES ({active.length})</h3></div>
           <div className="ww-board">
             {active.map(c => {
+              if (c.group) return renderGroupCard(c);
               const ptsVotes = votesFor(c.id, 'points');
               const dTally = doneTally(c);
               const header = (
@@ -5231,6 +5404,7 @@ function ChallengesView({ me, admin, members, challenges, votes = [], onCreate, 
           <div className="ww-section-head"><h3>ERLEDIGT</h3></div>
           <div className="ww-board">
             {resolved.map(c => (
+              c.group ? renderGroupCard(c) :
               <div key={c.id} id={`chal-${c.id}`} className={`ww-chal-card ${c.status === 'done' ? 'done' : 'failed'} ${highlightId === c.id ? 'highlight' : ''}`}>
                 <div className="ww-chal-top">
                   <span className="ww-chal-who"><b>{uname(c.toUser)}</b>{c.secret && ' 🤫'}</span>
@@ -6561,7 +6735,7 @@ function FlunkyLiveSettings({ flunky, onPatch }) {
 // Crew
 // ============================================================
 
-function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, challenges, mlQuestions, myId, onShowUserDetail, onSaveMyWishes }) {
+function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, challenges, challengeEntries, mlQuestions, myId, onShowUserDetail, onSaveMyWishes }) {
   const myMembership = members.find(m => (m.expand?.user?.id || m.user) === myId);
   return (
     <div className="ww-crew">
@@ -6573,7 +6747,7 @@ function CrewView({ members, statsMap, event, flunky, jeopardy, customModules, c
         {members.map(m => {
           const u = m.expand?.user; if (!u) return null;
           const s = statsMap[u.id] || { beer: 0, mische: 0 };
-          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges, mlQuestions);
+          const points = computeTotalPoints(u.id, s, event, flunky, customModules, jeopardy, challenges, mlQuestions, challengeEntries);
           // Event-specific wishes live on the membership row.
           const food = m.foodWishes || '';
           const drink = m.drinkWishes || '';
@@ -6651,7 +6825,7 @@ function MyEventWishes({ membership, onSave, eventName }) {
 // User detail drawer (point breakdown)
 // ============================================================
 
-function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, challenges, mlQuestions, isMe, admin, onSetBonus, onClose }) {
+function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, customModules, challenges, challengeEntries, mlQuestions, isMe, admin, onSetBonus, onClose }) {
   if (!user) return null;
   const evFood = membership?.foodWishes || '';
   const evDrink = membership?.drinkWishes || '';
@@ -6724,7 +6898,7 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
     });
   }
   const jeopardyPts = jeopardyBreakdown.reduce((s, x) => s + x.pts, 0);
-  const challengePts = computeChallengePoints(user.id, challenges);
+  const challengePts = computeChallengePoints(user.id, challenges, challengeEntries);
   const mlPts = computeMostLikelyPoints(user.id, mlQuestions);
   const bonus = Number(stats?.bonus) || 0;
 

@@ -560,6 +560,32 @@ export async function createChallenge({ eventId, toUser, text, reward, secret = 
   });
 }
 
+// Group challenge: ONE row carrying all `participants`, plus one entry per
+// participant (their personal photo + verdict). The creator sets the reward;
+// the host/creator resolves each participant ✓/✗. `participants` already
+// includes the creator when they chose to take part.
+export async function createGroupChallenge({ eventId, participants, text, reward, isPhoto = false }) {
+  const me = pb.authStore.record.id;
+  const takers = Array.from(new Set((participants || []).filter(Boolean)));
+  const rec = await pb.collection('challenges').create({
+    event: eventId,
+    fromUser: me,
+    toUser: me, // placeholder — group logic uses `participants`/entries, not toUser
+    text,
+    reward: Number(reward) || 0,
+    penalty: 0,
+    status: 'open',
+    secret: false,
+    isPhoto: !!isPhoto,
+    group: true,
+    participants: takers,
+  });
+  await Promise.all(takers.map(uid =>
+    pb.collection('challenge_entries').create({ event: eventId, challenge: rec.id, user: uid, status: 'pending' })
+  ));
+  return rec;
+}
+
 // ---- Challenge group votes (one row per challenge+voter+phase) ----
 export async function listChallengeVotes(eventId) {
   return pb.collection('challenge_votes').getFullList({ filter: `event="${eventId}"` });
@@ -582,6 +608,26 @@ export async function updateChallenge(id, patch) {
 
 export async function deleteChallenge(id) {
   return pb.collection('challenges').delete(id);
+}
+
+// ---- Group-challenge entries (one row per participant) ----
+export async function listChallengeEntries(eventId) {
+  return pb.collection('challenge_entries').getFullList({ filter: `event="${eventId}"` });
+}
+export async function updateChallengeEntry(id, patch) {
+  return pb.collection('challenge_entries').update(id, patch);
+}
+// A participant uploads their own photo proof (multipart). The backend guard
+// (challenges.pb.js) ensures a plain participant can only touch the photo field.
+export async function uploadChallengeEntryPhoto(entryId, file) {
+  const fd = new FormData();
+  fd.append('photo', file);
+  return pb.collection('challenge_entries').update(entryId, fd);
+}
+export function challengeEntryPhotoUrl(entry, thumb) {
+  if (!entry?.photo) return '';
+  try { return pb.files.getURL(entry, entry.photo, thumb ? { thumb } : {}); }
+  catch { return ''; }
 }
 
 // ---- Werwolf ----
@@ -716,6 +762,7 @@ export async function subscribeEvent(eventId, onChange) {
     safe(pb.collection('polls').subscribe('*', wrap('polls', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenges').subscribe('*', wrap('challenges', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('challenge_votes').subscribe('*', wrap('challenge_votes', (ev) => ev.record?.event === eventId))),
+    safe(pb.collection('challenge_entries').subscribe('*', wrap('challenge_entries', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('notifications').subscribe('*', wrap('notifications', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('werewolf').subscribe('*', wrap('werewolf', (ev) => ev.record?.event === eventId))),
     safe(pb.collection('werewolf_roles').subscribe('*', wrap('werewolf_roles', (ev) => ev.record?.event === eventId))),
