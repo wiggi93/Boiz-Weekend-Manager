@@ -170,16 +170,15 @@ const levelPoints = (level) => {
   return n >= 10 ? n : n * 100;
 };
 
-const jeopardyRoundScores = (round) => {
+const jeopardyTeams = (jeopardy) => (Array.isArray(jeopardy?.teams) ? jeopardy.teams : []);
+const jeopardyTeamOf = (teams, uid) => { for (const t of (teams || [])) if ((t?.members || []).includes(uid)) return t.id; return null; };
+
+// Per-tile raw scores: winner +pts, everyone else who tried −half.
+const jeopardyRawScores = (round) => {
   const map = {};
   for (const q of round?.questions || []) {
     const pts = levelPoints(q.level);
-    if (q.winnerUserId) {
-      map[q.winnerUserId] = (map[q.winnerUserId] || 0) + pts;
-    }
-    // Every user who tried and didn't end up winning loses half the
-    // question's points. Penalty applies whether the question was
-    // eventually won by someone else or abandoned with "Niemand".
+    if (q.winnerUserId) map[q.winnerUserId] = (map[q.winnerUserId] || 0) + pts;
     const penalty = Math.floor(pts / 2);
     for (const u of q.triedUsers || []) {
       if (!u || u === q.winnerUserId) continue;
@@ -189,16 +188,46 @@ const jeopardyRoundScores = (round) => {
   return map;
 };
 
+// Per-player round scores. In team mode every team member shares the team total.
+const jeopardyRoundScores = (round, jeopardy) => {
+  const raw = jeopardyRawScores(round);
+  const teams = jeopardyTeams(jeopardy);
+  if (teams.length === 0) return raw;
+  const teamTotal = {};
+  for (const [uid, s] of Object.entries(raw)) { const t = jeopardyTeamOf(teams, uid) || `solo-${uid}`; teamTotal[t] = (teamTotal[t] || 0) + s; }
+  const out = {};
+  for (const t of teams) for (const u of (t.members || [])) out[u] = teamTotal[t.id] || 0;
+  for (const uid of Object.keys(raw)) { if (!jeopardyTeamOf(teams, uid)) out[uid] = teamTotal[`solo-${uid}`] || 0; }
+  return out;
+};
+
+// Per-team round scores (for ranking teams).
+const jeopardyRoundTeamScores = (round, teams) => {
+  const raw = jeopardyRawScores(round);
+  const ts = {};
+  for (const t of teams) ts[t.id] = 0;
+  for (const [uid, s] of Object.entries(raw)) { const t = jeopardyTeamOf(teams, uid); if (t) ts[t] = (ts[t] || 0) + s; }
+  return ts;
+};
+
 const computeJeopardyPoints = (userId, jeopardy) => {
   if (!jeopardy) return 0;
   const positionPts = Array.isArray(jeopardy.pointsPerPosition) ? jeopardy.pointsPerPosition : [];
+  const teams = jeopardyTeams(jeopardy);
   let total = 0;
   for (const r of jeopardy.rounds || []) {
     if (!r.finishedAt) continue;
-    const scores = jeopardyRoundScores(r);
-    const ranking = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-    const idx = ranking.findIndex(([uid]) => uid === userId);
-    if (idx >= 0 && idx < positionPts.length) total += positionPts[idx] || 0;
+    if (teams.length > 0) {
+      const myTeam = jeopardyTeamOf(teams, userId);
+      if (!myTeam) continue;
+      const ranking = Object.entries(jeopardyRoundTeamScores(r, teams)).sort((a, b) => b[1] - a[1]);
+      const idx = ranking.findIndex(([tid]) => tid === myTeam);
+      if (idx >= 0 && idx < positionPts.length) total += positionPts[idx] || 0;
+    } else {
+      const ranking = Object.entries(jeopardyRawScores(r)).sort((a, b) => b[1] - a[1]);
+      const idx = ranking.findIndex(([uid]) => uid === userId);
+      if (idx >= 0 && idx < positionPts.length) total += positionPts[idx] || 0;
+    }
   }
   return total;
 };
@@ -3427,6 +3456,10 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const participants = (jeopardy?.participants || []).map(uid => usersById[uid]).filter(Boolean);
   const positionPts = jeopardy?.pointsPerPosition || [];
   const hostPlays = !!jeopardy?.hostPlays;
+  const teams = jeopardyTeams(jeopardy);
+  const teamMode = teams.length > 0;
+  const teamById = useMemo(() => { const m = {}; for (const t of teams) m[t.id] = t; return m; }, [jeopardy?.teams]);
+  const myTeamId = teamMode ? jeopardyTeamOf(teams, me.id) : null;
   const remote = !!jeopardy?.remoteMode;
   const spicy = !!jeopardy?.spicyMode;
 
@@ -3461,7 +3494,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
 
   const categories = currentRound?.categories || jeopardy?.categories || [];
 
-  const scoresByUser = useMemo(() => currentRound ? jeopardyRoundScores(currentRound) : {}, [currentRound]);
+  const scoresByUser = useMemo(() => currentRound ? jeopardyRoundScores(currentRound, jeopardy) : {}, [currentRound, jeopardy]);
   const ranking = useMemo(() => Object.entries(scoresByUser).sort((a, b) => b[1] - a[1]), [scoresByUser]);
 
   const myRoundScore = scoresByUser[me.id] || 0;
@@ -3680,17 +3713,29 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             <div className="ww-section" style={{ marginTop: 12 }}>
               <div className="ww-section-head"><h3>STAND RUNDE</h3></div>
               <div className="ww-board">
-                {participants
-                  .map(u => ({ u, pts: scoresByUser[u.id] || 0 }))
-                  .sort((a, b) => b.pts - a.pts)
-                  .map(({ u, pts }, i) => (
-                    <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
-                      <div className="ww-board-rank">{rankBadge(i)}</div>
-                      <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
-                      <div className="ww-board-name">{u.displayName || u.email}</div>
-                      <div className="ww-board-pts">{pts}<span>pkt</span></div>
-                    </div>
-                  ))}
+                {teamMode
+                  ? Object.entries(jeopardyRoundTeamScores(currentRound, teams))
+                      .map(([tid, pts]) => ({ team: teamById[tid], pts }))
+                      .filter(x => x.team)
+                      .sort((a, b) => b.pts - a.pts)
+                      .map(({ team, pts }, i) => (
+                        <div key={team.id} className={`ww-board-row ${team.id === myTeamId ? 'me' : ''}`}>
+                          <div className="ww-board-rank">{rankBadge(i)}</div>
+                          <div className="ww-board-name">{team.name}<span className="ww-muted" style={{ fontSize: 11 }}> · {(team.members || []).map(uid => usersById[uid]?.displayName || usersById[uid]?.email?.split('@')[0] || '?').join(' & ')}</span></div>
+                          <div className="ww-board-pts">{pts}<span>pkt</span></div>
+                        </div>
+                      ))
+                  : participants
+                      .map(u => ({ u, pts: scoresByUser[u.id] || 0 }))
+                      .sort((a, b) => b.pts - a.pts)
+                      .map(({ u, pts }, i) => (
+                        <div key={u.id} className={`ww-board-row ${u.id === me.id ? 'me' : ''}`}>
+                          <div className="ww-board-rank">{rankBadge(i)}</div>
+                          <div className="ww-board-emoji">{u.emoji || '🍺'}</div>
+                          <div className="ww-board-name">{u.displayName || u.email}</div>
+                          <div className="ww-board-pts">{pts}<span>pkt</span></div>
+                        </div>
+                      ))}
               </div>
               <div className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 8 }}>
                 Event-Punkte bei Rundenende: {positionPts.map((p, i) => `${i + 1}. → ${p}`).join(' · ')}
@@ -3717,7 +3762,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
           <div className="ww-board">
             {rounds.map((r, ri) => {
               if (!r.finishedAt) return null;
-              const sc = jeopardyRoundScores(r);
+              const sc = jeopardyRoundScores(r, jeopardy);
               const rk = Object.entries(sc).sort((a, b) => b[1] - a[1]);
               const myPlace = rk.findIndex(([uid]) => uid === me.id);
               const myEventPts = myPlace >= 0 && myPlace < positionPts.length ? (positionPts[myPlace] || 0) : 0;
@@ -3761,6 +3806,10 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         const winner = q.winnerUserId ? usersById[q.winnerUserId] : null;
         const dran = q.currentlyAnswering ? usersById[q.currentlyAnswering] : null;
         const iAmDran = !!q.currentlyAnswering && q.currentlyAnswering === me.id;
+        // In team mode the WHOLE answering team is "dran": they discuss together
+        // and none of them may see the answer or judge their own tile.
+        const dranTeamId = teamMode && q.currentlyAnswering ? jeopardyTeamOf(teams, q.currentlyAnswering) : null;
+        const iAmInDranTeam = teamMode && dranTeamId ? (myTeamId === dranTeamId) : iAmDran;
         const iAmParticipant = participants.some(p => p.id === me.id);
         // Solo: when the dran person is the only participant there's nobody
         // else to judge, so they self-judge (answer shown + Richtig/Falsch).
@@ -3776,14 +3825,14 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         //  soloMode      → the dran player self-judges (no one else there).
         //  remote        → the dran player TYPES their answer; once submitted
         //                  everyone sees it + the solution and the others judge.
-        const seesAnswer = remote ? !!q.typedAnswer : (hostPlays ? (!iAmDran || soloMode) : admin);
+        const seesAnswer = remote ? !!q.typedAnswer : (hostPlays ? (!iAmInDranTeam || soloMode) : admin);
         // Interaction is gated by the round being live (activeOpen only exists
         // within an unfinished round), NOT by the event's global active flag —
         // otherwise a host playing solo without flipping the event live can
         // open a tile but never judge it.
         const canJudge = remote
-          ? (!!q.typedAnswer && (admin || soloMode || (iAmParticipant && !iAmDran)))
-          : (hostPlays ? (iAmParticipant && (!iAmDran || soloMode)) : admin);
+          ? (!!q.typedAnswer && (admin || soloMode || (iAmParticipant && !iAmInDranTeam)))
+          : (hostPlays ? (iAmParticipant && (!iAmInDranTeam || soloMode)) : admin);
 
         // Step 1: no one assigned yet (rare — e.g. host re-opened). Host picks.
         if (!q.currentlyAnswering) {
@@ -3842,9 +3891,11 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               )
             ) : seesAnswer ? (
               <div className="ww-jeo-answer">💡 {q.a}</div>
-            ) : iAmDran ? (
+            ) : iAmInDranTeam ? (
               <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
-                🤫 Du bist dran — sag deine Antwort laut.<br />
+                {teamMode
+                  ? `🤫 Ihr seid dran${myTeamId && teamById[myTeamId]?.name ? ` (${teamById[myTeamId].name})` : ''} — besprecht euch und sagt eure Antwort laut.`
+                  : '🤫 Du bist dran — sag deine Antwort laut.'}<br />
                 {hostPlays ? 'Die anderen sehen die Lösung und werten.' : 'Der Host sieht die Lösung und entscheidet.'}
               </div>
             ) : (
@@ -3991,6 +4042,26 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
 
   const participants = jeopardy?.participants || [];
   const memberIds = members.map(m => m.expand?.user?.id).filter(Boolean);
+  const usersById = useMemo(() => { const m = {}; for (const mem of members) if (mem.expand?.user) m[mem.expand.user.id] = mem.expand.user; return m; }, [members]);
+
+  // --- Teams ---
+  const teams = jeopardy?.teams || [];
+  const teamMode = teams.length > 0;
+  const playerIds = participants.length ? participants : memberIds;
+  const shuffleTeams = (n) => {
+    const ids = [...playerIds];
+    for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    const t = Array.from({ length: Math.max(2, n) }, (_, i) => ({ id: `t${i + 1}`, name: `Team ${i + 1}`, members: [] }));
+    ids.forEach((id, i) => t[i % t.length].members.push(id));
+    onPatch({ teams: t });
+  };
+  const clearTeams = () => onPatch({ teams: [] });
+  const cycleTeam = (uid) => {
+    if (teams.length === 0) return;
+    const cur = teams.findIndex(t => (t.members || []).includes(uid));
+    const next = (cur + 1) % teams.length;
+    onPatch({ teams: teams.map((t, i) => ({ ...t, members: (t.members || []).filter(x => x !== uid).concat(i === next ? [uid] : []) })) });
+  };
 
   const updateCat = (i, v) => {
     const next = [...cats]; while (next.length < 5) next.push('');
@@ -4152,6 +4223,39 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
           );
         })}
       </div>
+
+      <button className={`ww-module-toggle ${teamMode ? 'on' : ''}`} style={{ marginTop: 12 }}
+        onClick={() => teamMode ? clearTeams() : shuffleTeams(2)}>
+        <span className="ww-mod-icon">👥</span>
+        <span className="ww-mod-toggle-text">
+          <b>Team-Modus {teamMode ? 'an' : 'aus'}</b>
+          <span>{teamMode ? 'Partner besprechen sich — beide kriegen die Punkte' : 'Ab 4 Spielern: in Teams spielen'}</span>
+        </span>
+        {teamMode ? <Check size={14} /> : <X size={14} />}
+      </button>
+      {teamMode && (<>
+        <div className="ww-flunky-controls" style={{ marginTop: 8 }}>
+          <span className="ww-muted" style={{ fontSize: 12, alignSelf: 'center' }}>Anzahl:</span>
+          {[2, 3, 4].map(n => (
+            <button key={n} className={`ww-mini-btn ${teams.length === n ? 'active' : ''}`} onClick={() => shuffleTeams(n)} disabled={n > playerIds.length}>{n}</button>
+          ))}
+          <button className="ww-mini-btn" onClick={() => shuffleTeams(teams.length)}><Dice5 size={12} /> Mischen</button>
+        </div>
+        <div className="ww-muted" style={{ fontSize: 11, margin: '6px 0 2px' }}>Tipp auf ein Team, um den Spieler zu verschieben:</div>
+        <div className="ww-flunky-assign">
+          {playerIds.map(uid => {
+            const u = usersById[uid]; if (!u) return null;
+            const ti = teams.findIndex(t => (t.members || []).includes(uid));
+            return (
+              <div key={uid} className="ww-flunky-assign-row">
+                <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+                <span className="ww-user-mgmt-name">{u.displayName || u.email}</span>
+                <button className={`ww-mini-btn ${ti >= 0 ? 'active' : ''}`} onClick={() => cycleTeam(uid)}>{ti >= 0 ? `Team ${ti + 1}` : '— wählen'}</button>
+              </div>
+            );
+          })}
+        </div>
+      </>)}
 
       <button className="ww-big-cta green" onClick={startRound} disabled={busy} style={{ marginTop: 14 }}>
         <Play size={20} /><span>{busy ? 'STARTE…' : 'NEUE RUNDE STARTEN'}</span>
@@ -6597,14 +6701,26 @@ function UserDetailDrawer({ user, membership, stats, event, flunky, jeopardy, cu
   const jeopardyBreakdown = [];
   if (jeopardy) {
     const positionPts = Array.isArray(jeopardy.pointsPerPosition) ? jeopardy.pointsPerPosition : [];
+    const jTeams = jeopardyTeams(jeopardy);
     (jeopardy.rounds || []).forEach((r, ri) => {
       if (!r.finishedAt) return;
-      const scores = jeopardyRoundScores(r);
-      const ranking = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-      const idx = ranking.findIndex(([uid]) => uid === user.id);
-      if (idx < 0) return;
-      const pts = (idx < positionPts.length ? positionPts[idx] : 0) || 0;
-      jeopardyBreakdown.push({ roundNo: ri + 1, place: idx + 1, roundScore: scores[user.id] || 0, pts });
+      if (jTeams.length > 0) {
+        const myTeam = jeopardyTeamOf(jTeams, user.id);
+        if (!myTeam) return;
+        const ts = jeopardyRoundTeamScores(r, jTeams);
+        const ranking = Object.entries(ts).sort((a, b) => b[1] - a[1]);
+        const idx = ranking.findIndex(([tid]) => tid === myTeam);
+        if (idx < 0) return;
+        const pts = (idx < positionPts.length ? positionPts[idx] : 0) || 0;
+        jeopardyBreakdown.push({ roundNo: ri + 1, place: idx + 1, roundScore: ts[myTeam] || 0, pts });
+      } else {
+        const scores = jeopardyRawScores(r);
+        const ranking = Object.entries(scores).sort((a, b) => b[1] - a[1]);
+        const idx = ranking.findIndex(([uid]) => uid === user.id);
+        if (idx < 0) return;
+        const pts = (idx < positionPts.length ? positionPts[idx] : 0) || 0;
+        jeopardyBreakdown.push({ roundNo: ri + 1, place: idx + 1, roundScore: scores[user.id] || 0, pts });
+      }
     });
   }
   const jeopardyPts = jeopardyBreakdown.reduce((s, x) => s + x.pts, 0);
