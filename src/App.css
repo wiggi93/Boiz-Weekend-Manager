@@ -2152,6 +2152,33 @@
 .ww-chal-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
 .ww-chal-badge.secret { background: rgba(168,85,247,0.18); color: #c084fc; }
 .ww-chal-badge.photo { background: rgba(6,182,212,0.18); color: #22d3ee; }
+.ww-chal-badge.group { background: rgba(34,197,94,0.18); color: #4ade80; }
+
+/* ============ Group challenge (one combined card) ============ */
+/* Compose form: pick which co-players take part */
+.ww-chal-group-pick { display: flex; flex-direction: column; }
+.ww-chal-group-members { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ww-chal-member {
+  padding: 7px 11px; border-radius: 999px; cursor: pointer; font-size: 13px;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+}
+.ww-chal-member.on { background: rgba(34,197,94,0.16); border-color: #4ade80; color: #4ade80; font-weight: 600; }
+
+/* Combined card: per-participant rows with their own photo + verdict */
+.ww-chal-card.group { border-color: #4ade80; }
+.ww-chal-entries { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.ww-chal-entry {
+  padding: 10px; border-radius: 10px;
+  background: var(--card-2); border: 1px solid var(--border);
+}
+.ww-chal-entry.done { border-color: rgba(34,197,94,0.55); }
+.ww-chal-entry.failed { border-color: rgba(239,68,68,0.5); }
+.ww-chal-entry-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ww-chal-entry-name { font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.ww-chal-entry-status { font-size: 15px; }
+.ww-chal-entry-status.done { color: #4ade80; }
+.ww-chal-entry-status.failed { color: #f87171; }
+.ww-chal-entry-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 
 /* ============ Wer würde eher (Most-Likely-To) ============ */
 .ww-ml-q { font-size: 16px; font-weight: 700; line-height: 1.3; }

@@ -32,9 +32,33 @@ onRecordAfterCreateSuccess((e) => {
     const fromUser = rec.get("fromUser");
     const eventId = rec.get("event");
     const secret = !!rec.get("secret");
+    const group = !!rec.get("group");
     const text = rec.get("text") || "";
     const nameOf = (id) => { try { return e.app.findRecordById("users", id).get("displayName") || "Jemand"; } catch (_) { return "Jemand"; } };
     const fromName = nameOf(fromUser);
+
+    // Group challenge: exactly ONE push per participant (no per-pairing voting
+    // storm), plus a single feed entry.
+    if (group) {
+      const participants = push.parseArr(rec, "participants");
+      const recipients = participants.filter((id) => id && id !== fromUser);
+      if (recipients.length) {
+        push.sendPushToUsers(e.app, recipients, {
+          title: "🎯 Gruppen-Challenge!",
+          body: `${fromName}: ${text}`,
+          url: `/?event=${eventId}&goto=challenges&challenge=${rec.id}`,
+          tag: `chal-${rec.id}`,
+        });
+      }
+      push.logNotif(e.app, {
+        event: eventId, type: "challenge",
+        title: "🎯 Neue Gruppen-Challenge",
+        body: `${fromName}: ${text}`,
+        url: `/?event=${eventId}&goto=challenges&challenge=${rec.id}`,
+      });
+      e.next();
+      return;
+    }
 
     if (toUser && toUser !== fromUser) {
       push.sendPushToUsers(e.app, [toUser], {

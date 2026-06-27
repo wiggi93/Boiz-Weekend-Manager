@@ -38,3 +38,45 @@ onRecordUpdateRequest((e) => {
   }
   e.next();
 }, "challenges");
+
+// Guard for group-challenge entries: a plain participant may update ONLY their
+// own entry's photo proof. The verdict (status) stays with the challenge
+// creator, event hosts and site admins.
+onRecordUpdateRequest((e) => {
+  try {
+    const auth = e.auth;
+    if (!auth) { e.next(); return; }
+    if (auth.get("role") === "admin") { e.next(); return; }
+
+    const rec = e.record; // record with the requested changes applied
+
+    // Creator / event host?
+    let privileged = false;
+    try {
+      const chal = e.app.findRecordById("challenges", rec.get("challenge"));
+      if (chal.get("fromUser") === auth.id) privileged = true;
+      if (!privileged) {
+        const ev = e.app.findRecordById("events", chal.get("event"));
+        const hosts = ev.get("hostUsers") || [];
+        privileged = ev.get("createdBy") === auth.id || (Array.isArray(hosts) && hosts.indexOf(auth.id) !== -1);
+      }
+    } catch (_) {}
+    if (privileged) { e.next(); return; }
+
+    // Otherwise: must be the entry's own user, and only the photo may differ.
+    const original = e.app.findRecordById("challenge_entries", rec.id);
+    if (original.get("user") !== auth.id) {
+      throw new ForbiddenError("Nur der Auftraggeber oder Host darf das ändern.");
+    }
+    const guarded = ["status", "user", "challenge", "event"];
+    for (const f of guarded) {
+      if (String(rec.get(f)) !== String(original.get(f))) {
+        throw new ForbiddenError("Du darfst hier nur deinen Fotobeweis hochladen.");
+      }
+    }
+  } catch (err) {
+    if (err && err.constructor && err.constructor.name === "ForbiddenError") throw err;
+    console.log("[challenge_entry] guard:", err);
+  }
+  e.next();
+}, "challenge_entries");
