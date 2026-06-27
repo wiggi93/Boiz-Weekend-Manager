@@ -3488,6 +3488,42 @@ function JeoTypeAnswer({ onSubmit }) {
   );
 }
 
+// Answer countdown. Driven from the persisted `answerStartedAt` timestamp so it
+// stays in sync on every device via realtime. Purely visual — when it hits 0 it
+// flashes "Zeit abgelaufen" and buzzes; the host still decides richtig/falsch.
+function JeoCountdown({ startedAt, seconds }) {
+  const total = Number(seconds) || 0;
+  const start = startedAt ? new Date(startedAt).getTime() : 0;
+  const calc = () => (!total || !start) ? total : Math.max(0, total - Math.floor((Date.now() - start) / 1000));
+  const [remaining, setRemaining] = useState(calc);
+  const buzzedRef = useRef(false);
+  useEffect(() => {
+    if (!total || !start) return;
+    buzzedRef.current = false;
+    const tick = () => {
+      const rem = calc();
+      setRemaining(rem);
+      if (rem <= 0 && !buzzedRef.current) {
+        buzzedRef.current = true;
+        try { navigator.vibrate?.([120, 60, 120]); } catch (_) {}
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 250);
+    return () => clearInterval(iv);
+  }, [total, start]);
+  if (!total || !start) return null;
+  const pct = Math.max(0, Math.min(100, (remaining / total) * 100));
+  const expired = remaining <= 0;
+  const danger = !expired && remaining <= 5;
+  return (
+    <div className={`ww-jeo-timer ${danger ? 'danger' : ''} ${expired ? 'expired' : ''}`}>
+      <div className="ww-jeo-timer-bar"><div className="ww-jeo-timer-fill" style={{ width: `${pct}%` }} /></div>
+      <div className="ww-jeo-timer-label">{expired ? '⏱ Zeit abgelaufen!' : `⏱ ${remaining}s`}</div>
+    </div>
+  );
+}
+
 function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSettings, onJeopardyRegenerate }) {
   const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
   const [compliment, setCompliment] = useState(null); // spicy-mode popup text
@@ -3512,6 +3548,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const myTeamId = teamMode ? jeopardyTeamOf(teams, me.id) : null;
   const remote = !!jeopardy?.remoteMode;
   const spicy = !!jeopardy?.spicyMode;
+  const answerSeconds = Number(jeopardy?.answerSeconds) || 0; // 0 = kein Limit
 
   // Spicy mode: pop a dirty compliment on MY screen when I just won a
   // HIGH-VALUE question (≥400 pts). Detected via realtime; seed the
@@ -3586,10 +3623,12 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     const t = rounds[ri]?.questions?.[qi];
     if (t && (t.opened || t.winnerUserId || t.resolved || t.revealed ||
         (Array.isArray(t.triedUsers) && t.triedUsers.length > 0))) return;
-    // The picker (whoever tapped the tile) auto-becomes the first dran.
-    resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [] }, false);
+    // The picker (whoever tapped the tile) auto-becomes the first dran. Stamp
+    // when answering started so the countdown (if enabled) syncs across devices.
+    resolveQuestion(ri, qi, { opened: true, currentlyAnswering: dranUserId || null, triedUsers: [], answerStartedAt: new Date().toISOString() }, false);
   };
-  const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId }, false);
+  // Reassigning the answerer restarts the countdown for the new dran.
+  const setDran = (ri, qi, userId) => resolveQuestion(ri, qi, { currentlyAnswering: userId, answerStartedAt: new Date().toISOString() }, false);
   // Remote mode: the dran player types their answer; it's stored on the
   // question and shown to everyone so the others can judge it.
   const submitTypedAnswer = (ri, qi, text) => resolveQuestion(ri, qi, { typedAnswer: String(text || '').slice(0, 200) }, false);
@@ -3618,12 +3657,26 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
     resolveQuestion(ri, qi, { winnerUserId: null, triedUsers: [], opened: false, currentlyAnswering: null, resolved: false, revealed: false }, false);
   };
 
-  // Current picker derivation
+  // Current picker derivation. In team mode pickerOrder holds TEAM ids (the turn
+  // belongs to "Team A", not an individual); in solo mode it holds user ids.
+  // We tolerate legacy rounds whose order still holds user ids while teams are
+  // set by resolving a user id back to its team.
   const pickerOrder = currentRound?.pickerOrder || [];
   const pickerIdx = currentRound?.pickerIdx || 0;
-  const currentPickerId = pickerOrder.length > 0 ? pickerOrder[pickerIdx % pickerOrder.length] : null;
-  const currentPicker = currentPickerId ? usersById[currentPickerId] : null;
-  const iAmPicker = currentPickerId === me.id;
+  const currentPickerKey = pickerOrder.length > 0 ? pickerOrder[pickerIdx % pickerOrder.length] : null;
+  let currentPickerTeam = null, currentPicker = null, iAmPicker = false;
+  if (currentPickerKey != null) {
+    if (teamMode) {
+      currentPickerTeam = teamById[currentPickerKey] || teamById[jeopardyTeamOf(teams, currentPickerKey)] || null;
+      iAmPicker = !!currentPickerTeam && myTeamId === currentPickerTeam.id;
+    } else {
+      currentPicker = usersById[currentPickerKey] || null;
+      iAmPicker = currentPickerKey === me.id;
+    }
+  }
+  // A truthy picker id for the "host failsafe" gates (open a tile when there's
+  // no rotation yet). Works for both modes.
+  const currentPickerId = currentPickerKey;
 
   const finishRound = async (ri) => {
     if (!admin) return;
@@ -3689,10 +3742,12 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             <h3>RUNDE {currentRoundIdx + 1}</h3>
           </div>
 
-          {hostPlays && !currentRound.finishedAt && currentPicker && (
+          {hostPlays && !currentRound.finishedAt && (currentPickerTeam || currentPicker) && (
             <div className={`ww-jeo-picker ${iAmPicker ? 'mine' : ''}`}>
-              🎯 An der Reihe: <b>{currentPicker.emoji || '🍺'} {currentPicker.displayName || currentPicker.email}</b>
-              {iAmPicker && <span style={{ marginLeft: 8 }}>— du bist dran, wähle ein Tile</span>}
+              🎯 An der Reihe: <b>{currentPickerTeam
+                ? `👥 ${currentPickerTeam.name}`
+                : `${currentPicker.emoji || '🍺'} ${currentPicker.displayName || currentPicker.email}`}</b>
+              {iAmPicker && <span style={{ marginLeft: 8 }}>— {currentPickerTeam ? 'ihr seid' : 'du bist'} dran, wählt ein Tile</span>}
             </div>
           )}
 
@@ -3859,6 +3914,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         // In team mode the WHOLE answering team is "dran": they discuss together
         // and none of them may see the answer or judge their own tile.
         const dranTeamId = teamMode && q.currentlyAnswering ? jeopardyTeamOf(teams, q.currentlyAnswering) : null;
+        const dranTeam = dranTeamId ? teamById[dranTeamId] : null;
         const iAmInDranTeam = teamMode && dranTeamId ? (myTeamId === dranTeamId) : iAmDran;
         const iAmParticipant = participants.some(p => p.id === me.id);
         // Solo: when the dran person is the only participant there's nobody
@@ -3923,8 +3979,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         return (
           <ModuleSettingsDrawer title={`${q.category} · ${levelPoints(q.level)} Pkt`} onClose={admin ? close : (() => {})}>
             <div className="ww-jeo-dran">
-              🎯 dran: <b>{dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
+              🎯 dran: <b>{teamMode && dranTeam
+                ? `👥 ${dranTeam.name}`
+                : dran ? `${dran.emoji || '🍺'} ${dran.displayName || dran.email}` : '?'}</b>
             </div>
+            {answerSeconds > 0 && !winner && (
+              <JeoCountdown startedAt={q.answerStartedAt} seconds={answerSeconds} />
+            )}
             <JeoPrompt q={q} />
             {remote ? (
               q.typedAnswer ? (
@@ -4252,6 +4313,23 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
         </span>
         {jeopardy?.spicyMode ? <Check size={14} /> : <X size={14} />}
       </button>
+
+      <label className="ww-label" style={{ marginTop: 14 }}>⏱ ANTWORT-TIMER</label>
+      <div className="ww-flunky-controls">
+        {[0, 10, 15, 30, 45, 60].map(s => (
+          <button
+            key={s}
+            className={`ww-mini-btn ${(Number(jeopardy?.answerSeconds) || 0) === s ? 'active' : ''}`}
+            onClick={() => onPatch({ answerSeconds: s })}
+          >
+            {s === 0 ? 'Aus' : `${s}s`}
+          </button>
+        ))}
+      </div>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Begrenzt die Antwortzeit pro Frage. Bei „Aus" gibt es kein Zeitlimit — der
+        Countdown läuft sichtbar für alle, bei 0 vibriert das Handy.
+      </p>
 
       <div className="ww-flunky-controls" style={{ marginTop: 10 }}>
         <button className="ww-mini-btn" onClick={allParticipants}>Alle dabei</button>

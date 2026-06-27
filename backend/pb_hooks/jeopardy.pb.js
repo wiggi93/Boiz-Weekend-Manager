@@ -99,9 +99,19 @@ routerAdd("POST", "/api/jeopardy/start-round", (e) => {
       .filter(c => typeof c === "string" && c.trim().length > 0).map(c => c.trim());
   }
 
-  // Picker order: shuffle the participants.
+  // Picker order. In TEAM mode the turn belongs to a team ("Team A ist dran"),
+  // so we rotate through team ids — not individual players. Otherwise we shuffle
+  // the participants. The frontend resolves each pickerOrder entry as a team id
+  // (team mode) or a user id (solo).
   const participants = lib.parseArr(jrec, "participants").filter(x => typeof x === "string" && x);
-  const pickerOrder = participants.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+  const teamsArr = lib.parseArr(jrec, "teams")
+    .filter(t => t && t.id && Array.isArray(t.members) && t.members.length > 0);
+  let pickerOrder;
+  if (teamsArr.length > 0) {
+    pickerOrder = teamsArr.map(t => [Math.random(), t.id]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+  } else {
+    pickerOrder = participants.map(v => [Math.random(), v]).sort((a, b) => a[0] - b[0]).map(p => p[1]);
+  }
 
   const round = {
     id: String(Date.now()),
