@@ -1245,6 +1245,39 @@
   animation: pulse-opened 1.6s ease-in-out infinite;
 }
 
+/* Answer countdown */
+.ww-jeo-timer {
+  margin: 0 0 12px;
+}
+.ww-jeo-timer-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.ww-jeo-timer-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 4px;
+  transition: width .25s linear, background .25s ease;
+}
+.ww-jeo-timer-label {
+  text-align: center;
+  font-size: 13px;
+  font-family: 'IBM Plex Mono', monospace;
+  letter-spacing: 0.05em;
+  margin-top: 5px;
+  color: var(--muted);
+}
+.ww-jeo-timer.danger .ww-jeo-timer-fill { background: var(--amber); }
+.ww-jeo-timer.danger .ww-jeo-timer-label { color: var(--amber); }
+.ww-jeo-timer.expired .ww-jeo-timer-fill { background: var(--red); }
+.ww-jeo-timer.expired .ww-jeo-timer-label {
+  color: var(--red);
+  font-weight: 700;
+  animation: pulse-opened 1s ease-in-out infinite;
+}
+
 .ww-jeo-cell.failed {
   background: rgba(239,68,68,0.15);
   border-color: var(--red);
