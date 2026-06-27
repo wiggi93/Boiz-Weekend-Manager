@@ -651,12 +651,13 @@ export function challengePhotoUrl(challenge, thumb) {
 export async function listMlQuestions(eventId) {
   return pb.collection('ml_questions').getFullList({ filter: `event="${eventId}"`, sort: '-created' });
 }
-export async function createMlQuestion({ eventId, text, points }) {
+export async function createMlQuestion({ eventId, text, points, round }) {
   return pb.collection('ml_questions').create({
     event: eventId,
     createdBy: pb.authStore.record.id,
     text,
     points: Number(points) || 2,
+    round: round || '',
     closed: false,
     winnerId: '',
   });
