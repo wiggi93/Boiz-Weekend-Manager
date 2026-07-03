@@ -19,6 +19,18 @@ document.addEventListener('touchend', (e) => {
 }, { passive: false });
 document.addEventListener('dblclick', (e) => e.preventDefault());
 
+// Offline banner. Plain DOM (no React coupling) so it shows on every screen —
+// on a wine hike with patchy reception it's important to KNOW that taps aren't
+// reaching the server rather than silently getting "something went wrong".
+const offlineEl = document.createElement('div');
+offlineEl.className = 'ww-offline-banner';
+offlineEl.textContent = '📡 Offline — Änderungen kommen gerade nicht an';
+document.body.appendChild(offlineEl);
+const syncOnlineState = () => document.body.classList.toggle('is-offline', !navigator.onLine);
+window.addEventListener('online', syncOnlineState);
+window.addEventListener('offline', syncOnlineState);
+syncOnlineState();
+
 // Lock to portrait where the platform supports it (installed PWA on Android /
 // Chromium). iOS Safari ignores this API — there a CSS overlay (.ww-rotate-lock
 // in App.css) covers the app in landscape instead.

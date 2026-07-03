@@ -2054,7 +2054,7 @@
   position: fixed; inset: 0; z-index: 130;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
   padding: 24px calc(20px + env(safe-area-inset-right)) 24px calc(20px + env(safe-area-inset-left));
-  background: rgba(10, 10, 11, 0.82); backdrop-filter: blur(6px);
+  background: rgba(9, 10, 16, 0.82); backdrop-filter: blur(6px);
   animation: fadein 0.18s ease-out;
 }
 .ww-compliment-card {
@@ -2086,7 +2086,7 @@
   position: fixed; inset: 0; z-index: 140;
   display: flex; align-items: center; justify-content: center;
   padding: 24px; text-align: center;
-  background: rgba(10, 10, 11, 0.9); backdrop-filter: blur(8px);
+  background: rgba(9, 10, 16, 0.9); backdrop-filter: blur(8px);
   animation: fadein 0.18s ease-out;
 }
 .ww-jeo-gen-inner { display: flex; flex-direction: column; align-items: center; gap: 12px; max-width: 320px; position: relative; }
@@ -2466,3 +2466,18 @@
 /* Cleaner taps on iOS + snappier buttons everywhere */
 * { -webkit-tap-highlight-color: transparent; }
 button, .ww-nav-btn, .ww-mod-tab { touch-action: manipulation; }
+
+/* ============ Offline banner (toggled via body.is-offline, see main.jsx) ============ */
+.ww-offline-banner {
+  display: none;
+  position: fixed; top: calc(env(safe-area-inset-top) + 6px); left: 50%;
+  transform: translateX(-50%);
+  z-index: 3000;
+  background: rgba(239, 68, 68, 0.16); border: 1px solid var(--red);
+  color: #fca5a5; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  padding: 8px 14px; border-radius: 12px;
+  font-size: 12px; font-weight: 700; white-space: nowrap;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6);
+}
+body.is-offline .ww-offline-banner { display: block; animation: ww-offline-in 0.25s ease; }
+@keyframes ww-offline-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }

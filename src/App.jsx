@@ -921,11 +921,11 @@ export default function App() {
     if (!mods.includes(moduleTab)) setModuleTab('overview');
   }, [currentEvent, moduleTab]);
 
-  // Switching module tabs starts you at the top of the new module — keeping
-  // the previous tab's scroll offset just dumped you mid-page.
+  // Switching module tabs / bottom-nav views / tools starts you at the top —
+  // keeping the previous tab's scroll offset just dumped you mid-page.
   useEffect(() => {
     document.querySelector('.ww-main')?.scrollTo?.({ top: 0 });
-  }, [moduleTab]);
+  }, [moduleTab, view, toolOpen]);
 
   // ---- Unread / "something new" indicators ----------------------------
   // Per-module latest-activity timestamp (from each record's `updated`), vs a
@@ -2392,6 +2392,8 @@ function JoinForm({ onSubmit }) {
         value={code}
         onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
         placeholder="ABC123" maxLength={6}
+        autoFocus autoCapitalize="characters" autoComplete="off" enterKeyHint="go"
+        onKeyDown={e => { if (e.key === 'Enter' && code.length === 6 && !busy) submit(); }}
       />
       {err && <div className="ww-err">{err}</div>}
       <button className={`ww-big-cta ${code.length === 6 && !busy ? '' : 'disabled'}`} onClick={submit} disabled={code.length !== 6 || busy}>
@@ -6291,7 +6293,7 @@ function WineView({ me, admin, eventId, event, members, wines, ratings, onCreate
 // Custom-module view + settings (generic competition)
 // ============================================================
 
-const ENTRANT_PALETTE = ['#f5a524', '#22c55e', '#6366f1', '#ef4444', '#06b6d4', '#a855f7', '#eab308', '#ec4899'];
+const ENTRANT_PALETTE = ['#8b7bff', '#22c55e', '#4cc9f0', '#ef4444', '#f59e0b', '#a855f7', '#eab308', '#ec4899'];
 
 function CustomModuleView({ me, mod, members, admin, active, onPatch, onOpenSettings }) {
   const usersById = useMemo(() => {
