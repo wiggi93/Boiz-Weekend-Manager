@@ -172,6 +172,45 @@ export async function kickMember(memberRecordId) {
   return pb.collection('event_members').delete(memberRecordId);
 }
 
+// ---- Invites ----
+// My pending invitations (newest first, with event + inviter expanded).
+export async function listMyInvites() {
+  const meId = pb.authStore.record?.id;
+  if (!meId) return [];
+  return pb.collection('invites').getFullList({
+    filter: `invitedUser="${meId}" && status="pending"`,
+    sort: '-created',
+    expand: 'event,invitedBy',
+  });
+}
+// Invites the host sent for an event (to show status).
+export async function listEventInvites(eventId) {
+  return pb.collection('invites').getFullList({ filter: `event="${eventId}"`, expand: 'invitedUser' });
+}
+// People the host has shared an event with (server-computed contact list).
+export async function getInviteContacts(eventId) {
+  const res = await fetch(`${PB_URL}/api/invite/contacts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: pb.authStore.token },
+    body: JSON.stringify({ eventId }),
+  });
+  if (!res.ok) throw new Error(`contacts failed (${res.status})`);
+  const data = await res.json();
+  return Array.isArray(data.contacts) ? data.contacts : [];
+}
+export async function createInvite(eventId, userId) {
+  return pb.collection('invites').create({ event: eventId, invitedUser: userId, invitedBy: pb.authStore.record.id, status: 'pending' });
+}
+export async function acceptInvite(invite) {
+  const meId = pb.authStore.record?.id;
+  try { await pb.collection('event_members').create({ event: invite.event, user: meId }); }
+  catch (e) { if (e?.status !== 400) throw e; } // 400 = already a member
+  await pb.collection('invites').update(invite.id, { status: 'accepted' });
+  return invite.expand?.event || getEvent(invite.event);
+}
+export async function declineInvite(inviteId) {
+  return pb.collection('invites').update(inviteId, { status: 'declined' });
+}
+
 // Per-event wishes live on the membership row (event-specific, unlike the
 // profile-level general preferences on the user record).
 export async function updateMembership(memberRecordId, patch) {
@@ -785,6 +824,17 @@ export async function subscribeMyMemberships(onChange) {
   try {
     return await pb.collection('event_members').subscribe('*', (ev) => {
       if (ev.record?.user === meId) onChange(ev);
+    });
+  } catch (_) { return () => {}; }
+}
+
+// New/changed invitations addressed to me (for the lobby's invite cards).
+export async function subscribeMyInvites(onChange) {
+  const meId = pb.authStore.record?.id;
+  if (!meId) return () => {};
+  try {
+    return await pb.collection('invites').subscribe('*', (ev) => {
+      if (ev.record?.invitedUser === meId) onChange(ev);
     });
   } catch (_) { return () => {}; }
 }

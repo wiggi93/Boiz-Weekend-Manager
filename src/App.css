@@ -2399,3 +2399,19 @@
 .ww-ml-round-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
 .ww-ml-qcard { padding: 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card-2); }
 .ww-ml-qcard .ww-ml-options { margin-top: 8px; }
+
+/* ============ Event invites ============ */
+.ww-invite-block { margin-bottom: 14px; }
+.ww-invite-card {
+  display: flex; align-items: center; gap: 10px; justify-content: space-between;
+  padding: 12px; border-radius: 10px; margin-bottom: 8px;
+  background: rgba(245,165,36,0.10); border: 1px solid var(--amber);
+}
+.ww-invite-info { min-width: 0; }
+.ww-invite-name { font-weight: 700; font-size: 15px; }
+.ww-invite-by { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.ww-invite-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.ww-invite-chip {
+  display: inline-block; font-size: 12px; padding: 3px 8px; border-radius: 6px;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+}
