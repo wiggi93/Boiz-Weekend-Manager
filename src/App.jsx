@@ -13,6 +13,7 @@ import {
   login, register, logout, requestPasswordReset, confirmPasswordReset, requestVerification, confirmVerification, broadcastEmail,
   listAllEvents, getEvent, createEvent, updateEvent, deleteEvent,
   listMyMemberships, listEventMembers, joinByCode, leaveEvent, kickMember, updateMembership,
+  listMyInvites, listEventInvites, getInviteContacts, createInvite, acceptInvite, declineInvite, subscribeMyInvites,
   loadEventStats, setMyCount, setStatsBonus, resetEventStats,
   updateMyProfile, setUserRole, setUserApproved, setUserVerified, deleteUser, loadAllUsers,
   getFlunky, updateFlunky,
@@ -304,6 +305,7 @@ export default function App() {
     try { return new URLSearchParams(window.location.search).get('reset') || null; } catch { return null; }
   });
   const [myMemberships, setMyMemberships] = useState([]);
+  const [myInvites, setMyInvites] = useState([]);
   const [currentEventId, setCurrentEventId] = useState(null);
   const [currentEvent, setCurrentEvent] = useState(null);
   const eventRef = useRef(null);
@@ -421,6 +423,8 @@ export default function App() {
       // Event-less admin deep-link (e.g. new-signup push → user management).
       if (!evId) {
         if (goto === 'users') { setView('users'); return true; }
+        // Invitation link → land in the lobby list where the invite card shows.
+        if (params.get('invite')) { setCurrentEventId(null); setView('home'); setLobbyView('list'); return true; }
         return false;
       }
       setCurrentEventId(evId);
@@ -480,6 +484,11 @@ export default function App() {
     if (!pb.authStore.isValid) { setMyMemberships([]); return; }
     try { setMyMemberships(await listMyMemberships()); }
     catch (e) { console.warn('refreshMemberships', e); }
+  }, []);
+  const refreshInvites = useCallback(async () => {
+    if (!pb.authStore.isValid) { setMyInvites([]); return; }
+    try { setMyInvites(await listMyInvites()); }
+    catch (_) {}
   }, []);
 
   const refreshCurrentEvent = useCallback(async () => {
@@ -545,6 +554,7 @@ export default function App() {
   useEffect(() => {
     (async () => { await refreshMemberships(); setBooted(true); })();
   }, [refreshMemberships, me?.id]);
+  useEffect(() => { refreshInvites(); }, [refreshInvites, me?.id]);
 
   useEffect(() => {
     if (!me) return;
@@ -552,6 +562,12 @@ export default function App() {
     subscribeMyMemberships(() => refreshMemberships()).then(fn => { if (cancelled) { try { fn(); } catch (_) {} } else { unsub = fn; } });
     return () => { cancelled = true; if (unsub) { try { unsub(); } catch (_) {} } };
   }, [me, refreshMemberships, rtEpoch]);
+  useEffect(() => {
+    if (!me) return;
+    let unsub; let cancelled = false;
+    subscribeMyInvites(() => refreshInvites()).then(fn => { if (cancelled) { try { fn(); } catch (_) {} } else { unsub = fn; } });
+    return () => { cancelled = true; if (unsub) { try { unsub(); } catch (_) {} } };
+  }, [me, refreshInvites, rtEpoch]);
 
   useEffect(() => {
     refreshCurrentEvent();
@@ -1024,6 +1040,19 @@ export default function App() {
     await refreshMemberships();
     setCurrentEventId(ev.id); setLobbyView('list');
     showToast(`In "${ev.name}" eingecheckt 🚪`);
+  };
+  const onAcceptInvite = async (invite) => {
+    try {
+      await acceptInvite(invite);
+      setMyInvites(prev => prev.filter(i => i.id !== invite.id));
+      await refreshMemberships();
+      setCurrentEventId(invite.event); setLobbyView('list');
+      showToast('Beigetreten 🍻');
+    } catch (e) { showToast(`Fehler: ${e?.status || ''} ${e?.message || ''}`); }
+  };
+  const onDeclineInvite = async (inviteId) => {
+    setMyInvites(prev => prev.filter(i => i.id !== inviteId));
+    try { await declineInvite(inviteId); } catch (_) {}
   };
 
   const onCreateEvent = async (data) => {
@@ -1572,6 +1601,7 @@ export default function App() {
         <Lobby
           me={me} memberships={myMemberships} allEvents={allEvents} allUsers={allUsers}
           view={lobbyView} setView={setLobbyView}
+          invites={myInvites} onAcceptInvite={onAcceptInvite} onDeclineInvite={onDeclineInvite}
           onPick={(id) => { setCurrentEventId(id); setModuleTab('overview'); }}
           onJoin={onJoin} onCreate={onCreateEvent} onLogout={onLogout}
           onSaveProfile={onSaveProfile}
@@ -2187,6 +2217,7 @@ function RegisterForm({ onSubmit, onGoLogin }) {
 function Lobby({
   me, memberships, allEvents, allUsers, view, setView, onPick, onJoin, onCreate,
   onLogout, onSaveProfile, onDeleteEvent, onToggleActiveAdmin, onSetUserRole, onDeleteUser, onSetUserApproved, onSetUserVerified,
+  invites = [], onAcceptInvite, onDeclineInvite,
 }) {
   const siteAdmin = isSiteAdmin(me);
   const canCreate = isHost(me);
@@ -2224,7 +2255,28 @@ function Lobby({
           <>
             {view === 'list' && (
               <div>
-                {memberships.length === 0 && <p className="ww-muted">Noch keine Events. Joine eins per Code 🎟️</p>}
+                {invites.length > 0 && (
+                  <div className="ww-invite-block">
+                    <p className="ww-label" style={{ marginTop: 0 }}>🎉 EINLADUNGEN ({invites.length})</p>
+                    {invites.map(inv => {
+                      const ev = inv.expand?.event;
+                      const by = inv.expand?.invitedBy;
+                      return (
+                        <div key={inv.id} className="ww-invite-card">
+                          <div className="ww-invite-info">
+                            <div className="ww-invite-name">{ev?.name || 'Event'}</div>
+                            <div className="ww-invite-by">von {by ? `${by.emoji || '🍺'} ${by.displayName || by.email?.split('@')[0]}` : 'einem Host'}{ev?.date ? ` · ${ev.date}` : ''}</div>
+                          </div>
+                          <div className="ww-invite-actions">
+                            <button className="ww-mini-btn green" onClick={() => onAcceptInvite?.(inv)}><Check size={13} /> Beitreten</button>
+                            <button className="ww-mini-btn red" onClick={() => onDeclineInvite?.(inv.id)}><X size={12} /></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {memberships.length === 0 && invites.length === 0 && <p className="ww-muted">Noch keine Events. Joine eins per Code 🎟️</p>}
                 <div className="ww-user-grid">
                   {memberships.map(m => {
                     const ev = m.expand?.event;
@@ -7187,6 +7239,68 @@ function ProfileView({ me, onSave, onLogout }) {
 // Event Settings (host) — slim, module configs live in module drawers
 // ============================================================
 
+// Host invites contacts (people they've shared an event with) → push + email.
+function InvitePeople({ eventId }) {
+  const [contacts, setContacts] = useState(null); // null = not loaded
+  const [invited, setInvited] = useState({});
+  const [pending, setPending] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    if (!open || contacts !== null) return;
+    (async () => {
+      try {
+        const [c, inv] = await Promise.all([getInviteContacts(eventId), listEventInvites(eventId)]);
+        setContacts(c);
+        setPending(inv.filter(i => i.status === 'pending'));
+      } catch { setContacts([]); }
+    })();
+  }, [open]);
+
+  const invite = async (uid) => {
+    setBusyId(uid);
+    try { await createInvite(eventId, uid); setInvited(m => ({ ...m, [uid]: true })); }
+    catch (_) {}
+    finally { setBusyId(null); }
+  };
+
+  return (
+    <div className="ww-section">
+      <button className="ww-collapse-head" onClick={() => setOpen(o => !o)}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><UserPlus size={16} /><h3 style={{ margin: 0 }}>PERSONEN EINLADEN</h3></span>
+        <ChevronRight size={18} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+      </button>
+      {open && (<>
+        <p className="ww-muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Nur Leute, mit denen du schon mal ein Event hattest. Sie kriegen Push + E-Mail mit Beitreten-Link.
+        </p>
+        {pending.length > 0 && (
+          <div style={{ margin: '4px 0 8px' }}>
+            <div className="ww-muted" style={{ fontSize: 11 }}>Eingeladen (wartet auf Antwort):</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+              {pending.map(i => <span key={i.id} className="ww-invite-chip">{i.expand?.invitedUser?.emoji || '🍺'} {i.expand?.invitedUser?.displayName || '?'}</span>)}
+            </div>
+          </div>
+        )}
+        {contacts === null && <div className="ww-muted" style={{ fontSize: 12 }}>Lade Kontakte…</div>}
+        {contacts && contacts.length === 0 && <div className="ww-muted" style={{ fontSize: 12 }}>Niemand zum Einladen — alle Kontakte sind schon dabei oder eingeladen.</div>}
+        <div className="ww-user-mgmt">
+          {(contacts || []).map(u => (
+            <div key={u.id} className="ww-user-mgmt-row">
+              <span className="ww-user-mgmt-emoji">{u.emoji || '🍺'}</span>
+              <span className="ww-user-mgmt-name">{u.displayName || '?'}</span>
+              {invited[u.id]
+                ? <span className="ww-invite-chip">✓ eingeladen</span>
+                : <button className="ww-mini-btn green" disabled={busyId === u.id} onClick={() => invite(u.id)}>{busyId === u.id ? '…' : <><UserPlus size={12} /> Einladen</>}</button>}
+            </div>
+          ))}
+        </div>
+      </>)}
+    </div>
+  );
+}
+
 function EventSettingsView({ event, me, members, customModules, onCustomCreate, onCustomDelete, onSave, onToggleActive, onToggleModule, onResetCounters, onDeleteEvent, onKickMember, onToggleEventHost }) {
   const canManageHosts = isEventCreator(me, event) || isSiteAdmin(me);
   const [name, setName] = useState(event.name || '');
@@ -7200,6 +7314,8 @@ function EventSettingsView({ event, me, members, customModules, onCustomCreate, 
         <div className="ww-code-val">{event.code}</div>
         <button className="ww-mini-btn" onClick={copyCode}><Copy size={11} /> Copy</button>
       </div>
+
+      <InvitePeople eventId={event.id} />
 
       <button className={`ww-big-cta ${event.active ? '' : 'green'}`} onClick={onToggleActive}>
         {event.active ? <><Pause size={20} /><span>PAUSIEREN</span></> : <><Play size={20} /><span>EVENT STARTEN</span></>}
