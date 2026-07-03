@@ -921,6 +921,12 @@ export default function App() {
     if (!mods.includes(moduleTab)) setModuleTab('overview');
   }, [currentEvent, moduleTab]);
 
+  // Switching module tabs starts you at the top of the new module — keeping
+  // the previous tab's scroll offset just dumped you mid-page.
+  useEffect(() => {
+    document.querySelector('.ww-main')?.scrollTo?.({ top: 0 });
+  }, [moduleTab]);
+
   // ---- Unread / "something new" indicators ----------------------------
   // Per-module latest-activity timestamp (from each record's `updated`), vs a
   // per-device "last seen" map in localStorage. A module shows a red dot when
@@ -7305,14 +7311,20 @@ function EventSettingsView({ event, me, members, customModules, onCustomCreate, 
   const canManageHosts = isEventCreator(me, event) || isSiteAdmin(me);
   const [name, setName] = useState(event.name || '');
   const [date, setDate] = useState(event.date || '');
-  const copyCode = () => navigator.clipboard?.writeText?.(event.code);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const copyCode = () => {
+    navigator.clipboard?.writeText?.(event.code);
+    setCodeCopied(true); setTimeout(() => setCodeCopied(false), 1800);
+  };
 
   return (
     <div>
       <div className="ww-code-box">
         <div className="ww-muted" style={{ fontSize: 11, letterSpacing: '0.2em' }}>JOIN-CODE</div>
         <div className="ww-code-val">{event.code}</div>
-        <button className="ww-mini-btn" onClick={copyCode}><Copy size={11} /> Copy</button>
+        <button className={`ww-mini-btn ${codeCopied ? 'green' : ''}`} onClick={copyCode}>
+          {codeCopied ? <><Check size={11} /> Kopiert</> : <><Copy size={11} /> Copy</>}
+        </button>
       </div>
 
       <InvitePeople eventId={event.id} />
