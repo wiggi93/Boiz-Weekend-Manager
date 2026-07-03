@@ -1,4 +1,6 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+/* Fonts are loaded via <link> in index.html — a CSS @import here was
+   render-blocking AND serialized (bundle CSS → import discovery → font CSS →
+   woff2). The <link> version downloads in parallel with the JS bundle. */
 
 * {
   box-sizing: border-box;
