@@ -33,9 +33,9 @@ onRecordAfterCreateSuccess((e) => {
           const link = front + url;
           const html =
             `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto">` +
-            `<h2 style="color:#d68a0c">🍻 Du bist eingeladen!</h2>` +
+            `<h2 style="color:#7c5cff">🍻 Du bist eingeladen!</h2>` +
             `<p style="font-size:15px;line-height:1.5;color:#222"><b>${hostName}</b> lädt dich zum Event <b>„${evName}"</b> ein.</p>` +
-            `<p style="margin:24px 0"><a href="${link}" style="background:#d68a0c;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold;display:inline-block">Zum Event & beitreten</a></p>` +
+            `<p style="margin:24px 0"><a href="${link}" style="background:#7c5cff;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold;display:inline-block">Zum Event & beitreten</a></p>` +
             `<p style="font-size:13px;color:#666">Oder öffne die App und schau unter deinen Einladungen. Kein Interesse? Einfach ignorieren.</p>` +
             `<hr style="border:none;border-top:1px solid #ddd;margin:20px 0">` +
             `<div style="font-size:12px;color:#888">Automatische Nachricht vom Boiz Weekend Manager.</div>` +

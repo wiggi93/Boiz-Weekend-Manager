@@ -42,7 +42,7 @@ onRecordAfterCreateSuccess((e) => {
       if (settings.smtp && settings.smtp.enabled) {
         const html =
           `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto">` +
-          `<h2 style="color:#d68a0c">🍺 Neue Registrierung</h2>` +
+          `<h2 style="color:#7c5cff">🍺 Neue Registrierung</h2>` +
           `<p style="font-size:15px;line-height:1.5;color:#222">` +
           `<b>${name}</b> (${email}) hat sich gerade im Boiz Weekend Manager registriert ` +
           `und wartet auf deine Freigabe.</p>` +
