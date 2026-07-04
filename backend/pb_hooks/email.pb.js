@@ -128,5 +128,27 @@ routerAdd("POST", "/api/broadcast", (e) => {
     }
   }
 
+  // Same message as a push (to everyone except the sender) + a feed entry, so
+  // the broadcast reaches people who don't check mail during the weekend.
+  try {
+    const push = require(`${__hooks}/push_lib.js`);
+    const targets = push.eventMemberIds(e.app, data.eventId, auth.id);
+    if (targets.length) {
+      push.sendPushToUsers(e.app, targets, {
+        title: `📢 ${evName}: ${data.subject}`,
+        body: String(data.body).slice(0, 160),
+        url: `/?event=${data.eventId}`,
+        tag: `broadcast-${data.eventId}-${Date.now()}`,
+      });
+    }
+    push.logNotif(e.app, {
+      event: data.eventId, type: "announcement",
+      title: `📢 ${data.subject}`,
+      body: String(data.body).slice(0, 600),
+      url: `/?event=${data.eventId}`,
+      createdBy: auth.id,
+    });
+  } catch (err) { console.log("[email] broadcast push:", err); }
+
   return e.json(200, { sent, failed });
 });

@@ -7255,16 +7255,21 @@ function InvitePeople({ eventId }) {
   const [open, setOpen] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
+  // Load right away (not lazily on expand) and auto-open when there is
+  // actually someone to invite — as a collapsed row the feature was invisible.
   useEffect(() => {
-    if (!open || contacts !== null) return;
+    let alive = true;
     (async () => {
       try {
         const [c, inv] = await Promise.all([getInviteContacts(eventId), listEventInvites(eventId)]);
+        if (!alive) return;
         setContacts(c);
         setPending(inv.filter(i => i.status === 'pending'));
-      } catch { setContacts([]); }
+        if (c.length > 0) setOpen(true);
+      } catch { if (alive) setContacts([]); }
     })();
-  }, [open]);
+    return () => { alive = false; };
+  }, [eventId]);
 
   const invite = async (uid) => {
     setBusyId(uid);
@@ -7274,9 +7279,12 @@ function InvitePeople({ eventId }) {
   };
 
   return (
-    <div className="ww-section">
+    <div className="ww-section ww-invite-section">
       <button className="ww-collapse-head" onClick={() => setOpen(o => !o)}>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><UserPlus size={16} /><h3 style={{ margin: 0 }}>PERSONEN EINLADEN</h3></span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <UserPlus size={16} /><h3 style={{ margin: 0 }}>PERSONEN EINLADEN</h3>
+          {contacts?.length > 0 && <span className="ww-invite-count">{contacts.length}</span>}
+        </span>
         <ChevronRight size={18} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
       </button>
       {open && (<>
@@ -7429,7 +7437,7 @@ function BroadcastSection({ eventId, memberCount }) {
   return (
     <div className="ww-section">
       <button className="ww-section-head" onClick={() => setOpen(o => !o)} style={{ background: 'none', border: 'none', width: '100%', cursor: 'pointer', color: 'inherit' }}>
-        <Mail size={16} /><h3 style={{ flex: 1, textAlign: 'left' }}>NACHRICHT AN ALLE (E-MAIL)</h3>
+        <Mail size={16} /><h3 style={{ flex: 1, textAlign: 'left' }}>NACHRICHT AN ALLE (E-MAIL + PUSH)</h3>
         <ChevronRight size={16} style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
       </button>
       {open && (

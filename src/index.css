@@ -9,8 +9,11 @@
 html, body, #root {
   margin: 0;
   padding: 0;
+  /* Plain 100% — NOT 100dvh. body is position:fixed inset:0, so 100% tracks
+     the true full screen. On iOS standalone PWAs 100dvh can come up SHORT of
+     the real height (excludes the home-indicator zone), which left a black
+     body-background band under the app/bottom nav. */
   height: 100%;
-  height: 100dvh;
   overflow: hidden;
   overscroll-behavior: none;
   touch-action: pan-x pan-y;
@@ -20,8 +23,8 @@ html, body, #root {
 
 body {
   font-family: 'Manrope', system-ui, sans-serif;
-  background: #0a0a0b;
-  color: #f4f4f5;
+  background: #07080d;
+  color: #f2f3f7;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   -webkit-touch-callout: none;
