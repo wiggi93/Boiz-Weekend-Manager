@@ -23,7 +23,9 @@
 }
 
 .ww-app {
-  height: 100dvh;
+  /* 100% of the fixed body = true full screen (100dvh came up short on iOS
+     standalone and left a black band under the bottom nav). */
+  height: 100%;
   background:
     radial-gradient(900px 480px at 85% -12%, rgba(124, 92, 255, 0.16), transparent 60%),
     radial-gradient(720px 420px at -15% 108%, rgba(76, 201, 240, 0.08), transparent 60%),
@@ -1776,7 +1778,7 @@
 
 /* ============ Pending approval gate ============ */
 .ww-pending {
-  min-height: 100dvh; display: flex; align-items: center; justify-content: center;
+  min-height: 100%; display: flex; align-items: center; justify-content: center;
   padding: 24px calc(20px + env(safe-area-inset-right)) 24px calc(20px + env(safe-area-inset-left));
 }
 .ww-pending-card {
@@ -2481,3 +2483,17 @@ button, .ww-nav-btn, .ww-mod-tab { touch-action: manipulation; }
 }
 body.is-offline .ww-offline-banner { display: block; animation: ww-offline-in 0.25s ease; }
 @keyframes ww-offline-in { from { opacity: 0; transform: translateX(-50%) translateY(-8px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+/* ============ Invite section: make it discoverable ============ */
+.ww-invite-section {
+  border: 1px solid rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.06);
+  border-radius: 16px; padding: 12px 14px;
+}
+.ww-invite-section .ww-collapse-head h3 { color: var(--amber); }
+.ww-invite-count {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px;
+  background: var(--grad); color: #fff; font-size: 12px; font-weight: 800;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: 'Manrope', sans-serif; letter-spacing: 0;
+}
