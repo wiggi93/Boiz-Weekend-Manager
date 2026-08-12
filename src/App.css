@@ -1229,6 +1229,19 @@
   color: #86efac;
 }
 
+/* Antworten-verstecken: Platzhalter statt der Lösung, bis aufgedeckt wird. */
+.ww-jeo-answer-hidden {
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 12px 16px;
+  background: rgba(var(--accent-rgb), 0.08);
+  border: 1px dashed var(--amber);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  color: var(--amber);
+  text-align: center;
+}
+
 .ww-jeo-cell.opened {
   border-color: var(--amber);
   background: rgba(var(--accent-rgb), 0.18);
