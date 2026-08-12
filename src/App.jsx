@@ -3588,6 +3588,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const [expandedRound, setExpandedRound] = useState(null); // round id whose board is expanded in history
   const [compliment, setCompliment] = useState(null); // spicy-mode popup text
   const [regenBusy, setRegenBusy] = useState(false); // regenerating the open question
+  // Aufgedeckte Lösungen — NUR lokal auf diesem Gerät, nichts wird gesynct.
+  // Jeder entscheidet für sich, ob er aufdeckt; der dran-Spieler nie.
+  const [revealedKeys, setRevealedKeys] = useState(() => new Set());
   const celebratedRef = useRef(null); // question keys I've already been complimented for
 
   const usersById = useMemo(() => {
@@ -3609,9 +3612,10 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const remote = !!jeopardy?.remoteMode;
   const spicy = !!jeopardy?.spicyMode;
   const answerSeconds = Number(jeopardy?.answerSeconds) || 0; // 0 = kein Limit
-  // Antworten-verstecken: solange an, sieht NIEMAND (auch nicht Host/Wertende)
-  // die Lösung — erst ein "Antwort aufdecken" macht sie für alle gleichzeitig
-  // sichtbar (per Realtime auf allen Geräten).
+  // Antworten-verstecken: solange an, sieht NIEMAND die Lösung von selbst —
+  // jeder außer dem dran-Spieler kann sie sich per Knopf NUR FÜR SICH selbst
+  // aufdecken (rein lokal, kein Sync). Der dran-Spieler sieht sie nie, auch
+  // nicht wenn andere aufdecken.
   const hideAnswers = !!jeopardy?.hideAnswers;
 
   // Spicy mode: pop a dirty compliment on MY screen when I just won a
@@ -3698,9 +3702,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const submitTypedAnswer = (ri, qi, text) => resolveQuestion(ri, qi, { typedAnswer: String(text || '').slice(0, 200) }, false);
   // markRight does NOT clear triedUsers — those users tried wrong and keep
   // their −half penalty in the round scoring.
-  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, resolved: true, opened: false, currentlyAnswering: null, answerShown: true }, true);
-  // Antwort für ALLE aufdecken (nur im hideAnswers-Modus relevant).
-  const revealAnswer = (ri, qi) => resolveQuestion(ri, qi, { answerShown: true }, false);
+  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, resolved: true, opened: false, currentlyAnswering: null }, true);
+  // Aufdecken passiert nur lokal (kein Patch): niemand deckt für andere auf.
+  const revealForMe = (key) => setRevealedKeys(prev => {
+    const next = new Set(prev);
+    next.add(key);
+    return next;
+  });
   // FALSCH in hostPlays mode closes the question immediately — by the time
   // someone clicks Richtig/Falsch the non-dran participants already saw the
   // correct answer on their screen, so a second-try "Wer versucht jetzt?"
@@ -3709,18 +3717,18 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const markWrong = (ri, qi) => {
     const q = rounds[ri]?.questions?.[qi]; if (!q) return;
     const tried = Array.from(new Set([...(q.triedUsers || []), q.currentlyAnswering].filter(Boolean)));
-    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried, revealed: true, resolved: true, answerShown: true }, true);
+    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried, revealed: true, resolved: true }, true);
   };
   // closeQuestion ("Niemand") also preserves triedUsers so penalties for
   // everyone who tried still apply.
-  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, revealed: true, resolved: true, answerShown: true }, true);
+  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, revealed: true, resolved: true }, true);
 
   // Correct a mis-judged tile (admin): reset it to fresh/unanswered so it can
   // be re-opened and re-judged. Removes its points until it's resolved again.
   const correctTile = async (ri, qi) => {
     if (!admin) return;
     if (!await appConfirm('Wertung korrigieren? Das Feld wird zurückgesetzt und kann neu beantwortet werden.', { title: 'Wertung korrigieren?', okLabel: 'ZURÜCKSETZEN' })) return;
-    resolveQuestion(ri, qi, { winnerUserId: null, triedUsers: [], opened: false, currentlyAnswering: null, resolved: false, revealed: false, answerShown: false }, false);
+    resolveQuestion(ri, qi, { winnerUserId: null, triedUsers: [], opened: false, currentlyAnswering: null, resolved: false, revealed: false }, false);
   };
 
   // Current picker derivation. In team mode pickerOrder holds TEAM ids (the turn
@@ -3819,7 +3827,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
 
           {hideAnswers && !currentRound.finishedAt && (
             <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 6 }}>
-              🙈 Antworten versteckt — alle raten mit, aufgedeckt wird per Knopf.
+              🙈 Antworten versteckt — jeder deckt nur für sich auf, wer dran ist nie.
             </p>
           )}
 
@@ -4003,13 +4011,20 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         //  soloMode      → the dran player self-judges (no one else there).
         //  remote        → the dran player TYPES their answer; once submitted
         //                  everyone sees it + the solution and the others judge.
-        //  hideAnswers   → überschreibt alles: bis jemand aufdeckt, sieht
-        //                  NIEMAND die Lösung (auch der Host/die Wertenden
-        //                  nicht) — jeder rät erst für sich. Nach dem Aufdecken
-        //                  sehen sie ALLE gleichzeitig.
-        const answerShown = !!q.answerShown;
+        //  hideAnswers   → überschreibt alles: von selbst sieht NIEMAND die
+        //                  Lösung. Jeder außer dem dran-Team kann sie sich
+        //                  einzeln für SICH aufdecken — das bleibt lokal auf
+        //                  dem Gerät, andere (und vor allem der dran-Spieler)
+        //                  sehen davon nichts.
+        // Der Reveal-Key trägt answerStartedAt, damit ein neu geöffnetes /
+        // zurückgesetztes Feld wieder verdeckt startet.
+        const revealKey = `${activeOpen.ri}:${activeOpen.qi}:${q.answerStartedAt || ''}`;
+        const revealedForMe = revealedKeys.has(revealKey);
+        // Das dran-Team darf die Lösung nie sehen (außer solo — da ist niemand
+        // sonst da, der werten könnte).
+        const mayEverSeeAnswer = !iAmInDranTeam || soloMode;
         const baseSeesAnswer = remote ? !!q.typedAnswer : (hostPlays ? (!iAmInDranTeam || soloMode) : admin);
-        const seesAnswer = hideAnswers ? answerShown : baseSeesAnswer;
+        const seesAnswer = hideAnswers ? (revealedForMe && mayEverSeeAnswer) : baseSeesAnswer;
         // Interaction is gated by the round being live (activeOpen only exists
         // within an unfinished round), NOT by the event's global active flag —
         // otherwise a host playing solo without flipping the event live can
@@ -4017,14 +4032,14 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         const baseCanJudge = remote
           ? (!!q.typedAnswer && (admin || soloMode || (iAmParticipant && !iAmInDranTeam)))
           : (hostPlays ? (iAmParticipant && (!iAmInDranTeam || soloMode)) : admin);
-        // Ohne sichtbare Lösung kann niemand sinnvoll werten → erst aufdecken.
-        const canJudge = hideAnswers ? (baseCanJudge && answerShown) : baseCanJudge;
-        // Aufdecken darf, wer die Lösung sonst sehen würde (Host bzw. die
-        // wertenden Mitspieler) — nie das dran-Team, sonst könnte es sich
-        // selbst die Lösung zeigen. Im Remote-Modus erst nach dem Abschicken.
-        const canReveal = hideAnswers && !answerShown && !q.winnerUserId
-          && (!remote || !!q.typedAnswer)
-          && (admin || (hostPlays && iAmParticipant && (!iAmInDranTeam || soloMode)));
+        // Ohne sichtbare Lösung kann niemand sinnvoll werten → erst für sich
+        // aufdecken, dann werten.
+        const canJudge = hideAnswers ? (baseCanJudge && seesAnswer) : baseCanJudge;
+        // Für sich aufdecken darf jeder AUSSER dem dran-Team — auch wenn es
+        // selbst Host ist. Im Remote-Modus erst nach dem Abschicken.
+        const canReveal = hideAnswers && !revealedForMe && !q.winnerUserId
+          && mayEverSeeAnswer
+          && (!remote || !!q.typedAnswer);
 
         // Step 1: no one assigned yet (rare — e.g. host re-opened). Host picks.
         if (!q.currentlyAnswering) {
@@ -4081,7 +4096,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                     <div className="ww-jeo-answer">💡 Richtig: {q.a}</div>
                   ) : (
                     <div className="ww-jeo-answer-hidden">
-                      🙈 Lösung ist noch verborgen — ratet erst alle für euch.
+                      {iAmInDranTeam
+                        ? '🙈 Die Lösung bleibt für dich verborgen — du warst dran.'
+                        : '🙈 Lösung verborgen — deck sie nur für dich auf, wenn du willst.'}
                     </div>
                   )}
                 </>
@@ -4097,7 +4114,11 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             ) : hideAnswers ? (
               <>
                 <div className="ww-jeo-answer-hidden">
-                  🙈 Lösung ist für alle verborgen — jeder rät erst für sich.
+                  {iAmInDranTeam
+                    ? (teamMode
+                        ? '🙈 Die Lösung bleibt für euch verborgen — ihr seid dran.'
+                        : '🙈 Die Lösung bleibt für dich verborgen — du bist dran.')
+                    : '🙈 Lösung verborgen — deck sie nur für dich auf, wenn du willst.'}
                 </div>
                 <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
                   {iAmInDranTeam
@@ -4105,7 +4126,7 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                         ? `🎯 Ihr seid dran${myTeamId && teamById[myTeamId]?.name ? ` (${teamById[myTeamId].name})` : ''} — besprecht euch und sagt eure Antwort laut.`
                         : '🎯 Du bist dran — sag deine Antwort laut.')
                     : (dran ? `${dran.displayName || dran.email} ist dran.` : '')}
-                  <br />Aufgedeckt wird erst, wenn jemand auf „Antwort aufdecken" tippt.
+                  {iAmInDranTeam && <><br />Auch wenn andere aufdecken, siehst du die Lösung nicht.</>}
                 </div>
               </>
             ) : iAmInDranTeam ? (
@@ -4122,15 +4143,20 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
             )}
             {canReveal && (
               <button className="ww-big-cta" style={{ marginTop: 12, background: 'var(--amber)', boxShadow: 'none' }}
-                onClick={() => revealAnswer(activeOpen.ri, activeOpen.qi)}>
-                <Eye size={20} /><span>ANTWORT AUFDECKEN</span>
+                onClick={() => revealForMe(revealKey)}>
+                <Eye size={20} /><span>NUR FÜR MICH AUFDECKEN</span>
               </button>
             )}
-            {hideAnswers && !answerShown && !canReveal && !q.winnerUserId && (
+            {hideAnswers && !revealedForMe && !canReveal && !q.winnerUserId && (
               <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 10 }}>
-                {remote && !q.typedAnswer
-                  ? 'Erst abschicken — danach kann aufgedeckt werden.'
-                  : 'Warte, bis aufgedeckt wird — dann sehen es alle gleichzeitig.'}
+                {remote && !q.typedAnswer && !iAmInDranTeam
+                  ? 'Erst abschicken — danach kannst du für dich aufdecken.'
+                  : 'Die anderen decken jeweils nur für sich auf — bei dir bleibt die Lösung verborgen.'}
+              </p>
+            )}
+            {hideAnswers && revealedForMe && (
+              <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 10 }}>
+                👀 Nur du siehst die Lösung — die anderen müssen selbst aufdecken.
               </p>
             )}
             {canJudge && (
@@ -4411,15 +4437,16 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
         <span className="ww-mod-icon">{jeopardy?.hideAnswers ? '🙈' : '💡'}</span>
         <span className="ww-mod-name">
           {jeopardy?.hideAnswers
-            ? 'AN — niemand sieht die Lösung, bis jemand aufdeckt'
+            ? 'AN — jeder deckt die Lösung nur für sich auf'
             : 'AUS — Lösung wie gehabt sofort sichtbar'}
         </span>
         {jeopardy?.hideAnswers ? <EyeOff size={14} /> : <Eye size={14} />}
       </button>
       <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
         Alle raten erst für sich — auch Host und Wertende sehen nichts. Mit
-        „Antwort aufdecken" wird die Lösung gleichzeitig auf allen Geräten
-        sichtbar, erst danach kann gewertet werden.
+        „Nur für mich aufdecken" sieht die Lösung ausschließlich das eigene
+        Gerät, erst danach kann derjenige werten. Wer dran ist, bekommt die
+        Lösung nie zu sehen — auch nicht, wenn andere aufdecken.
       </p>
 
       <label className="ww-label" style={{ marginTop: 14 }}>REMOTE-MODUS (getrennt spielen)</label>
