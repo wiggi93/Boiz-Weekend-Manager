@@ -3609,6 +3609,10 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const remote = !!jeopardy?.remoteMode;
   const spicy = !!jeopardy?.spicyMode;
   const answerSeconds = Number(jeopardy?.answerSeconds) || 0; // 0 = kein Limit
+  // Antworten-verstecken: solange an, sieht NIEMAND (auch nicht Host/Wertende)
+  // die Lösung — erst ein "Antwort aufdecken" macht sie für alle gleichzeitig
+  // sichtbar (per Realtime auf allen Geräten).
+  const hideAnswers = !!jeopardy?.hideAnswers;
 
   // Spicy mode: pop a dirty compliment on MY screen when I just won a
   // HIGH-VALUE question (≥400 pts). Detected via realtime; seed the
@@ -3694,7 +3698,9 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const submitTypedAnswer = (ri, qi, text) => resolveQuestion(ri, qi, { typedAnswer: String(text || '').slice(0, 200) }, false);
   // markRight does NOT clear triedUsers — those users tried wrong and keep
   // their −half penalty in the round scoring.
-  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, resolved: true, opened: false, currentlyAnswering: null }, true);
+  const markRight = (ri, qi, who) => resolveQuestion(ri, qi, { winnerUserId: who, revealed: true, resolved: true, opened: false, currentlyAnswering: null, answerShown: true }, true);
+  // Antwort für ALLE aufdecken (nur im hideAnswers-Modus relevant).
+  const revealAnswer = (ri, qi) => resolveQuestion(ri, qi, { answerShown: true }, false);
   // FALSCH in hostPlays mode closes the question immediately — by the time
   // someone clicks Richtig/Falsch the non-dran participants already saw the
   // correct answer on their screen, so a second-try "Wer versucht jetzt?"
@@ -3703,18 +3709,18 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
   const markWrong = (ri, qi) => {
     const q = rounds[ri]?.questions?.[qi]; if (!q) return;
     const tried = Array.from(new Set([...(q.triedUsers || []), q.currentlyAnswering].filter(Boolean)));
-    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried, revealed: true, resolved: true }, true);
+    resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, triedUsers: tried, revealed: true, resolved: true, answerShown: true }, true);
   };
   // closeQuestion ("Niemand") also preserves triedUsers so penalties for
   // everyone who tried still apply.
-  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, revealed: true, resolved: true }, true);
+  const closeQuestion = (ri, qi) => resolveQuestion(ri, qi, { opened: false, currentlyAnswering: null, revealed: true, resolved: true, answerShown: true }, true);
 
   // Correct a mis-judged tile (admin): reset it to fresh/unanswered so it can
   // be re-opened and re-judged. Removes its points until it's resolved again.
   const correctTile = async (ri, qi) => {
     if (!admin) return;
     if (!await appConfirm('Wertung korrigieren? Das Feld wird zurückgesetzt und kann neu beantwortet werden.', { title: 'Wertung korrigieren?', okLabel: 'ZURÜCKSETZEN' })) return;
-    resolveQuestion(ri, qi, { winnerUserId: null, triedUsers: [], opened: false, currentlyAnswering: null, resolved: false, revealed: false }, false);
+    resolveQuestion(ri, qi, { winnerUserId: null, triedUsers: [], opened: false, currentlyAnswering: null, resolved: false, revealed: false, answerShown: false }, false);
   };
 
   // Current picker derivation. In team mode pickerOrder holds TEAM ids (the turn
@@ -3809,6 +3815,12 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 : `${currentPicker.emoji || '🍺'} ${currentPicker.displayName || currentPicker.email}`}</b>
               {iAmPicker && <span style={{ marginLeft: 8 }}>— {currentPickerTeam ? 'ihr seid' : 'du bist'} dran, wählt ein Tile</span>}
             </div>
+          )}
+
+          {hideAnswers && !currentRound.finishedAt && (
+            <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 6 }}>
+              🙈 Antworten versteckt — alle raten mit, aufgedeckt wird per Knopf.
+            </p>
           )}
 
           <div className="ww-jeo-board" style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(60px, 1fr))` }}>
@@ -3991,14 +4003,28 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
         //  soloMode      → the dran player self-judges (no one else there).
         //  remote        → the dran player TYPES their answer; once submitted
         //                  everyone sees it + the solution and the others judge.
-        const seesAnswer = remote ? !!q.typedAnswer : (hostPlays ? (!iAmInDranTeam || soloMode) : admin);
+        //  hideAnswers   → überschreibt alles: bis jemand aufdeckt, sieht
+        //                  NIEMAND die Lösung (auch der Host/die Wertenden
+        //                  nicht) — jeder rät erst für sich. Nach dem Aufdecken
+        //                  sehen sie ALLE gleichzeitig.
+        const answerShown = !!q.answerShown;
+        const baseSeesAnswer = remote ? !!q.typedAnswer : (hostPlays ? (!iAmInDranTeam || soloMode) : admin);
+        const seesAnswer = hideAnswers ? answerShown : baseSeesAnswer;
         // Interaction is gated by the round being live (activeOpen only exists
         // within an unfinished round), NOT by the event's global active flag —
         // otherwise a host playing solo without flipping the event live can
         // open a tile but never judge it.
-        const canJudge = remote
+        const baseCanJudge = remote
           ? (!!q.typedAnswer && (admin || soloMode || (iAmParticipant && !iAmInDranTeam)))
           : (hostPlays ? (iAmParticipant && (!iAmInDranTeam || soloMode)) : admin);
+        // Ohne sichtbare Lösung kann niemand sinnvoll werten → erst aufdecken.
+        const canJudge = hideAnswers ? (baseCanJudge && answerShown) : baseCanJudge;
+        // Aufdecken darf, wer die Lösung sonst sehen würde (Host bzw. die
+        // wertenden Mitspieler) — nie das dran-Team, sonst könnte es sich
+        // selbst die Lösung zeigen. Im Remote-Modus erst nach dem Abschicken.
+        const canReveal = hideAnswers && !answerShown && !q.winnerUserId
+          && (!remote || !!q.typedAnswer)
+          && (admin || (hostPlays && iAmParticipant && (!iAmInDranTeam || soloMode)));
 
         // Step 1: no one assigned yet (rare — e.g. host re-opened). Host picks.
         if (!q.currentlyAnswering) {
@@ -4051,7 +4077,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               q.typedAnswer ? (
                 <>
                   <div className="ww-jeo-typed">✍️ {dran?.displayName || 'Antwort'}: <b>{q.typedAnswer}</b></div>
-                  <div className="ww-jeo-answer">💡 Richtig: {q.a}</div>
+                  {seesAnswer ? (
+                    <div className="ww-jeo-answer">💡 Richtig: {q.a}</div>
+                  ) : (
+                    <div className="ww-jeo-answer-hidden">
+                      🙈 Lösung ist noch verborgen — ratet erst alle für euch.
+                    </div>
+                  )}
                 </>
               ) : iAmDran ? (
                 <JeoTypeAnswer onSubmit={(txt) => submitTypedAnswer(activeOpen.ri, activeOpen.qi, txt)} />
@@ -4062,6 +4094,20 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               )
             ) : seesAnswer ? (
               <div className="ww-jeo-answer">💡 {q.a}</div>
+            ) : hideAnswers ? (
+              <>
+                <div className="ww-jeo-answer-hidden">
+                  🙈 Lösung ist für alle verborgen — jeder rät erst für sich.
+                </div>
+                <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
+                  {iAmInDranTeam
+                    ? (teamMode
+                        ? `🎯 Ihr seid dran${myTeamId && teamById[myTeamId]?.name ? ` (${teamById[myTeamId].name})` : ''} — besprecht euch und sagt eure Antwort laut.`
+                        : '🎯 Du bist dran — sag deine Antwort laut.')
+                    : (dran ? `${dran.displayName || dran.email} ist dran.` : '')}
+                  <br />Aufgedeckt wird erst, wenn jemand auf „Antwort aufdecken" tippt.
+                </div>
+              </>
             ) : iAmInDranTeam ? (
               <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
                 {teamMode
@@ -4073,6 +4119,19 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
               <div className="ww-muted" style={{ fontSize: 13, margin: '8px 0', textAlign: 'center', padding: 12 }}>
                 {dran ? `${dran.displayName || dran.email} ist dran.` : ''} Der Host entscheidet, ob richtig.
               </div>
+            )}
+            {canReveal && (
+              <button className="ww-big-cta" style={{ marginTop: 12, background: 'var(--amber)', boxShadow: 'none' }}
+                onClick={() => revealAnswer(activeOpen.ri, activeOpen.qi)}>
+                <Eye size={20} /><span>ANTWORT AUFDECKEN</span>
+              </button>
+            )}
+            {hideAnswers && !answerShown && !canReveal && !q.winnerUserId && (
+              <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 10 }}>
+                {remote && !q.typedAnswer
+                  ? 'Erst abschicken — danach kann aufgedeckt werden.'
+                  : 'Warte, bis aufgedeckt wird — dann sehen es alle gleichzeitig.'}
+              </p>
             )}
             {canJudge && (
               <div className="ww-grid2" style={{ marginTop: 14 }}>
@@ -4341,6 +4400,27 @@ function JeopardyLiveSettings({ jeopardy, members, onPatch, onGenerate }) {
         </span>
         {jeopardy?.hostPlays ? <Eye size={14} /> : <EyeOff size={14} />}
       </button>
+
+      <label className="ww-label" style={{ marginTop: 14 }}>🙈 ANTWORTEN VERSTECKEN</label>
+      <button
+        type="button"
+        className={`ww-module-toggle ${jeopardy?.hideAnswers ? 'on' : ''}`}
+        onClick={() => onPatch({ hideAnswers: !jeopardy?.hideAnswers })}
+        style={{ width: '100%' }}
+      >
+        <span className="ww-mod-icon">{jeopardy?.hideAnswers ? '🙈' : '💡'}</span>
+        <span className="ww-mod-name">
+          {jeopardy?.hideAnswers
+            ? 'AN — niemand sieht die Lösung, bis jemand aufdeckt'
+            : 'AUS — Lösung wie gehabt sofort sichtbar'}
+        </span>
+        {jeopardy?.hideAnswers ? <EyeOff size={14} /> : <Eye size={14} />}
+      </button>
+      <p className="ww-muted" style={{ fontSize: 11, marginTop: 6 }}>
+        Alle raten erst für sich — auch Host und Wertende sehen nichts. Mit
+        „Antwort aufdecken" wird die Lösung gleichzeitig auf allen Geräten
+        sichtbar, erst danach kann gewertet werden.
+      </p>
 
       <label className="ww-label" style={{ marginTop: 14 }}>REMOTE-MODUS (getrennt spielen)</label>
       <button
