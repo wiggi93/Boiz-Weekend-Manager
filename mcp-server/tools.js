@@ -108,14 +108,35 @@ export function registerTools(server, ctx) {
   };
 
   /** Same math as the app's kittySettlement, so numbers match exactly. */
+  /** Mirrors expenseShares() in src/App.jsx — keep the two in sync. */
+  function expenseShares(exp, validIds) {
+    const parts = (exp.participants || []).filter(pid => validIds.includes(pid));
+    if (parts.length === 0) return {};
+    const amount = Number(exp.amount) || 0;
+    const shares = (exp.shares && typeof exp.shares === 'object') ? exp.shares : {};
+    const out = {};
+    const evenly = [];
+    let allocated = 0;
+    for (const pid of parts) {
+      const s = shares[pid];
+      const val = Number(s?.value);
+      if (s?.type === 'fixed' && val > 0) { out[pid] = val; allocated += val; }
+      else if (s?.type === 'percent' && val > 0) { const a = amount * val / 100; out[pid] = a; allocated += a; }
+      else evenly.push(pid);
+    }
+    if (evenly.length) {
+      const each = Math.max(0, amount - allocated) / evenly.length;
+      for (const pid of evenly) out[pid] = each;
+    }
+    return out;
+  }
+
   function kittySettlement(expenses, partyIds) {
     const balances = {};
     for (const p of partyIds) balances[p] = 0;
     for (const exp of expenses) {
-      const parts = (exp.participants || []).filter(pid => partyIds.includes(pid));
-      if (parts.length === 0) continue;
-      const share = exp.amount / parts.length;
-      for (const pid of parts) {
+      const owed = expenseShares(exp, partyIds);
+      for (const [pid, share] of Object.entries(owed)) {
         if (pid === exp.paidBy) continue;
         balances[pid] = (balances[pid] || 0) - share;
         if (balances[exp.paidBy] !== undefined) balances[exp.paidBy] += share;
@@ -372,20 +393,40 @@ export function registerTools(server, ctx) {
   // ---------- Kassensturz ----------
   server.registerTool('kitty_add_expense', {
     title: 'Ausgabe eintragen',
-    description: 'Trägt eine Ausgabe in den Kassensturz ein, z.B. "füge 40€ Pizza für Marcus hinzu". Wer zahlt und wer mitteilt, wird per Name aufgelöst.',
+    description: 'Trägt eine Ausgabe in den Kassensturz ein, z.B. "füge 40€ Pizza für Marcus hinzu". Standardmäßig teilen alle Beteiligten gleich. Mit `shares` kann man einzelne Personen auf einen festen Betrag oder Prozentsatz festlegen ("Anna zahlt 50%", "Ben zahlt 20€") — der Rest wird gleichmäßig auf die übrigen verteilt.',
     inputSchema: {
       event: z.string().describe('Event-Name oder -ID'),
-      description: z.string().describe('Wofür, z.B. "Pizza"'),
-      amount: z.number().describe('Betrag in Euro, z.B. 40.5'),
+      description: z.string().describe('Wofür, z.B. "Einkauf"'),
+      amount: z.number().describe('Gesamtbetrag in Euro, z.B. 40.5'),
       paidBy: z.string().describe('Wer hat bezahlt (Name)'),
       participants: z.array(z.string()).optional().describe('Wer teilt sich das (Namen). Default: alle'),
+      shares: z.array(z.object({
+        person: z.string().describe('Name der Person'),
+        fixed: z.number().optional().describe('Fester Betrag in Euro, z.B. 20'),
+        percent: z.number().optional().describe('Prozent vom Gesamtbetrag, z.B. 50'),
+      })).optional().describe('Feste Anteile einzelner Personen. Pro Eintrag entweder fixed ODER percent.'),
     },
-  }, handler(async ({ event, description, amount, paidBy, participants }) => {
+  }, handler(async ({ event, description, amount, paidBy, participants, shares }) => {
     const ev = await resolveEvent(event);
     const members = await eventMembers(ev.id);
     const payer = resolveMemberNames(members, [paidBy])[0];
     const parts = resolveMemberNames(members, participants);
     if (!(amount > 0)) return fail('Betrag muss größer als 0 sein.');
+
+    // Build the per-person overrides, resolving names → ids.
+    const shareMap = {};
+    for (const s of (shares || [])) {
+      const id = resolveMemberNames(members, [s.person])[0];
+      if (!parts.includes(id)) {
+        return fail(`${nameOf(members, id)} hat einen Anteil, ist aber nicht unter den Beteiligten.`);
+      }
+      if (s.fixed != null && s.percent != null) {
+        return fail(`Für ${nameOf(members, id)} bitte entweder fixed ODER percent angeben, nicht beides.`);
+      }
+      if (s.fixed > 0) shareMap[id] = { type: 'fixed', value: Math.round(s.fixed * 100) / 100 };
+      else if (s.percent > 0) shareMap[id] = { type: 'percent', value: s.percent };
+      else return fail(`Für ${nameOf(members, id)} fehlt ein gültiger Betrag oder Prozentsatz.`);
+    }
 
     let kitty;
     try { kitty = await pb.collection('kitty').getFirstListItem(`event="${ev.id}"`); }
@@ -397,16 +438,28 @@ export function registerTools(server, ctx) {
       amount: Math.round(amount * 100) / 100,
       paidBy: payer,
       participants: parts,
+      ...(Object.keys(shareMap).length ? { shares: shareMap } : {}),
       createdBy: me().id,
       createdAt: new Date().toISOString(),
     };
     // Any change invalidates the "everyone confirmed" state — same as the app.
     await pb.collection('kitty').update(kitty.id, { expenses: [...expenses, expense], done: [] });
-    const share = expense.amount / parts.length;
+
+    // Report the resulting split so it's obvious what was booked.
+    const owed = expenseShares(expense, parts);
+    const allocated = Object.values(shareMap).reduce(
+      (s, v) => s + (v.type === 'fixed' ? v.value : expense.amount * v.value / 100), 0);
+    const over = allocated > expense.amount + 0.005;
     return ok(
       `💸 ${expense.desc} — ${eur(expense.amount)}\n` +
       `Bezahlt von: ${nameOf(members, payer)}\n` +
-      `Geteilt durch ${parts.length} (${parts.map(id => nameOf(members, id)).join(', ')}) → je ${eur(share)}`
+      `Aufteilung:\n` +
+      parts.map(id => {
+        const s = shareMap[id];
+        const tag = s ? (s.type === 'fixed' ? ' (fest)' : ` (${s.value}%)`) : '';
+        return `  • ${nameOf(members, id)}: ${eur(owed[id] || 0)}${tag}`;
+      }).join('\n') +
+      (over ? `\n⚠️ Die festen Anteile ergeben ${eur(allocated)} — mehr als die Ausgabe. Die übrigen zahlen 0.` : '')
     );
   }));
 

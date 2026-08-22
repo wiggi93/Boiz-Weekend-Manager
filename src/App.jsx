@@ -4588,14 +4588,43 @@ function JeoGeneratingOverlay() {
 // Kitty Split (Kassensturz)
 // ============================================================
 
+// What each participant owes for ONE expense.
+//
+// `exp.shares[partyId]` may pin a person to a fixed € amount or a percentage
+// of the expense; everyone else splits whatever is left, equally. With no
+// `shares` at all this is exactly the old "split evenly" behaviour, so older
+// expenses keep their numbers.
+function expenseShares(exp, validIds) {
+  const parts = (exp.participants || []).filter(pid => validIds.includes(pid));
+  if (parts.length === 0) return {};
+  const amount = Number(exp.amount) || 0;
+  const shares = (exp.shares && typeof exp.shares === 'object') ? exp.shares : {};
+  const out = {};
+  const evenly = [];
+  let allocated = 0;
+  for (const pid of parts) {
+    const s = shares[pid];
+    const val = Number(s?.value);
+    if (s?.type === 'fixed' && val > 0) { out[pid] = val; allocated += val; }
+    else if (s?.type === 'percent' && val > 0) { const a = amount * val / 100; out[pid] = a; allocated += a; }
+    else evenly.push(pid);
+  }
+  if (evenly.length) {
+    // Never hand out negative shares if the fixed/percent parts already
+    // exceed the total — the payer simply eats the difference.
+    const each = Math.max(0, amount - allocated) / evenly.length;
+    for (const pid of evenly) out[pid] = each;
+  }
+  return out;
+}
+
 function kittySettlement(expenses, parties) {
   const balances = {};
   for (const p of parties) balances[p.id] = 0;
+  const validIds = parties.map(p => p.id);
   for (const exp of expenses) {
-    const parts = (exp.participants || []).filter(pid => parties.some(p => p.id === pid));
-    if (parts.length === 0) continue;
-    const share = exp.amount / parts.length;
-    for (const pid of parts) {
+    const owed = expenseShares(exp, validIds);
+    for (const [pid, share] of Object.entries(owed)) {
       if (pid === exp.paidBy) continue;
       balances[pid] = (balances[pid] || 0) - share;
       if (balances[exp.paidBy] !== undefined) {
@@ -4637,11 +4666,14 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
   const [paidBy, setPaidBy] = useState(me.id);
   const [participants, setParticipants] = useState(() => parties.map(p => p.id));
   const [extName, setExtName] = useState('');
+  // Per-person overrides: { [id]: { type: 'fixed'|'percent', value: '…' } }.
+  // Anyone not in here splits the remainder equally.
+  const [shares, setShares] = useState({});
 
   const openAdd = () => {
     setDesc(''); setAmount(''); setPaidBy(me.id);
     setParticipants(parties.map(p => p.id));
-    setExtName('');
+    setExtName(''); setShares({});
     setShowAdd(true);
   };
 
@@ -4649,7 +4681,40 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
     setParticipants(prev =>
       prev.includes(uid) ? prev.filter(id => id !== uid) : [...prev, uid]
     );
+    // Dropping someone drops their override too, so it can't linger invisibly.
+    setShares(prev => { const n = { ...prev }; delete n[uid]; return n; });
   };
+  const cycleShareType = (uid) => setShares(prev => {
+    const cur = prev[uid]?.type;
+    const next = cur === undefined ? 'fixed' : cur === 'fixed' ? 'percent' : undefined;
+    const n = { ...prev };
+    if (next === undefined) delete n[uid];
+    else n[uid] = { type: next, value: prev[uid]?.value ?? '' };
+    return n;
+  });
+  const setShareValue = (uid, value) => setShares(prev =>
+    prev[uid] ? { ...prev, [uid]: { ...prev[uid], value } } : prev);
+
+  // Live preview of who owes what, using the same math as the settlement.
+  const parsedAmount = parseFloat(String(amount).replace(',', '.'));
+  const cleanShares = useMemo(() => {
+    const out = {};
+    for (const [id, s] of Object.entries(shares)) {
+      const v = parseFloat(String(s.value).replace(',', '.'));
+      if (participants.includes(id) && v > 0) out[id] = { type: s.type, value: v };
+    }
+    return out;
+  }, [shares, participants]);
+  const preview = useMemo(() => {
+    if (!(parsedAmount > 0) || participants.length === 0) return null;
+    return expenseShares(
+      { amount: parsedAmount, participants, shares: cleanShares },
+      parties.map(p => p.id)
+    );
+  }, [parsedAmount, participants, cleanShares, parties.length]);
+  const allocated = Object.entries(cleanShares).reduce(
+    (s, [, v]) => s + (v.type === 'fixed' ? v.value : (parsedAmount || 0) * v.value / 100), 0);
+  const overAllocated = parsedAmount > 0 && allocated > parsedAmount + 0.005;
 
   // Any change to the expense set means confirmations are stale — clear `done`.
   const addExpense = () => {
@@ -4661,6 +4726,7 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
       amount: Math.round(amt * 100) / 100,
       paidBy,
       participants: [...participants],
+      ...(Object.keys(cleanShares).length ? { shares: cleanShares } : {}),
       createdBy: me.id,
       createdAt: new Date().toISOString(),
     };
@@ -4724,9 +4790,11 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
           const payer = partyById(exp.paidBy);
           const canDelete = admin || exp.createdBy === me.id || exp.paidBy === me.id;
           const parts = (exp.participants || []).map(pid => partyById(pid)).filter(Boolean);
-          const myShare = exp.participants?.includes(me.id)
-            ? exp.amount / (exp.participants?.length || 1)
-            : 0;
+          // Must go through expenseShares — a custom split makes the naive
+          // amount/participants division wrong.
+          const owedByParty = expenseShares(exp, parties.map(p => p.id));
+          const myShare = owedByParty[me.id] || 0;
+          const customSplit = !!(exp.shares && Object.keys(exp.shares).length);
           return (
             <div key={exp.id} className="ww-kitty-expense">
               <div className="ww-kitty-exp-top">
@@ -4736,7 +4804,7 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
               <div className="ww-kitty-exp-meta">
                 <span>{payer?.emoji || '🍺'} {payer?.name || '?'} hat bezahlt</span>
                 <span className="ww-kitty-exp-parts">
-                  {parts.map(u => u.emoji || '🍺').join('')} ÷{parts.length}
+                  {parts.map(u => u.emoji || '🍺').join('')} {customSplit ? '⚖️ individuell' : `÷${parts.length}`}
                   {myShare > 0.005 && <span className="ww-kitty-myshare"> · mein Anteil: {fmt(myShare)} €</span>}
                 </span>
               </div>
@@ -4838,6 +4906,45 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
               </button>
             ))}
           </div>
+
+          <label className="ww-label">AUFTEILUNG</label>
+          <p className="ww-muted" style={{ fontSize: 11, marginTop: -4 }}>
+            Standard: alle teilen gleich. Tippe auf <b>=</b>, um jemandem einen festen
+            Betrag (<b>€</b>) oder Prozentsatz (<b>%</b>) zu geben — der Rest wird
+            gleichmäßig auf die anderen verteilt.
+          </p>
+          <div className="ww-kitty-splits">
+            {parties.filter(p => participants.includes(p.id)).map(p => {
+              const s = shares[p.id];
+              const owed = preview?.[p.id];
+              return (
+                <div key={p.id} className="ww-kitty-split-row">
+                  <span className="ww-kitty-split-name">{p.emoji} {p.name}</span>
+                  <button type="button" className={`ww-kitty-split-mode ${s ? 'on' : ''}`}
+                    onClick={() => cycleShareType(p.id)}
+                    title="Gleich / fester Betrag / Prozent">
+                    {s?.type === 'fixed' ? '€' : s?.type === 'percent' ? '%' : '='}
+                  </button>
+                  {s ? (
+                    <input className="ww-input ww-kitty-split-val" type="text" inputMode="decimal"
+                      placeholder={s.type === 'fixed' ? '20' : '50'}
+                      value={s.value} onChange={e => setShareValue(p.id, e.target.value)} />
+                  ) : (
+                    <span className="ww-kitty-split-hint">gleich</span>
+                  )}
+                  <span className="ww-kitty-split-owed">
+                    {owed !== undefined ? `${(Math.round(owed * 100) / 100).toFixed(2)} €` : '—'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {overAllocated && (
+            <div className="ww-err" style={{ marginTop: 8 }}>
+              ⚠️ Die festen Anteile ergeben {allocated.toFixed(2)} € — mehr als die
+              Ausgabe ({parsedAmount.toFixed(2)} €). Die anderen zahlen dann nichts.
+            </div>
+          )}
 
           <label className="ww-label">EXTERNE PERSON (nicht in der App)</label>
           {externals.length > 0 && (

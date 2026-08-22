@@ -2510,3 +2510,20 @@ body.is-offline .ww-offline-banner { display: block; animation: ww-offline-in 0.
   display: inline-flex; align-items: center; justify-content: center;
   font-family: 'Manrope', sans-serif; letter-spacing: 0;
 }
+
+/* ============ Kassensturz: individuelle Aufteilung ============ */
+.ww-kitty-splits { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.ww-kitty-split-row { display: flex; align-items: center; gap: 8px; }
+.ww-kitty-split-name { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.ww-kitty-split-mode {
+  flex-shrink: 0; width: 38px; height: 36px; border-radius: 10px; cursor: pointer;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+  font-size: 15px; font-weight: 700;
+}
+.ww-kitty-split-mode.on { background: rgba(var(--accent-rgb), 0.18); border-color: var(--amber); color: var(--amber); }
+.ww-kitty-split-val { width: 72px; flex-shrink: 0; padding: 8px 10px; text-align: center; }
+.ww-kitty-split-hint { width: 72px; flex-shrink: 0; text-align: center; font-size: 11px; color: var(--muted-2); }
+.ww-kitty-split-owed {
+  width: 68px; flex-shrink: 0; text-align: right;
+  font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--amber);
+}
