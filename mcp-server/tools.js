@@ -598,6 +598,23 @@ export function registerTools(server, ctx) {
   }));
 
   // ---------- Kommunikation ----------
+  server.registerTool('send_test_push', {
+    title: 'Test-Push an mich',
+    description: 'Schickt NUR an die eigenen Geräte eine Test-Benachrichtigung und meldet, ob sie zugestellt werden konnte. Gut, um zu prüfen, ob Push auf dem Handy überhaupt funktioniert. Niemand sonst bekommt etwas.',
+    inputSchema: {},
+  }, handler(async () => {
+    const r = await apiPost('/api/push/test', {});
+    if (!r.devices) {
+      return ok('🔕 Für deinen Account ist kein Gerät für Benachrichtigungen registriert.\n' +
+        'In der App: PWA zum Home-Bildschirm hinzufügen, öffnen, Profil → „Benachrichtigungen erlauben".');
+    }
+    if (!r.sent) {
+      return ok(`⚠️ ${r.devices} Gerät(e) registriert, aber die Zustellung hat nicht geklappt.\n` +
+        'Das Abo ist vermutlich abgelaufen — in der App einmal Profil → Benachrichtigungen neu erlauben.');
+    }
+    return ok(`🔔 Test-Push raus an ${r.sent} von ${r.devices} Gerät(en) — sollte gleich aufploppen.`);
+  }));
+
   server.registerTool('send_announcement', {
     title: 'Nachricht an alle',
     description: 'Schickt allen Teilnehmern eine Push-Nachricht (erscheint auch im Glocken-Feed). Nur als Host.',
