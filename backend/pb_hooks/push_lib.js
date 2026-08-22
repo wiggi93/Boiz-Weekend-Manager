@@ -128,4 +128,29 @@ function logNotif(app, n) {
   } catch (err) { console.log("[notif] log:", err); }
 }
 
-module.exports = { sendPushToUsers, eventMemberIds, parseArr, logNotif };
+// What each participant owes for ONE kitty expense. Mirrors expenseShares()
+// in src/App.jsx (and mcp-server/tools.js) — keep the three in sync.
+// Without a `shares` map this is a plain even split, i.e. the old behaviour.
+function expenseShares(exp) {
+  const parts = Array.isArray(exp.participants) ? exp.participants.filter(Boolean) : [];
+  if (parts.length === 0) return {};
+  const amount = Number(exp.amount) || 0;
+  const shares = (exp.shares && typeof exp.shares === "object") ? exp.shares : {};
+  const out = {};
+  const evenly = [];
+  let allocated = 0;
+  for (const pid of parts) {
+    const s = shares[pid];
+    const val = s ? Number(s.value) : NaN;
+    if (s && s.type === "fixed" && val > 0) { out[pid] = val; allocated += val; }
+    else if (s && s.type === "percent" && val > 0) { const a = amount * val / 100; out[pid] = a; allocated += a; }
+    else evenly.push(pid);
+  }
+  if (evenly.length) {
+    const each = Math.max(0, amount - allocated) / evenly.length;
+    for (const pid of evenly) out[pid] = each;
+  }
+  return out;
+}
+
+module.exports = { sendPushToUsers, eventMemberIds, parseArr, logNotif, expenseShares };

@@ -125,6 +125,58 @@ onRecordUpdateRequest((e) => {
 //      route (jeopardy.pb.js): the round is built + saved server-side, so a
 //      request hook wouldn't fire — it pushes the participants itself there.
 
+// ---- Trigger 4a: new kitty expense → push everyone who shares in it -------
+// Fires on any kitty update, but only acts on expense ids that weren't there
+// before. Each recipient gets THEIR own share in the message, which matters
+// now that expenses can carry fixed/percent splits.
+onRecordUpdateRequest((e) => {
+  const lib = require(`${__hooks}/push_lib.js`);
+  let prev = [];
+  try { prev = lib.parseArr(e.app.findRecordById("kitty", e.record.id), "expenses"); }
+  catch (_) {}
+  const next = lib.parseArr(e.record, "expenses");
+  const eventId = e.record.get("event");
+  e.next(); // persist first — only notify about writes that actually landed
+  try {
+    const known = {};
+    for (const x of prev) if (x && x.id) known[x.id] = true;
+    const added = next.filter((x) => x && x.id && !known[x.id]);
+    if (added.length === 0) return;
+
+    const nameOf = (id) => { try { return e.app.findRecordById("users", id).get("displayName") || "Jemand"; } catch (_) { return "Jemand"; } };
+    const eur = (n) => (Math.round(n * 100) / 100).toFixed(2).replace(".", ",") + " €";
+
+    for (const exp of added) {
+      const payer = nameOf(exp.paidBy);
+      const author = exp.createdBy || exp.paidBy;
+      const owed = lib.expenseShares(exp);
+      const desc = exp.desc || "Ausgabe";
+      const total = Number(exp.amount) || 0;
+
+      // Personalised: everyone involved except whoever entered it.
+      for (const uid of Object.keys(owed)) {
+        if (!uid || uid === author) continue;
+        const share = owed[uid];
+        if (!(share > 0.005)) continue;
+        lib.sendPushToUsers(e.app, [uid], {
+          title: `💸 ${desc} — dein Anteil ${eur(share)}`,
+          body: `${payer} hat ${eur(total)} ausgelegt. Tippen für den Kassensturz.`,
+          url: `/?event=${eventId}&goto=kitty`,
+          tag: `kitty-exp-${exp.id}`,
+        });
+      }
+
+      lib.logNotif(e.app, {
+        event: eventId, type: "kitty",
+        title: `💸 Neue Ausgabe: ${desc}`,
+        body: `${payer} hat ${eur(total)} ausgelegt.`,
+        url: `/?event=${eventId}&goto=kitty`,
+        createdBy: author,
+      });
+    }
+  } catch (err) { console.log("[push] kitty expense trigger:", err); }
+}, "kitty");
+
 // ---- Trigger 4: kitty — everyone marked done → push to all members --------
 onRecordUpdateRequest((e) => {
   const lib = require(`${__hooks}/push_lib.js`);
