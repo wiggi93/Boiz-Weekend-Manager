@@ -463,6 +463,104 @@ export function registerTools(server, ctx) {
     );
   }));
 
+  server.registerTool('kitty_update_expense', {
+    title: 'Ausgabe bearbeiten',
+    description: 'Ändert eine bereits eingetragene Ausgabe — Betrag, Beschreibung, wer bezahlt hat, wer beteiligt ist und die Aufteilung. Nur angegebene Felder werden geändert; `shares: []` setzt auf gleichmäßige Teilung zurück. Die Ausgabe wird per Beschreibung (oder id) gefunden.',
+    inputSchema: {
+      event: z.string().describe('Event-Name oder -ID'),
+      expense: z.string().describe('Beschreibung der Ausgabe (oder ihre id), z.B. "Einkauf"'),
+      description: z.string().optional().describe('Neue Beschreibung'),
+      amount: z.number().optional().describe('Neuer Gesamtbetrag in Euro'),
+      paidBy: z.string().optional().describe('Wer hat bezahlt (Name)'),
+      participants: z.array(z.string()).optional().describe('Neue Beteiligten-Liste (Namen). Ersetzt die bisherige.'),
+      shares: z.array(z.object({
+        person: z.string().describe('Name der Person'),
+        fixed: z.number().optional().describe('Fester Betrag in Euro'),
+        percent: z.number().optional().describe('Prozent vom Gesamtbetrag'),
+      })).optional().describe('Neue feste Anteile. Leeres Array = wieder gleichmäßig teilen.'),
+    },
+  }, handler(async ({ event, expense, description, amount, paidBy, participants, shares }) => {
+    const ev = await resolveEvent(event);
+    const members = await eventMembers(ev.id);
+
+    let kitty;
+    try { kitty = await pb.collection('kitty').getFirstListItem(`event="${ev.id}"`); }
+    catch { return fail('Für dieses Event gibt es noch keine Ausgaben.'); }
+    const expenses = Array.isArray(kitty.expenses) ? kitty.expenses : [];
+    if (!expenses.length) return fail('Für dieses Event gibt es noch keine Ausgaben.');
+
+    // Find it by id, then exact description, then a unique partial match.
+    const needle = String(expense).trim().toLowerCase();
+    const byId = expenses.filter(e => e.id === expense);
+    const exact = expenses.filter(e => (e.desc || '').toLowerCase() === needle);
+    const partial = expenses.filter(e => (e.desc || '').toLowerCase().includes(needle));
+    const hits = byId.length ? byId : exact.length ? exact : partial;
+    if (hits.length === 0) {
+      return fail(`Keine Ausgabe "${expense}" gefunden. Vorhanden: ${expenses.map(e => e.desc).join(', ')}`);
+    }
+    if (hits.length > 1) {
+      return fail(`Mehrdeutig — passt auf: ${hits.map(e => `${e.desc} (${eur(e.amount)})`).join(', ')}`);
+    }
+    const target = hits[0];
+
+    const nextAmount = amount != null ? Math.round(amount * 100) / 100 : Number(target.amount) || 0;
+    if (!(nextAmount > 0)) return fail('Betrag muss größer als 0 sein.');
+    const nextParts = participants ? resolveMemberNames(members, participants) : (target.participants || []);
+    const nextPayer = paidBy ? resolveMemberNames(members, [paidBy])[0] : target.paidBy;
+
+    // shares: undefined = keep, [] = reset to even, otherwise replace.
+    let nextShares = target.shares;
+    if (shares) {
+      const map = {};
+      for (const s of shares) {
+        const id = resolveMemberNames(members, [s.person])[0];
+        if (!nextParts.includes(id)) {
+          return fail(`${nameOf(members, id)} hat einen Anteil, ist aber nicht unter den Beteiligten.`);
+        }
+        if (s.fixed != null && s.percent != null) {
+          return fail(`Für ${nameOf(members, id)} bitte entweder fixed ODER percent angeben.`);
+        }
+        if (s.fixed > 0) map[id] = { type: 'fixed', value: Math.round(s.fixed * 100) / 100 };
+        else if (s.percent > 0) map[id] = { type: 'percent', value: s.percent };
+        else return fail(`Für ${nameOf(members, id)} fehlt ein gültiger Betrag oder Prozentsatz.`);
+      }
+      nextShares = Object.keys(map).length ? map : undefined;
+    }
+    // A participant who dropped out must not keep a stale override.
+    if (nextShares) {
+      nextShares = Object.fromEntries(Object.entries(nextShares).filter(([id]) => nextParts.includes(id)));
+      if (!Object.keys(nextShares).length) nextShares = undefined;
+    }
+
+    const updated = {
+      ...target,
+      desc: description != null ? String(description).trim() : target.desc,
+      amount: nextAmount,
+      paidBy: nextPayer,
+      participants: nextParts,
+      editedBy: me().id,
+      editedAt: new Date().toISOString(),
+    };
+    if (nextShares) updated.shares = nextShares; else delete updated.shares;
+
+    await pb.collection('kitty').update(kitty.id, {
+      expenses: expenses.map(e => (e.id === target.id ? updated : e)),
+      done: [], // any change invalidates the confirmations, same as the app
+    });
+
+    const owed = expenseShares(updated, nextParts);
+    return ok(
+      `✏️ "${updated.desc}" aktualisiert — ${eur(updated.amount)}\n` +
+      `Bezahlt von: ${nameOf(members, nextPayer)}\n` +
+      `Aufteilung:\n` +
+      nextParts.map(id => {
+        const s = nextShares?.[id];
+        const tag = s ? (s.type === 'fixed' ? ' (fest)' : ` (${s.value}%)`) : '';
+        return `  • ${nameOf(members, id)}: ${eur(owed[id] || 0)}${tag}`;
+      }).join('\n')
+    );
+  }));
+
   server.registerTool('kitty_status', {
     title: 'Kassensturz-Stand',
     description: 'Zeigt alle Ausgaben und wer wem am Ende wie viel schuldet.',
