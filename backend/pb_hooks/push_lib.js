@@ -12,8 +12,12 @@
 function sendPushToUsers(app, userIds, payload) {
   try {
     const url = $os.getenv("PUSH_SENDER_URL");
-    if (!url) { console.log("[push] PUSH_SENDER_URL not set — skip"); return; }
-    if (!Array.isArray(userIds) || userIds.length === 0) { console.log("[push] no target users"); return; }
+    // Returns { targeted, reachable, sent } so callers can tell the user how
+    // many people a notification actually got to — a silent no-op looks like a
+    // bug when in truth nobody had notifications enabled.
+    const result = { targeted: Array.isArray(userIds) ? userIds.length : 0, reachable: [], sent: 0 };
+    if (!url) { console.log("[push] PUSH_SENDER_URL not set — skip"); return result; }
+    if (!Array.isArray(userIds) || userIds.length === 0) { console.log("[push] no target users"); return result; }
 
     const subs = [];
     const subIdByEndpoint = {};
@@ -46,10 +50,11 @@ function sendPushToUsers(app, userIds, payload) {
         if (!p256dh || !auth) { console.log("[push] sub missing keys, skip"); continue; }
         subs.push({ endpoint: endpoint, keys: { p256dh: String(p256dh), auth: String(auth) } });
         subIdByEndpoint[endpoint] = r.id;
+        if (result.reachable.indexOf(uid) === -1) result.reachable.push(uid);
       }
     }
     console.log("[push] target users " + JSON.stringify(userIds) + " -> " + subs.length + " subscription(s)");
-    if (subs.length === 0) return;
+    if (subs.length === 0) return result;
 
     const res = $http.send({
       url: url.replace(/\/$/, "") + "/send",
@@ -66,14 +71,17 @@ function sendPushToUsers(app, userIds, payload) {
     console.log("[push] sidecar status " + res.statusCode + " body " + (bodyStr || "").slice(0, 120));
     try {
       const out = JSON.parse(bodyStr);
+      result.sent = Number(out.sent) || 0;
       for (const ep of out.gone || []) {
         const id = subIdByEndpoint[ep];
         if (!id) continue;
         try { app.delete(app.findRecordById("push_subs", id)); } catch (_) {}
       }
     } catch (_) {}
+    return result;
   } catch (err) {
     console.log("[push] send failed:", err);
+    return { targeted: 0, reachable: [], sent: 0 };
   }
 }
 
