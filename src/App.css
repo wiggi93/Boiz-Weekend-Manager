@@ -1336,9 +1336,12 @@
 .ww-kitty-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
 .ww-kitty-expense {
   background: var(--card); border: 1px solid var(--border);
-  border-radius: 6px; padding: 10px 12px;
-  position: relative;
+  border-radius: 12px; padding: 10px 12px;
+  /* Text block and action buttons sit side by side, so the buttons can never
+     overlap the amount (they used to be absolutely positioned on top of it). */
+  display: flex; align-items: center; gap: 8px;
 }
+.ww-kitty-exp-main { flex: 1; min-width: 0; }
 .ww-kitty-exp-top {
   display: flex; justify-content: space-between; align-items: baseline;
   gap: 8px; margin-bottom: 4px;
@@ -2523,10 +2526,11 @@ body.is-offline .ww-offline-banner { display: block; animation: ww-offline-in 0.
 }
 
 /* Kassensturz: Aktionen pro Ausgabe (bearbeiten / löschen) */
-.ww-kitty-exp-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 2px; }
+.ww-kitty-exp-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
 .ww-kitty-exp-actions button {
-  background: none; border: none; color: var(--muted-2);
-  cursor: pointer; padding: 4px; border-radius: 8px; line-height: 0;
+  background: var(--card-2); border: 1px solid var(--border); color: var(--muted);
+  cursor: pointer; width: 34px; height: 30px; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
 }
 .ww-kitty-exp-actions button:hover { color: var(--amber); background: var(--card-2); }
 .ww-kitty-exp-actions button:last-child:hover { color: var(--red); }

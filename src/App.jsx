@@ -6,7 +6,7 @@ import {
   ArrowLeft, LogOut, AlertTriangle, ShieldCheck,
   Mail, Lock, UserPlus, Shield, KeyRound, Copy, Play, Pause,
   Hourglass, Eye, EyeOff, Dice5, Hand, Trash2, Flag, Crown,
-  ChevronRight, Bell, BellOff, Wrench, Target, Sparkles, Send,
+  ChevronRight, Bell, BellOff, Wrench, Target, Sparkles, Send, Pencil,
 } from 'lucide-react';
 import {
   pb, isSiteAdmin, isHost, isEventAdmin, isEventCreator, isEventHost,
@@ -4823,25 +4823,29 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
           const myShare = owedByParty[me.id] || 0;
           const customSplit = !!(exp.shares && Object.keys(exp.shares).length);
           return (
+            // The buttons get their own column instead of floating over the
+            // card — absolutely positioned they collided with the amount.
             <div key={exp.id} className="ww-kitty-expense">
-              <div className="ww-kitty-exp-top">
-                <span className="ww-kitty-exp-desc">{exp.desc}</span>
-                <span className="ww-kitty-exp-amount">{fmt(exp.amount)} €</span>
-              </div>
-              <div className="ww-kitty-exp-meta">
-                <span>{payer?.emoji || '🍺'} {payer?.name || '?'} hat bezahlt</span>
-                <span className="ww-kitty-exp-parts">
-                  {parts.map(u => u.emoji || '🍺').join('')} {customSplit ? '⚖️ individuell' : `÷${parts.length}`}
-                  {myShare > 0.005 && <span className="ww-kitty-myshare"> · mein Anteil: {fmt(myShare)} €</span>}
-                </span>
+              <div className="ww-kitty-exp-main">
+                <div className="ww-kitty-exp-top">
+                  <span className="ww-kitty-exp-desc">{exp.desc}</span>
+                  <span className="ww-kitty-exp-amount">{fmt(exp.amount)} €</span>
+                </div>
+                <div className="ww-kitty-exp-meta">
+                  <span>{payer?.emoji || '🍺'} {payer?.name || '?'} hat bezahlt</span>
+                  <span className="ww-kitty-exp-parts">
+                    {parts.map(u => u.emoji || '🍺').join('')} {customSplit ? '⚖️ individuell' : `÷${parts.length}`}
+                    {myShare > 0.005 && <span className="ww-kitty-myshare"> · mein Anteil: {fmt(myShare)} €</span>}
+                  </span>
+                </div>
               </div>
               {canDelete && (
                 <div className="ww-kitty-exp-actions">
                   <button onClick={() => openEdit(exp)} aria-label="Bearbeiten" title="Bearbeiten">
-                    <Settings size={13} />
+                    <Pencil size={15} />
                   </button>
                   <button onClick={() => deleteExpense(exp.id)} aria-label="Löschen" title="Löschen">
-                    <Trash2 size={13} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
               )}
@@ -7010,17 +7014,29 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
   // arrives (visualViewport reports it *after* the focus event).
   const bodyRef = useRef(null);
   const focusedRef = useRef(null);
+  // Deterministic instead of scrollIntoView: park the field a third of the way
+  // down the *currently visible* body. scrollIntoView('center') kept leaving it
+  // flush against the bottom edge, where iOS's autofill bar covers it.
   const revealFocused = () => {
+    const body = bodyRef.current;
     const el = focusedRef.current;
-    if (el && document.contains(el)) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    if (!body || !el || !document.contains(el)) return;
+    const bodyRect = body.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    const wanted = bodyRect.top + Math.min(bodyRect.height * 0.33, 160);
+    const delta = elRect.top - wanted;
+    if (Math.abs(delta) > 4) body.scrollTo({ top: body.scrollTop + delta, behavior: 'smooth' });
   };
+  // iOS animates the keyboard in and reports the size in steps, so nudge the
+  // field into place a few times rather than betting on a single moment.
+  const revealSoon = () => [60, 250, 500].forEach(ms => setTimeout(revealFocused, ms));
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     const onFocusIn = (e) => {
       if (!e.target?.matches?.('input, textarea, select, [contenteditable]')) return;
       focusedRef.current = e.target;
-      setTimeout(revealFocused, 300); // let the keyboard animation settle
+      revealSoon();
     };
     const onFocusOut = () => { focusedRef.current = null; };
     body.addEventListener('focusin', onFocusIn);
@@ -7030,11 +7046,7 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
       body.removeEventListener('focusout', onFocusOut);
     };
   }, []);
-  useEffect(() => {
-    if (kb <= 0) return;
-    const t = setTimeout(revealFocused, 80);
-    return () => clearTimeout(t);
-  }, [kb]);
+  useEffect(() => { if (kb > 0) revealSoon(); }, [kb]);
 
   // Portal to <body> so the drawer escapes any ancestor positioning
   // context (.ww-app's flex/overflow:hidden was clipping fixed children
@@ -7048,7 +7060,19 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
         className="ww-drawer"
         role="dialog"
         aria-modal="true"
-        style={kb > 0 ? { bottom: kb, maxHeight: `calc(100vh - ${kb}px - max(60px, env(safe-area-inset-top, 0px) + 16px))` } : undefined}
+        // minHeight must go to 0 while the keyboard is up: the stylesheet sets
+        // min-height:400px, and min-height beats max-height in CSS — so with a
+        // tall keyboard (numeric pad + autofill bar) the drawer refused to
+        // shrink and its lower part stayed behind the keyboard.
+        style={kb > 0 ? {
+          // + a little extra: iOS puts an accessory bar ("AutoFill …") above
+          // the keyboard that visualViewport does NOT report, so lifting by the
+          // reported height alone leaves the drawer's last row under it.
+          bottom: kb + 44,
+          minHeight: 0,
+          height: 'auto',
+          maxHeight: `calc(100vh - ${kb + 44}px - max(60px, env(safe-area-inset-top, 0px) + 16px))`,
+        } : undefined}
       >
         <div className="ww-drawer-head">
           <h3>{title}</h3>
