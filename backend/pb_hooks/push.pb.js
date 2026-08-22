@@ -22,6 +22,32 @@ routerAdd("GET", "/api/push/pubkey", (e) => {
   return e.json(200, { key });
 });
 
+// Self-test: push ONLY to the caller's own devices. Nobody else is disturbed,
+// so it's safe to fire any time — and it answers "is push broken, or does that
+// person simply have none registered?" without guessing from logs.
+routerAdd("POST", "/api/push/test", (e) => {
+  if (!e.auth) return e.unauthorizedError("auth required", null);
+  try {
+    const push = require(`${__hooks}/push_lib.js`);
+    const subs = e.app.findRecordsByFilter("push_subs", `user = "${e.auth.id}"`, "", 50, 0);
+    const r = push.sendPushToUsers(e.app, [e.auth.id], {
+      title: "🔔 Test-Benachrichtigung",
+      body: "Wenn du das siehst, funktionieren Push-Nachrichten auf diesem Gerät.",
+      url: "/",
+      tag: `selftest-${Date.now()}`,
+    });
+    return e.json(200, {
+      ok: true,
+      devices: subs.length,
+      reachable: (r && r.reachable ? r.reachable.length : 0),
+      sent: (r && r.sent) || 0,
+    });
+  } catch (err) {
+    console.log("[push] selftest:", err);
+    return e.internalServerError("selftest failed: " + err, null);
+  }
+});
+
 // ---- Trigger 1: new challenge → ping the challenged player, and (for a
 // non-secret challenge) the rest of the crew so they vote on the points -------
 onRecordAfterCreateSuccess((e) => {
