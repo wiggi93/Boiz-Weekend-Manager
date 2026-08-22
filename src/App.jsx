@@ -7003,6 +7003,39 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
     };
   }, []);
 
+  // Lifting the drawer above the keyboard isn't enough on its own: a field far
+  // down the form is then simply below the (now much shorter) drawer, so you
+  // type blind. Remember whatever has focus and scroll it into the visible part
+  // of the body — once on focus, and again when the keyboard height actually
+  // arrives (visualViewport reports it *after* the focus event).
+  const bodyRef = useRef(null);
+  const focusedRef = useRef(null);
+  const revealFocused = () => {
+    const el = focusedRef.current;
+    if (el && document.contains(el)) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const onFocusIn = (e) => {
+      if (!e.target?.matches?.('input, textarea, select, [contenteditable]')) return;
+      focusedRef.current = e.target;
+      setTimeout(revealFocused, 300); // let the keyboard animation settle
+    };
+    const onFocusOut = () => { focusedRef.current = null; };
+    body.addEventListener('focusin', onFocusIn);
+    body.addEventListener('focusout', onFocusOut);
+    return () => {
+      body.removeEventListener('focusin', onFocusIn);
+      body.removeEventListener('focusout', onFocusOut);
+    };
+  }, []);
+  useEffect(() => {
+    if (kb <= 0) return;
+    const t = setTimeout(revealFocused, 80);
+    return () => clearTimeout(t);
+  }, [kb]);
+
   // Portal to <body> so the drawer escapes any ancestor positioning
   // context (.ww-app's flex/overflow:hidden was clipping fixed children
   // on iOS Safari). With the portal it's a direct child of <body>,
@@ -7021,7 +7054,11 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
           <h3>{title}</h3>
           <button className="ww-icon-btn" onClick={onClose} aria-label="Schließen"><X size={16} /></button>
         </div>
-        <div className="ww-drawer-body">{children}</div>
+        {/* Extra room at the bottom while the keyboard is up, so even the last
+            field can actually be scrolled into the middle of the view. */}
+        <div className="ww-drawer-body" ref={bodyRef} style={kb > 0 ? { paddingBottom: '45vh' } : undefined}>
+          {children}
+        </div>
       </div>
     </>,
     document.body
