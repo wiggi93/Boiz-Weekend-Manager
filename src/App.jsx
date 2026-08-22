@@ -4147,11 +4147,13 @@ function JeopardyView({ me, jeopardy, members, admin, active, onPatch, onOpenSet
                 <Eye size={20} /><span>NUR FÜR MICH AUFDECKEN</span>
               </button>
             )}
-            {hideAnswers && !revealedForMe && !canReveal && !q.winnerUserId && (
+            {/* Nur für NICHT-dran: das dran-Team hat oben schon seinen eigenen
+                Hinweis ("Auch wenn andere aufdecken…") — hier stand er doppelt. */}
+            {hideAnswers && !revealedForMe && !canReveal && !q.winnerUserId && !iAmInDranTeam && (
               <p className="ww-muted" style={{ fontSize: 11, textAlign: 'center', marginTop: 10 }}>
-                {remote && !q.typedAnswer && !iAmInDranTeam
-                  ? 'Erst abschicken — danach kannst du für dich aufdecken.'
-                  : 'Die anderen decken jeweils nur für sich auf — bei dir bleibt die Lösung verborgen.'}
+                {remote && !q.typedAnswer
+                  ? `Sobald ${dran?.displayName || 'der Spieler'} abgeschickt hat, kannst du für dich aufdecken.`
+                  : 'Die anderen decken jeweils nur für sich auf.'}
               </p>
             )}
             {hideAnswers && revealedForMe && (
