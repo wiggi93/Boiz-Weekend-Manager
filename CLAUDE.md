@@ -48,19 +48,33 @@ If you change the backend schema or hooks, the Watchtower step will redeploy the
 
 ## MCP server (`mcp-server/`)
 
-A local stdio MCP server that lets Claude drive the app (create events, toggle
-modules, start Jeopardy rounds, book kitty expenses, send announcements, …).
-It is NOT deployed — it runs on the maintainer's machine and talks to the
-public API like any other client. Excluded from the frontend Docker context.
+Lets Claude drive the app (create events, toggle modules, start Jeopardy
+rounds, book kitty expenses, send announcements, …). The 17 tools live in
+`tools.js` and are shared by two entrypoints:
 
-- Auth: logs in as the maintainer via `BOIZ_EMAIL` / `BOIZ_PASSWORD` env vars,
-  so it can only do what that account may do. `BOIZ_PB_URL` overrides the API
-  base (default `https://boiz-api.dr-disco.eu`).
-- Register: `claude mcp add boiz --env BOIZ_EMAIL=… --env BOIZ_PASSWORD=… -- node <abs-path>/mcp-server/index.js`
+- **`http.js` — the hosted one (this is what people use).** Runs as the
+  4th container `boiz-weekend-mcp` behind Traefik at
+  `https://boiz-mcp.dr-disco.eu`, added to Claude as a *Custom Connector*, so
+  it works from the phone too. Streamable HTTP + full OAuth 2.1 (auth code +
+  PKCE + dynamic client registration) via the SDK's `mcpAuthRouter`.
+  **Auth has no shared secret**: the login screen validates each person's own
+  Boiz credentials against PocketBase and the issued token carries THAT user's
+  PB token, so tools run with their real permissions (unapproved accounts are
+  refused). Stateless per-request servers — no session affinity behind the
+  proxy. OAuth clients/tokens persist in `/data` (host:
+  `~/docker/service_configs/boiz-weekend-mcp`) so a redeploy doesn't drop
+  connectors. Talks to PocketBase over the internal docker network.
+- **`index.js` — local stdio**, for development:
+  `claude mcp add boiz --env BOIZ_EMAIL=… --env BOIZ_PASSWORD=… -- node <abs-path>/mcp-server/index.js`
+
+Notes:
 - Tools resolve events and people by NAME (fuzzy), not by id — "Marcus",
   "Weinwanderung" etc. work directly.
 - Kitty settlement math is duplicated from `kittySettlement` in `src/App.jsx`;
   keep the two in sync if that ever changes.
+- `mcp-server` is excluded from the frontend Docker build context.
+- DNS: `boiz-mcp` is a proxied CNAME → `dr-disco.duckdns.org`, same as the
+  other boiz records.
 
 ## Commands
 
