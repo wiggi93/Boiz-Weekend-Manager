@@ -4661,6 +4661,7 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
   const partyById = (id) => parties.find(p => p.id === id);
 
   const [showAdd, setShowAdd] = useState(false);
+  const [editId, setEditId] = useState(null); // set → the drawer edits instead of creating
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [paidBy, setPaidBy] = useState(me.id);
@@ -4671,9 +4672,27 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
   const [shares, setShares] = useState({});
 
   const openAdd = () => {
+    setEditId(null);
     setDesc(''); setAmount(''); setPaidBy(me.id);
     setParticipants(parties.map(p => p.id));
     setExtName(''); setShares({});
+    setShowAdd(true);
+  };
+
+  // Editing reuses the whole add form — same fields, same validation, same
+  // live preview. Stored share values are numbers; the inputs want strings.
+  const openEdit = (exp) => {
+    setEditId(exp.id);
+    setDesc(exp.desc || '');
+    setAmount(String(exp.amount ?? '').replace('.', ','));
+    setPaidBy(exp.paidBy);
+    setParticipants([...(exp.participants || [])]);
+    const s = {};
+    for (const [id, v] of Object.entries(exp.shares || {})) {
+      s[id] = { type: v.type, value: String(v.value).replace('.', ',') };
+    }
+    setShares(s);
+    setExtName('');
     setShowAdd(true);
   };
 
@@ -4717,21 +4736,29 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
   const overAllocated = parsedAmount > 0 && allocated > parsedAmount + 0.005;
 
   // Any change to the expense set means confirmations are stale — clear `done`.
-  const addExpense = () => {
+  const saveExpense = () => {
     const amt = parseFloat(amount.replace(',', '.'));
     if (!desc.trim() || isNaN(amt) || amt <= 0 || participants.length === 0) return;
-    const expense = {
-      id: String(Date.now()),
+    const hasShares = Object.keys(cleanShares).length > 0;
+    const fields = {
       desc: desc.trim(),
       amount: Math.round(amt * 100) / 100,
       paidBy,
       participants: [...participants],
-      ...(Object.keys(cleanShares).length ? { shares: cleanShares } : {}),
-      createdBy: me.id,
-      createdAt: new Date().toISOString(),
+      // Only carry the key when overrides exist, so an expense edited back to
+      // an even split looks exactly like a plain one again.
+      ...(hasShares ? { shares: cleanShares } : {}),
     };
-    onPatch({ expenses: [...expenses, expense], done: [] });
-    setShowAdd(false);
+    const next = editId
+      ? expenses.map(e => {
+          if (e.id !== editId) return e;
+          const { shares: _dropped, ...rest } = e; // stale overrides must not survive
+          return { ...rest, ...fields, editedBy: me.id, editedAt: new Date().toISOString() };
+        })
+      : [...expenses, { id: String(Date.now()), ...fields, createdBy: me.id, createdAt: new Date().toISOString() }];
+
+    onPatch({ expenses: next, done: [] });
+    setShowAdd(false); setEditId(null);
   };
 
   const deleteExpense = async (id) => {
@@ -4809,9 +4836,14 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
                 </span>
               </div>
               {canDelete && (
-                <button className="ww-kitty-del" onClick={() => deleteExpense(exp.id)} aria-label="Löschen">
-                  <Trash2 size={13} />
-                </button>
+                <div className="ww-kitty-exp-actions">
+                  <button onClick={() => openEdit(exp)} aria-label="Bearbeiten" title="Bearbeiten">
+                    <Settings size={13} />
+                  </button>
+                  <button onClick={() => deleteExpense(exp.id)} aria-label="Löschen" title="Löschen">
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               )}
             </div>
           );
@@ -4863,7 +4895,10 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
       </div>
 
       {showAdd && (
-        <ModuleSettingsDrawer title="💰 Ausgabe eintragen" onClose={() => setShowAdd(false)}>
+        <ModuleSettingsDrawer
+          title={editId ? '✏️ Ausgabe bearbeiten' : '💰 Ausgabe eintragen'}
+          onClose={() => { setShowAdd(false); setEditId(null); }}
+        >
           <label className="ww-label">BESCHREIBUNG</label>
           <input
             className="ww-input"
@@ -4967,17 +5002,14 @@ function KittyView({ me, kitty, members, admin, onPatch }) {
             <button className="ww-mini-btn" onClick={addExternal} disabled={!extName.trim()}><Plus size={13} /> Add</button>
           </div>
 
-          {participants.length > 0 && amount && !isNaN(parseFloat(amount.replace(',', '.'))) && (
-            <div className="ww-muted" style={{ fontSize: 12, margin: '6px 0 10px', textAlign: 'center' }}>
-              = {fmt(parseFloat(amount.replace(',', '.')) / participants.length)} € pro Person
-            </div>
-          )}
+          {/* The per-person amounts live in the AUFTEILUNG table above — a
+              flat "÷ headcount" line here would contradict custom splits. */}
           <button
             className={`ww-big-cta ${desc.trim() && amount && participants.length > 0 ? '' : 'disabled'}`}
-            onClick={addExpense}
+            onClick={saveExpense}
             disabled={!desc.trim() || !amount || participants.length === 0}
           >
-            <Plus size={20} /><span>EINTRAGEN</span>
+            {editId ? <><Check size={20} /><span>ÄNDERUNGEN SPEICHERN</span></> : <><Plus size={20} /><span>EINTRAGEN</span></>}
           </button>
         </ModuleSettingsDrawer>
       )}

@@ -1354,13 +1354,7 @@
 }
 .ww-kitty-exp-parts { font-size: 11px; }
 .ww-kitty-myshare { color: var(--text); }
-.ww-kitty-del {
-  position: absolute; top: 8px; right: 8px;
-  background: none; border: none; color: var(--muted-2);
-  cursor: pointer; padding: 4px; border-radius: 4px;
-  display: flex; align-items: center;
-}
-.ww-kitty-del:hover { color: var(--red); }
+/* (.ww-kitty-del replaced by .ww-kitty-exp-actions — edit + delete side by side) */
 
 .ww-kitty-settlement {
   margin-top: 4px;
@@ -2527,3 +2521,12 @@ body.is-offline .ww-offline-banner { display: block; animation: ww-offline-in 0.
   width: 68px; flex-shrink: 0; text-align: right;
   font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--amber);
 }
+
+/* Kassensturz: Aktionen pro Ausgabe (bearbeiten / löschen) */
+.ww-kitty-exp-actions { position: absolute; top: 8px; right: 8px; display: flex; gap: 2px; }
+.ww-kitty-exp-actions button {
+  background: none; border: none; color: var(--muted-2);
+  cursor: pointer; padding: 4px; border-radius: 8px; line-height: 0;
+}
+.ww-kitty-exp-actions button:hover { color: var(--amber); background: var(--card-2); }
+.ww-kitty-exp-actions button:last-child:hover { color: var(--red); }
