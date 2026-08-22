@@ -46,6 +46,22 @@ Push to master → `docker.yml` builds amd64+arm64 → Docker Hub → Watchtower
 
 If you change the backend schema or hooks, the Watchtower step will redeploy the backend image which runs new migrations on container start. No manual migration step needed.
 
+## MCP server (`mcp-server/`)
+
+A local stdio MCP server that lets Claude drive the app (create events, toggle
+modules, start Jeopardy rounds, book kitty expenses, send announcements, …).
+It is NOT deployed — it runs on the maintainer's machine and talks to the
+public API like any other client. Excluded from the frontend Docker context.
+
+- Auth: logs in as the maintainer via `BOIZ_EMAIL` / `BOIZ_PASSWORD` env vars,
+  so it can only do what that account may do. `BOIZ_PB_URL` overrides the API
+  base (default `https://boiz-api.dr-disco.eu`).
+- Register: `claude mcp add boiz --env BOIZ_EMAIL=… --env BOIZ_PASSWORD=… -- node <abs-path>/mcp-server/index.js`
+- Tools resolve events and people by NAME (fuzzy), not by id — "Marcus",
+  "Weinwanderung" etc. work directly.
+- Kitty settlement math is duplicated from `kittySettlement` in `src/App.jsx`;
+  keep the two in sync if that ever changes.
+
 ## Commands
 
 - `npm install` then `npm run dev` for local dev

@@ -8,3 +8,5 @@ dist
 README.md
 LICENSE
 .DS_Store
+**/node_modules
+mcp-server
