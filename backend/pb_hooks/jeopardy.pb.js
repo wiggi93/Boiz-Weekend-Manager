@@ -138,15 +138,19 @@ routerAdd("POST", "/api/jeopardy/start-round", (e) => {
   // Notify the participants (server-side save doesn't fire the request hook,
   // so push directly here). Plus a "your round is ready" ping to the host who
   // kicked it off — they may have locked the phone during the long generation.
+  const pushInfo = { targeted: [], reachable: [], unreachable: [] };
   try {
     const push = require(`${__hooks}/push_lib.js`);
     const targets = participants.filter(id => id && id !== actor);
-    push.sendPushToUsers(e.app, targets, {
+    pushInfo.targeted = targets;
+    const r = push.sendPushToUsers(e.app, targets, {
       title: "🎤 Jeopardy-Runde gestartet!",
       body: "Eine neue Runde läuft — du bist dabei. Handy raus!",
       url: `/?event=${data.eventId}&goto=jeopardy`,
       tag: `jeo-${jrec.id}-${nextRounds.length}`,
     });
+    pushInfo.reachable = (r && r.reachable) || [];
+    pushInfo.unreachable = targets.filter(id => pushInfo.reachable.indexOf(id) === -1);
     push.sendPushToUsers(e.app, [actor], {
       title: "✅ Deine Jeopardy-Runde ist fertig!",
       body: "Die Fragen sind generiert — los geht's! 🎤",
@@ -161,5 +165,7 @@ routerAdd("POST", "/api/jeopardy/start-round", (e) => {
     });
   } catch (err) { console.log("[push] start-round:", err); }
 
-  return e.json(200, { ok: true, roundId: round.id });
+  // Report who could actually be reached, so a caller (e.g. the MCP server)
+  // can say "2 of 3 notified" instead of silently appearing to do nothing.
+  return e.json(200, { ok: true, roundId: round.id, push: pushInfo });
 });

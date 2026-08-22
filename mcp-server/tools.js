@@ -339,8 +339,9 @@ export function registerTools(server, ctx) {
     catch { jeo = await pb.collection('jeopardy').create({ event: ev.id, categories: [], pointsPerPosition: [5, 3, 2, 1], participants: [], rounds: [] }); }
     await pb.collection('jeopardy').update(jeo.id, { participants: partIds, categories: cats });
 
+    let started;
     try {
-      await apiPost('/api/jeopardy/start-round', {
+      started = await apiPost('/api/jeopardy/start-round', {
         eventId: ev.id, categories: cats, aiCategories: cats,
         flagQuestions: JSON.stringify([]), surprise: !!surprise,
       }, 150000);
@@ -351,11 +352,22 @@ export function registerTools(server, ctx) {
       }
       throw e;
     }
+    // Be explicit about who was actually reachable — people without push
+    // notifications enabled get nothing, and silence there looks like a bug.
+    const info = started?.push || {};
+    const unreachable = Array.isArray(info.unreachable) ? info.unreachable : [];
+    const reached = Array.isArray(info.reachable) ? info.reachable.length : null;
+    let pushLine;
+    if (reached === null) pushLine = 'Die Mitspieler wurden benachrichtigt.';
+    else if (unreachable.length === 0) pushLine = `🔔 Push an alle ${reached} Mitspieler raus.`;
+    else pushLine = `🔔 Push an ${reached} von ${reached + unreachable.length} raus — ohne Benachrichtigungen: ` +
+      `${unreachable.map(id => nameOf(members, id)).join(', ')} (in der App unter Profil aktivieren).`;
+
     return ok(
       `🎤 Jeopardy-Runde in "${ev.name}" gestartet!\n` +
       `Kategorien: ${surprise ? '🎲 Überraschung (KI-gewählt)' : cats.join(', ')}\n` +
       `Mitspieler (${partIds.length}): ${partIds.map(id => nameOf(members, id)).join(', ')}\n` +
-      `Alle haben eine Push bekommen.`
+      pushLine
     );
   }));
 
