@@ -5,9 +5,12 @@
   "type": "module",
   "description": "MCP server so Claude can drive the Boiz Weekend Manager (events, modules, jeopardy, kitty, …)",
   "main": "index.js",
-  "scripts": { "start": "node index.js" },
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "express": "^5.2.1",
     "pocketbase": "^0.26.9",
     "zod": "^3.25.0"
   }
