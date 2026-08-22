@@ -6975,37 +6975,40 @@ function CustomModuleSettings({ mod, members, onPatch, onDelete }) {
 // ============================================================
 
 function ModuleSettingsDrawer({ title, onClose, children }) {
-  // The drawer is `position: fixed; bottom: 0; height: 85vh` (layout viewport).
-  // When the iOS keyboard opens it shrinks the *visual* viewport but NOT the
-  // layout viewport, so the drawer's bottom (and the focused input) end up
-  // behind the keyboard. iOS reacts by translating the whole fixed page up —
-  // the "content schiebt sich nach oben" the user sees. Fix: track the visual
-  // viewport, compute the keyboard height, and lift + shrink the drawer to sit
-  // exactly above the keyboard. Then nothing is hidden, so iOS has no reason
-  // to scroll the page. Also defensively pin any residual page offset to 0.
-  const [kb, setKb] = useState(0);
+  // `position: fixed` is relative to the LAYOUT viewport, which iOS does not
+  // shrink for the keyboard — so a bottom-anchored drawer keeps extending
+  // behind it. Earlier attempts guessed a keyboard height and forced
+  // window.scrollTo(0,0) to undo iOS's page-translate; that fought the browser
+  // (and broke badly when stepping through fields with the keyboard's ‹ › bar).
+  //
+  // Instead: anchor the drawer to the VISUAL viewport. offsetTop/height
+  // describe exactly the area the user can actually see, translation and
+  // keyboard included, so the drawer simply follows it. Nothing is guessed and
+  // iOS is never fought.
+  const [vp, setVp] = useState(null); // { top, height, kb }
   useEffect(() => {
     const vv = window.visualViewport;
+    if (!vv) return;
+    let raf = 0;
     const apply = () => {
-      if (vv) {
-        const h = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-        setKb(h);
-      }
-      // Counter the iOS page-translate so the app stays anchored.
-      if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);
-      const se = document.scrollingElement;
-      if (se && se.scrollTop !== 0) se.scrollTop = 0;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setVp({
+        top: Math.round(vv.offsetTop),
+        height: Math.round(vv.height),
+        kb: Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)),
+      }));
     };
     apply();
-    vv?.addEventListener('resize', apply);
-    vv?.addEventListener('scroll', apply);
-    window.addEventListener('scroll', apply, { passive: true });
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
     return () => {
-      vv?.removeEventListener('resize', apply);
-      vv?.removeEventListener('scroll', apply);
-      window.removeEventListener('scroll', apply);
+      cancelAnimationFrame(raf);
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
     };
   }, []);
+  // >20px filters out the address-bar shuffle; only a real keyboard counts.
+  const kbOpen = !!vp && vp.kb > 20;
 
   // Lifting the drawer above the keyboard isn't enough on its own: a field far
   // down the form is then simply below the (now much shorter) drawer, so you
@@ -7046,7 +7049,7 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
       body.removeEventListener('focusout', onFocusOut);
     };
   }, []);
-  useEffect(() => { if (kb > 0) revealSoon(); }, [kb]);
+  useEffect(() => { if (kbOpen) revealSoon(); }, [kbOpen, vp?.height]);
 
   // Portal to <body> so the drawer escapes any ancestor positioning
   // context (.ww-app's flex/overflow:hidden was clipping fixed children
@@ -7060,27 +7063,31 @@ function ModuleSettingsDrawer({ title, onClose, children }) {
         className="ww-drawer"
         role="dialog"
         aria-modal="true"
-        // minHeight must go to 0 while the keyboard is up: the stylesheet sets
-        // min-height:400px, and min-height beats max-height in CSS — so with a
-        // tall keyboard (numeric pad + autofill bar) the drawer refused to
-        // shrink and its lower part stayed behind the keyboard.
-        style={kb > 0 ? {
-          // + a little extra: iOS puts an accessory bar ("AutoFill …") above
-          // the keyboard that visualViewport does NOT report, so lifting by the
-          // reported height alone leaves the drawer's last row under it.
-          bottom: kb + 44,
+        // While the keyboard is up the drawer stops being bottom-anchored and
+        // instead covers exactly the visible viewport rectangle. top/height
+        // come straight from visualViewport, so page-translate and keyboard are
+        // both already accounted for — no guessed offsets. min-height/height
+        // from the stylesheet must be cleared, since min-height beats
+        // max-height in CSS and would stop it from shrinking.
+        style={kbOpen ? {
+          top: vp.top + 8,
+          height: vp.height - 8,
+          bottom: 'auto',
           minHeight: 0,
-          height: 'auto',
-          maxHeight: `calc(100vh - ${kb + 44}px - max(60px, env(safe-area-inset-top, 0px) + 16px))`,
+          maxHeight: 'none',
         } : undefined}
       >
         <div className="ww-drawer-head">
           <h3>{title}</h3>
           <button className="ww-icon-btn" onClick={onClose} aria-label="Schließen"><X size={16} /></button>
         </div>
-        {/* Extra room at the bottom while the keyboard is up, so even the last
-            field can actually be scrolled into the middle of the view. */}
-        <div className="ww-drawer-body" ref={bodyRef} style={kb > 0 ? { paddingBottom: '45vh' } : undefined}>
+        {/* Room to scroll the LAST field up into the reading position, plus
+            slack for the keyboard's accessory bar if it overlaps us. */}
+        <div
+          className="ww-drawer-body"
+          ref={bodyRef}
+          style={kbOpen ? { paddingBottom: Math.round(vp.height * 0.7) } : undefined}
+        >
           {children}
         </div>
       </div>
