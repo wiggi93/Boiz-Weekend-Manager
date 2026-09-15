@@ -49,7 +49,7 @@ If you change the backend schema or hooks, the Watchtower step will redeploy the
 ## MCP server (`mcp-server/`)
 
 Lets Claude drive the app (create events, toggle modules, start Jeopardy
-rounds, book kitty expenses, send announcements, …). The 17 tools live in
+rounds, book kitty expenses, send announcements, …). The 19 tools live in
 `tools.js` and are shared by two entrypoints:
 
 - **`http.js` — the hosted one (this is what people use).** Runs as the
